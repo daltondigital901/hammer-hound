@@ -305,6 +305,8 @@ legend + .option-grid { margin-top: 0; }
 .fee-now { font-size: 64px; }
 .fee-offer--dark .fee-now { color: var(--yellow); }
 .fee-text { font-weight: 700; font-size: 18px; }
+.fee-fine { font-size: 12px; opacity: .85; }
+.fee-fine a { color: inherit; }
 
 /* pro ads landing page */
 .header-actions { display: flex; align-items: center; gap: 16px; }

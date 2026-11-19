@@ -585,7 +585,7 @@ page({
 });
 
 // ---------- pros ----------
-const proBullets = ["Every job is confirmed by phone before you see it", "Buy as many as you want. No cap, no contract", "Wrong number or fake request? Credit or refund"];
+const proBullets = ["Every job is confirmed by phone before you see it", "Buy as many as you want. No cap, no minimum", "Wrong number or fake request? Credit or refund"];
 page({
   path: "/pros/",
   title: `Contractor Leads by Text | ${site.name}`,
@@ -636,6 +636,7 @@ const feeOffer = (dark) => `<div class="fee-offer${dark ? " fee-offer--dark" : "
   <span class="chip chip--yellow">Limited-time offer</span>
   <p class="fee-line"><span class="fee-was"><span class="sr-only">Was </span>$300</span><span class="fee-now"><span class="sr-only">now </span>$0</span></p>
   <p class="fee-text">Annual membership fee waived</p>
+  <p class="fee-fine">Waived for now. We give notice before it starts. See the <a href="/terms/">Terms of Use</a>.</p>
 </div>`;
 const landingHeader = `<header class="site-header">
   <div class="wrap header-row">
@@ -648,7 +649,7 @@ const fixes = [
   ["The same lead sold to a dozen contractors", "Five pros at most, or just you", "The owner picks how many pros can call, from 1 to 5. That is the limit. If no one has bought a lead yet, you can take it exclusive and it is sold to nobody else."],
   ["Paying for jobs you would never have taken", "See the job before you spend a dollar", "Each offer shows the trade, the area, the job size and the price. Reply YES to the ones you want and ignore the rest. You are never charged for a lead you did not choose."],
   ["Not enough work coming in", "Every job in your area, as many as you want", "You get a text the moment a job in your trades and service area is confirmed. Buy one or buy them all. There is no cap. We cannot promise how many jobs your area produces, but you will be offered every one."],
-  ["Contracts and bills whether the phone rings or not", "No contract. Pay per lead", "Leads come out of a balance you load yourself. Auto-refill is optional and you can switch it off at any time. Stop whenever you like."],
+  ["Paying every month whether the phone rings or not", "You pay for leads, not for waiting", "Leads come out of a balance you load yourself, and you spend it only on leads you choose. There is no minimum purchase and auto-refill is optional. The $300 annual membership fee is waived for now."],
   ["By the time you call, they have hired someone else", "Details in seconds", "Reply YES and the owner's name, number, address and job notes arrive by text right away, while the owner is still expecting calls."],
 ];
 const proFaqs = [
@@ -657,13 +658,13 @@ const proFaqs = [
   ["Are the leads exclusive?", "They are shared with up to 5 pros, because the owner chooses how many can call. If no one has bought a lead yet, you can buy it exclusive at the exclusive price shown."],
   ["What counts as a bad lead?", "A wrong or disconnected number, a duplicate of a lead you already bought from us, a request that was not real, or a job outside your trades or service area. Report it within the window in the Terms and choose a credit or a refund. An owner who does not pick up, hires someone else or changes their mind is not a bad lead."],
   ["What do I need to get my 3 free leads?", "Create an account, then upload proof of your business and proof of insurance. Your free leads unlock when both pass."],
-  ["Is there a membership fee?", "The annual membership fee is $300. It is waived for pros who join during this limited-time offer."],
-  ["Is there a contract?", "No. You pay per lead from a balance you control, and you can stop at any time."],
+  ["Is there a membership fee?", "Membership is $300 a year, and that fee is waived for now while Hammer Hound launches. We will give you notice before it starts, and you can close your account before then without paying it."],
+  ["What am I agreeing to?", "The Terms of Use, which cover leads, balances, the membership fee and refunds. There is no minimum purchase, and you can close your account at any time."],
 ];
 page({
   path: "/pros/leads/",
   title: `Contractor Leads That Are Real Jobs | ${site.name}`,
-  desc: D("Phone-confirmed jobs by text. Buy as many as you want, no contract. First 3 free."),
+  desc: D("Phone-confirmed jobs by text. Buy as many as you want. Membership fee waived. First 3 free."),
   noindex: true,
   chrome: landingHeader,
   bodyClass: "landing",
@@ -681,7 +682,7 @@ page({
         <button class="btn btn--yellow btn--lg" type="submit">Get my 3 free leads</button>
       </form>
       <p class="lp-micro">Two minutes to create your account. Free leads unlock once your business and insurance documents pass.</p>
-      ${checks(["Every job confirmed by phone", "No cap, no contract", "Bad lead? Credit or refund"], "checks--row checks--yellow")}
+      ${checks(["Every job confirmed by phone", "No cap, no minimum", "Bad lead? Credit or refund"], "checks--row checks--yellow")}
     </div>
     <div class="sms" aria-label="Sample lead offer by text">
       <p class="sms-from"><img src="/assets/img/badge.png" alt="" width="33" height="40"><span><strong>${esc(site.name)}</strong><small>Text message</small></span></p>
