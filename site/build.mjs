@@ -171,6 +171,38 @@ ${footer === "full" ? footerFull() : footer === "slim" ? footerSlim() : `<p clas
 const D = (s) => `${s} ${TAG}`;
 
 // ---------- home ----------
+// The hound and his promise. One for property owners, one for pros. Each line matches the Terms of Use.
+const houndPromise = ({ kind, title, lead, points, fine, cta }) => `
+<section class="promise promise--${kind}">
+  <div class="wrap promise-row">
+    <div class="promise-hound"><img src="/assets/img/badge-large.png" alt="The Hammer Hound, a smiling hound in a hard hat with a hammer over his shoulder" width="530" height="640" loading="lazy"></div>
+    <div class="promise-bubble">
+      <p class="promise-tag">${icon("shield", 16)} The Hound's Promise</p>
+      <h2>${esc(title)}</h2>
+      <p class="promise-lead">${esc(lead)}</p>
+      ${checks(points)}
+      <p class="promise-fine">${fine}</p>
+      ${cta ? `<p class="btn-row"><a class="btn btn--black btn--lg" href="${cta[1]}">${esc(cta[0])}</a></p>` : ""}
+    </div>
+  </div>
+</section>`;
+const ownerPromise = houndPromise({
+  kind: "owner",
+  title: "I do the hounding. You never get hounded.",
+  lead: "I track down the pros so your phone does not blow up.",
+  points: ["Free for property owners. No card, no catch", "You pick 1 to 5 pros. Not one more gets your number", "Your details are never sold to call lists"],
+  fine: `It is in writing in the <a href="/terms/">Terms of Use</a> and <a href="/privacy/">Privacy Policy</a>.`,
+  cta: ["Start my request", "/request/"],
+});
+const proPromise = houndPromise({
+  kind: "pro",
+  title: "If the lead is a dud, I eat it. You don't.",
+  lead: "Real Job Guarantee: pay for a lead that is not a real job and you get your money back.",
+  points: ["Wrong or disconnected number", "Duplicate of a lead you already bought", "Not a real request for service", "Outside your trade or service area"],
+  fine: `Credit or refund, your choice. Report it from your account. It does not cover an owner who does not answer or hires someone else. The full rule is the <a href="/terms/">Lead Credit Policy</a>.`,
+  cta: ["Get my 3 free leads", "/pros/join/"],
+});
+
 page({
   path: "/",
   title: `${site.name} | ${TAG}`,
@@ -190,7 +222,7 @@ page({
   <div class="hero-photo"><img src="/assets/img/hero.jpg" alt="A contractor in a hard hat talking with a homeowner in her driveway" width="1536" height="1024" fetchpriority="high"></div>
 </section>
 ${hazard}
-
+${ownerPromise}
 <section class="section">
   <div class="wrap">
     <div class="section-head"><h2>What property owners say</h2><p class="chips"><span class="chip chip--green">${icon("shield", 16)} License on file</span><span class="chip chip--green">${icon("check", 16)} Insured</span></p></div>
@@ -602,6 +634,7 @@ page({
   </div>
 </section>
 ${hazard}
+${proPromise}
 <section class="section">
   <div class="wrap">
     <h2>How it works for pros</h2>
@@ -703,6 +736,7 @@ ${hazard}
     <p class="btn-row btn-row--center"><a class="btn btn--black btn--lg" href="/pros/join/">Get my 3 free leads</a></p>
   </div>
 </section>
+${proPromise}
 <section class="section section--dark">
   <div class="wrap trust-grid">
     <div>
