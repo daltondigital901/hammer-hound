@@ -585,7 +585,7 @@ page({
 });
 
 // ---------- pros ----------
-const proBullets = ["See the trade, area and job size before you spend anything", "Up to 5 pros per lead, or take it exclusive", "Wrong number? Credit or refund"];
+const proBullets = ["Every job is confirmed by phone before you see it", "Buy as many as you want. No cap, no contract", "Wrong number or fake request? Credit or refund"];
 page({
   path: "/pros/",
   title: `Contractor Leads by Text | ${site.name}`,
@@ -628,6 +628,88 @@ ${hazard}
 <section class="pro-band pro-band--yellow">
   <div class="wrap pro-band-row"><div><h2>Your first 3 leads are free.</h2><p>After that you buy only the leads you want.</p></div><a class="btn btn--black" href="/pros/join/">Join as a pro</a></div>
 </section>`,
+});
+
+
+// ---------- pro ads landing page ----------
+const landingHeader = `<header class="site-header">
+  <div class="wrap header-row">
+    ${logo(false, true)}
+    <div class="header-actions"><a class="link-quiet" href="/pros/sign-in/">Pro sign in</a><a class="btn btn--yellow btn--sm" href="/pros/join/">Get 3 free leads</a></div>
+  </div>
+</header>`;
+const fixes = [
+  ["Leads with wrong numbers, or that were never real", "Every lead is confirmed by phone first", "We call every property owner and confirm the job before it is offered to you, including requests that came through a form. If a lead still turns out to be a wrong number, a duplicate or not a real request, you choose a credit or a refund."],
+  ["The same lead sold to a dozen contractors", "Five pros at most, or just you", "The owner picks how many pros can call, from 1 to 5. That is the limit. If no one has bought a lead yet, you can take it exclusive and it is sold to nobody else."],
+  ["Paying for jobs you would never have taken", "See the job before you spend a dollar", "Each offer shows the trade, the area, the job size and the price. Reply YES to the ones you want and ignore the rest. You are never charged for a lead you did not choose."],
+  ["Not enough work coming in", "Every job in your area, as many as you want", "You get a text the moment a job in your trades and service area is confirmed. Buy one or buy them all. There is no cap. We cannot promise how many jobs your area produces, but you will be offered every one."],
+  ["Contracts and bills whether the phone rings or not", "No contract. Pay per lead", "Leads come out of a balance you load yourself. Auto-refill is optional and you can switch it off at any time. Stop whenever you like."],
+  ["By the time you call, they have hired someone else", "Details in seconds", "Reply YES and the owner's name, number, address and job notes arrive by text right away, while the owner is still expecting calls."],
+];
+const proFaqs = [
+  ["How much does a lead cost?", "It depends on the trade, the market and the size of the job. The price is in every offer before you buy, so you always know what you are paying."],
+  ["How many leads will I get?", "As many as you want to buy. There is no cap and no minimum. How many are offered depends on how many property owners in your service area ask for your trade."],
+  ["Are the leads exclusive?", "They are shared with up to 5 pros, because the owner chooses how many can call. If no one has bought a lead yet, you can buy it exclusive at the exclusive price shown."],
+  ["What counts as a bad lead?", "A wrong or disconnected number, a duplicate of a lead you already bought from us, a request that was not real, or a job outside your trades or service area. Report it within the window in the Terms and choose a credit or a refund. An owner who does not pick up, hires someone else or changes their mind is not a bad lead."],
+  ["What do I need to get my 3 free leads?", "Create an account, then upload proof of your business and proof of insurance. Your free leads unlock when both pass."],
+  ["Is there a contract?", "No. You pay per lead from a balance you control, and you can stop at any time."],
+];
+page({
+  path: "/pros/leads/",
+  title: `Contractor Leads That Are Real Jobs | ${site.name}`,
+  desc: D("Phone-confirmed jobs by text. Buy as many as you want, no contract. First 3 free."),
+  noindex: true,
+  chrome: landingHeader,
+  bodyClass: "landing",
+  body: `
+<section class="page-hero page-hero--dark lp-hero">
+  <div class="wrap lp-hero-grid">
+    <div>
+      <p class="eyebrow eyebrow--yellow">For contractors</p>
+      <h1>Real jobs, confirmed by phone. Buy as many as you want.</h1>
+      <p class="lead">Done paying for wrong numbers and tire-kickers? We call every property owner before you ever see the lead. You see the job, then decide.</p>
+      <p class="btn-row"><a class="btn btn--yellow btn--lg" href="/pros/join/">Get my 3 free leads</a></p>
+      ${checks(["Every job confirmed by phone", "No cap, no contract", "Bad lead? Credit or refund"], "checks--row checks--yellow")}
+    </div>
+    <div class="sms" aria-label="Sample lead offer by text">
+      <p class="sms-from"><img src="/assets/img/badge.png" alt="" width="33" height="40"><span><strong>${esc(site.name)}</strong><small>Text message</small></span></p>
+      <p class="sms-in">${esc(site.name)}: New ROOFING lead in your area. Roof leak repair. Job size under $5,000. Owner confirmed by phone. Reply YES to buy, ONLY for exclusive. Ends in 10 min.</p>
+      <p class="sms-out">YES</p>
+      <p class="sms-in">${esc(site.name)}: Bought. Owner name, phone, address and job notes follow.</p>
+      <p class="sms-note">Sample messages. The price is shown in every real offer.</p>
+    </div>
+  </div>
+</section>
+${hazard}
+<section class="section">
+  <div class="wrap">
+    <h2>The lead problems you already know, and what we do about each one</h2>
+    <div class="grid grid--3 fixes">
+      ${fixes.map(([prob, fix, body]) => `<div class="card fix"><p class="fix-problem">${icon("close", 16)}<span>${esc(prob)}</span></p><h3>${esc(fix)}</h3><p>${esc(body)}</p></div>`).join("")}
+    </div>
+    <p class="btn-row btn-row--center"><a class="btn btn--black btn--lg" href="/pros/join/">Get my 3 free leads</a></p>
+  </div>
+</section>
+<section class="section section--concrete">
+  <div class="wrap">
+    <h2>How it works</h2>
+    ${stepList([
+      ["Create your account and verify", "Tell us your trade and ZIP code, then upload proof of business and proof of insurance. Your 3 free leads unlock when both pass."],
+      ["Get offers by text", "Each offer shows the trade, the area, the job size and the price. No contact details yet, and no charge."],
+      ["Reply YES and call", "The lead comes out of your balance and the owner's details arrive in seconds. Call while they are expecting you."],
+    ])}
+  </div>
+</section>
+<section class="section">
+  <div class="wrap wrap--narrow">
+    <h2>Straight answers</h2>
+    <div class="faq">${proFaqs.map(([q, a]) => `<details><summary>${esc(q)}${icon("chevron", 18)}</summary><p>${esc(a)}</p></details>`).join("")}</div>
+  </div>
+</section>
+<section class="pro-band pro-band--yellow">
+  <div class="wrap pro-band-row"><div><h2>Your first 3 leads are free.</h2><p>See the quality for yourself before you load a dollar.</p></div><a class="btn btn--black btn--lg" href="/pros/join/">Create my pro account</a></div>
+</section>
+<div class="sticky-cta"><a class="btn btn--yellow btn--block" href="/pros/join/">Get my 3 free leads</a></div>`,
 });
 
 const splitShell = (left, right) => `<div class="split"><div class="split-dark"><div class="split-inner">${logo(true, true)}${left}</div></div><div class="split-light"><div class="split-inner">${right}</div></div></div>${hazard}`;
