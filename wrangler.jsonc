@@ -1,0 +1,10 @@
+{
+  // Cloudflare Worker that serves the static site in site/dist.
+  "name": "hammer-hound",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./site/dist",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  }
+}
