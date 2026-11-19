@@ -618,3 +618,27 @@ legend + .option-grid { margin-top: 0; }
 .chip--old { background: #fff; }
 .offer-was { font-size: .6em; font-weight: 600; opacity: .55; }
 .offer-price .chip { font-size: 13px; vertical-align: middle; }
+/* admin panel */
+.ad-wrap { padding: 24px 16px 64px; max-width: 1040px; }
+.ad-top { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: flex-end; margin-bottom: 16px; }
+.ad-top h1 { margin: 0; }
+.ad-top-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.ad-toggle { font-size: 14px; display: inline-flex; gap: 6px; align-items: center; }
+.ad-stats .stat strong { display: block; }
+@media (min-width: 900px) { .ad-stats { grid-template-columns: repeat(5, 1fr); } }
+.ad-section { margin-top: 28px; }
+.ad-section h2 { font-size: 20px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+.ad-card { padding: 18px; margin-bottom: 12px; display: grid; gap: 8px; }
+.ad-card h3 { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+.ad-card p { margin: 0; overflow-wrap: anywhere; }
+.ad-card label { font-size: 13px; font-weight: 700; margin-top: 4px; }
+.ad-card .input { width: 100%; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 8px; font: inherit; }
+.ad-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.ad-actions, .ad-files { display: flex; flex-wrap: wrap; gap: 8px; }
+.ad-msg { white-space: pre-wrap; background: var(--concrete); padding: 10px 12px; border-radius: 8px; }
+.ad-pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: var(--concrete); padding: 10px; border-radius: 8px; max-height: 240px; overflow: auto; }
+.ad-signin { max-width: 420px; margin: 40px auto; }
+.ad-table { overflow-x: auto; background: var(--white); border-radius: var(--r); box-shadow: var(--shadow); }
+.ad-table table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.ad-table th, .ad-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--concrete-2); white-space: nowrap; }
+.ad-table .num { text-align: right; font-variant-numeric: tabular-nums; }

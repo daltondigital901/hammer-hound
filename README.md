@@ -176,3 +176,12 @@ Every lead is rewritten by the AI into one format before any pro sees it (`style
 ## Older leads are marked down
 
 `priceOf()` is the one place a lead's price is worked out, for the card and for the charge. Hot leads are full price. Past 72 hours the price is a percent of the hot price by day: `AGED_PRICING` = `50,40,30,20` (day 3, 4, 5, 6), rounded to the nearest $5, never under $10. At $75 / $225 that is $40 / $115, $30 / $90, $25 / $70, $15 / $45. The purchase row stores the price paid.
+
+## Admin panel
+
+`/admin/` (not indexed). Step 1: Today numbers, the queues that need a person, and where pros asked for more leads.
+
+- **Sign-in.** With `ACCESS_TEAM` and `ACCESS_AUD` set in `wrangler.jsonc`, the Worker only accepts requests carrying a valid Cloudflare Access token (`Cf-Access-Jwt-Assertion`, RS256, checked against the team's public keys, audience and expiry). With them empty, `ADMIN_KEY` (20 characters or more) signs in and sets a 12-hour cookie.
+- **Access setup.** Zero Trust → Access → Applications → Add → Self-hosted. Add two paths on `hammerhound.com`: `admin` and `api/admin`. Policy: Allow, Emails, your address. Then put the team name (the part before `.cloudflareaccess.com`) in `ACCESS_TEAM` and the application's Audience (AUD) tag in `ACCESS_AUD`.
+- **API.** `GET /api/admin/overview[?real=1]`, `GET /api/admin/doc?key=pros/...`, `POST /api/admin/verify {proId, decision: approve|decline, expires, reason}`, `POST /api/admin/report {purchaseId, decision: approve|deny, reason}`, `POST /api/admin/ticket {ticketId, reply}`.
+- **Not in it yet.** Property owner details never appear in step 1. Leads, Pros, Money, Messages and Settings screens are later steps.
