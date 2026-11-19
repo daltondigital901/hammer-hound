@@ -74,13 +74,15 @@ The person who accepts this Agreement confirms that they are at least 18 and hav
 
 **5.2 Wallet and card on file.** Leads are paid from your wallet. You add to your wallet with a card, and you may save that card on file. A wallet balance is not a bank deposit and earns no interest.
 
-**5.2.1 Claiming by text.** A lead offer we text you states the job and the price. Replying YES, or ONLY for an exclusive lead, is an order for that lead. The price is taken from your wallet. If your wallet does not cover it and you have a card on file, you authorize us to charge that card a reload, in the reload amount set in your wallet, and to take the price from the reloaded wallet. We text you a confirmation with the amount.
+**5.2.1 Claiming by text.** A lead offer we text you states the job and the price. Replying YES, or ONLY for an exclusive lead, is an order for that lead. The price is taken from your wallet. If your wallet does not cover it and you have a card on file, you authorize us to charge that card a reload, in the reload amount set in your wallet, and to take the price from the reloaded wallet. The reply gives you the lead's details. Every card charge is confirmed by an emailed receipt.
 
 **5.2.2 Claiming in your account.** If your wallet does not cover a lead, the claim button states the reload amount and the card before you press it. Pressing it authorizes that charge.
 
 **5.2.3 Automatic reload.** If you turn on automatic reload, you authorize us to charge your card on file the reload amount you chose whenever your wallet cannot cover the price of a lead, up to any monthly limit you set. You can change the amount, set a limit or turn it off at any time in your wallet. We email a receipt for every charge.
 
-**5.2.4 Invoices.** We email an invoice each month, as a PDF, listing every charge, lead and credit. Your invoices are also in your wallet.
+**5.2.4 Topping up by text.** We may text you when your wallet is low, with a choice of amounts. Replying with a choice, or texting TOPUP with an amount, authorizes us to charge that amount to your card on file and add it to your wallet. We email a receipt.
+
+**5.2.5 Invoices.** We email an invoice each month, as a PDF, listing every charge, lead and credit. Your invoices are also in your wallet.
 
 **5.3 Welcome credit.** A new pro account starts with $240 of welcome credit, which is enough for 3 shared leads at the standard price of $75. Welcome credit can be spent only on leads, only after you pass verification, and is spent before money you add. It has no cash value, cannot be withdrawn, transferred or refunded, and may be changed or ended for new accounts at any time. If a lead paid for with welcome credit qualifies under the Lead Credit Policy, the welcome credit is returned to your balance; it is not paid out.
 
