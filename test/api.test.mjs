@@ -73,7 +73,7 @@ const uv = await send(docs(50), u.cookie);
 assert.equal(uv.pro.verified, true); assert.equal(uv.pro.einLast4, "6750"); assert.ok(!JSON.stringify(uv).includes("123456750"), "full EIN never returned");
 assert.equal((await call("/api/pro/offers", null, u.cookie)).canBuy, true);
 assert.ok([...stored.keys()].some((k) => k.endsWith("-business.pdf")) && [...stored.keys()].some((k) => k.endsWith("-insurance.pdf")), "both files are kept");
-assert.equal(ai.last.headers["anthropic-version"], "2026-10-21"); assert.equal(ai.last.body.model, "claude-sonnet-5-5"); assert.equal(ai.last.body.tool_choice.name, "report");
+assert.equal(ai.last.headers["anthropic-version"], "2026-10-21"); assert.equal(ai.last.body.model, "claude-sonnet-5-5"); assert.ok(!ai.last.body.tool_choice, "no forced tool call: the live model refuses it"); assert.equal(ai.last.body.output_config.format.type, "json_schema");
 // the AI check: fail, unsure, expired, EIN mismatch, AI down, daily limit, review request
 const v2 = async (n) => { const phone = "90155501" + n; await call("/api/pro/join", { business: "Check " + n, phone }); return (await call("/api/pro/verify-code", { phone, code: "424242" })).cookie; };
 const c1 = await v2(60), before = sent.length;
@@ -89,13 +89,26 @@ const expired = await send(docs(60, { insurance: "certificate EXPIRES 2021-03-01
 const passed = await send(docs(60), c1); assert.equal(passed.pro.verified, true); assert.equal(passed.pro.insuranceExpires, nextYear);
 assert.equal((await send(docs(60), c1)).status, 429, "three checks a day");
 const c2 = await v2(61);
-const unsure = await send(docs(61, { insurance: "UNSURE EXPIRES " + nextYear }), c2); assert.equal(unsure.pro.verification, "In review"); assert.match(sent.at(-1).subject, /closer look/);
-const wrongEin = await send(docs(61, { business: "license EIN 999999999" }), c2); assert.equal(wrongEin.pro.verification, "Declined"); assert.match(wrongEin.pro.verificationReason, /EIN/);
-ai.down = true; const down = await send(docs(61), c2); ai.down = false;
-assert.equal(down.pro.verification, "In review", "an AI outage sends the documents to a person, never auto-passes");
-// the decision never passes insurance without a readable future expiry date
-assert.equal(decide({ business: { result: "pass" }, insurance: { result: "pass", expires: "" } }, { ein: "123456789" }).status, "In review");
-assert.equal(decide({ business: { result: "pass" }, insurance: { result: "pass", expires: "2020-01-01" } }, { ein: "123456789" }).status, "Declined");
+// permissive: one unreadable document with one good one still passes, on the date the pro entered
+const soft = await send(docs(61, { insurance: "UNSURE" }), c2); assert.equal(soft.pro.verified, true, "one unreadable file does not block a pro"); assert.equal(soft.pro.insuranceExpires, nextYear);
+const c3 = await v2(62);
+const both = await send(docs(62, { business: "UNSURE", insurance: "UNSURE" }), c3); assert.equal(both.pro.verification, "In review", "two unreadable files go to a person"); assert.match(sent.at(-1).subject, /closer look/);
+const wrongEin = await send(docs(62, { business: "license EIN 999999999" }), c3); assert.equal(wrongEin.pro.verification, "Declined"); assert.match(wrongEin.pro.verificationReason, /EIN/);
+// reliability: the check survives a refused option and a chatty reply, and falls back to the backup model
+const c4 = await v2(63); ai.noSchema = true; ai.chatty = true; ai.models = [];
+const fallback = await send(docs(63), c4); ai.noSchema = false; ai.chatty = false;
+assert.equal(fallback.pro.verified, true, "a refused schema falls back to a plain JSON prompt"); assert.deepEqual(ai.models, ["claude-sonnet-5-5+schema", "claude-sonnet-5-5"]);
+const c5 = await v2(64); ai.down = true; ai.models = []; const down = await send(docs(64), c5); ai.down = false;
+assert.equal(down.pro.verification, "In review", "a full AI outage sends the documents to a person, never auto-passes"); assert.deepEqual(ai.models, ["claude-sonnet-5-5+schema", "claude-sonnet-5-5", "claude-haiku-5-5"]);
+// the decision rules in code
+const F = { ein: "123456789", insuranceExpiresEntered: nextYear };
+assert.equal(decide({ business: { result: "pass" }, insurance: { result: "pass", expires: "" } }, F).expires, nextYear, "unreadable expiry falls back to the date entered");
+assert.equal(decide({ business: { result: "pass" }, insurance: { result: "pass", expires: "2020-01-01" } }, F).status, "Declined", "expired insurance never passes");
+assert.equal(decide({ business: { result: "pass", ein_on_document: "98-7654321" }, insurance: { result: "pass" } }, F).status, "Declined", "a wrong EIN never passes");
+// copy follows the pro's phase: free leads only while they have some
+const c6 = await v2(65); db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550165").fields["Free Leads Left"] = 0;
+await send(docs(65, { business: "FAIL" }), c6); assert.ok(!/free lead/.test(sent.at(-1).text), "a pro with no free leads left is not promised any"); assert.match(sent.at(-1).text, /leads in your market/);
+assert.match(sent.find((e) => e.to === "pro60@example.com" && /another look/.test(e.subject)).text, /Verified Pro badge and 3 free leads/);
 // insurance expiry ends verification
 db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === unverifiedPhone).fields["Insurance Expires"] = "2020-01-01";
 const lapsed = await call("/api/pro/me", null, u.cookie); assert.equal(lapsed.pro.verified, false); assert.equal(lapsed.pro.verification, "Insurance expired");

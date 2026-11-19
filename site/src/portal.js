@@ -5,13 +5,16 @@
   if (!root) return;
   var pro = null, tab = "offers";
   var DOC_TYPES = ["State contractor license", "City or county business license", "Secretary of State registration", "IRS EIN letter (CP 575 or 147C)", "DBA or assumed-name certificate", "State tax registration certificate"];
+  // What verifying gets this pro: free leads while they still have some, otherwise the leads themselves.
+  function prize() { var n = pro ? pro.freeLeadsLeft : 3; return n > 0 ? "your Verified Pro badge and " + n + " free lead" + (n === 1 ? "" : "s") : "your Verified Pro badge and claim leads again"; }
   var BANNER = {
-    "Not started": ["Verify your business to unlock your Verified Pro badge and 3 free leads.", "You can look at every lead in your market now. Claiming and buying unlock when you are verified.", "Get verified"],
+    "Not started": [function () { return "Verify your business to unlock " + prize() + "."; }, "You can look at every lead in your market now. Claiming and buying unlock when you are verified.", "Get verified"],
     "Pending": ["We are checking your documents.", "You can look at leads now. Claiming unlocks as soon as both documents pass.", "See status"],
     "In review": ["A person is taking a closer look at your documents.", "We will email you the result. You can look at leads while you wait.", "See status"],
-    "Declined": ["Your documents did not pass yet.", "Send a clearer or different document to unlock your Verified Pro badge and 3 free leads.", "Fix it now"],
+    "Declined": ["Your documents did not pass yet.", function () { return "Send a clearer or different document to unlock " + prize() + "."; }, "Fix it now"],
     "Insurance expired": ["Your insurance on file has expired.", "Upload a current certificate to get your badge back and keep buying leads.", "Update insurance"],
   };
+  var say = function (t) { return typeof t === "function" ? t() : t; };
   var store = { get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
   var h = function (tag, attrs, kids) {
     var el = document.createElement(tag);
@@ -51,7 +54,7 @@
       })));
       if (!pro.verified && tab !== "verify") root.appendChild(h("div", { class: "unlock" }, [
         h("img", { src: "/assets/img/badge.png", alt: "", width: "50", height: "60" }),
-        h("div", {}, [h("strong", { text: BANNER[pro.verification] ? BANNER[pro.verification][0] : BANNER["Not started"][0] }), h("span", { text: BANNER[pro.verification] ? BANNER[pro.verification][1] : BANNER["Not started"][1] })]),
+        h("div", {}, [h("strong", { text: say((BANNER[pro.verification] || BANNER["Not started"])[0]) }), h("span", { text: say((BANNER[pro.verification] || BANNER["Not started"])[1]) })]),
         h("button", { class: "btn btn--black", type: "button", text: BANNER[pro.verification] ? BANNER[pro.verification][2] : "Get verified", on: { click: function () { tab = "verify"; render(); } } }),
       ]));
     }
@@ -100,8 +103,8 @@
       h("img", { class: "passed-badge", src: "/assets/img/badge-large.png", alt: "", width: "170", height: "205" }),
       h("p", { class: "vbadge-title", text: "Verified Pro" }),
       h("h1", { text: "You are a Verified Pro." }),
-      h("p", { class: "sub", text: "Your 3 free leads are ready. Pick any three and call the owner." }),
-      h("button", { class: "btn btn--yellow btn--block btn--lg", type: "button", text: "Claim my free leads", on: { click: function () { tab = "offers"; render(); } } }),
+      h("p", { class: "sub", text: pro.freeLeadsLeft > 0 ? "Your " + pro.freeLeadsLeft + " free lead" + (pro.freeLeadsLeft === 1 ? " is" : "s are") + " ready. Pick a job and call the owner." : "You can claim and buy leads again. Pick a job and call the owner." }),
+      h("button", { class: "btn btn--yellow btn--block btn--lg", type: "button", text: pro.freeLeadsLeft > 0 ? "Claim my free leads" : "See open leads", on: { click: function () { tab = "offers"; render(); } } }),
     ])]);
   }
   var resubmit = false, justPassed = false;
@@ -125,9 +128,9 @@
     var form = h("form", { class: "card form verify" }, [
       h("div", { class: "verify-hero" }, [h("img", { src: "/assets/img/badge-large.png", alt: "", width: "106", height: "128" }), h("div", {}, [
         h("h1", { text: title }),
-        h("p", { class: "sub", text: "Two steps unlock your Verified Pro badge and your 3 free leads. We check your documents while you wait." }),
+        h("p", { class: "sub", text: "Two steps unlock " + prize() + ". We check your documents while you wait." }),
       ])]),
-      h("ul", { class: "verify-unlocks" }, [h("li", { text: "Verified Pro badge" }), h("li", { text: "3 free leads" }), h("li", { text: "Claim and buy leads" })]),
+      h("ul", { class: "verify-unlocks" }, [h("li", { text: "Verified Pro badge" }), pro.freeLeadsLeft > 0 ? h("li", { text: pro.freeLeadsLeft + " free lead" + (pro.freeLeadsLeft === 1 ? "" : "s") }) : null, h("li", { text: "Claim and buy leads" })]),
       h("ol", { class: "verify-steps" }, [s1, s2]),
       h("h2", { text: "Your business" }),
       field("v-legal", "Legal business name", legal, "The name on your EIN and your documents."),
@@ -187,7 +190,7 @@
           h("h3", { text: o.title }),
           h("p", { class: "meta", text: "Received " + when(o.receivedAt) + " · " + o.spotsTaken + " of " + o.maxPros + " spots taken" }),
           h("p", { class: "offer-price", text: freeNow && !locked ? "Free" : money(o.sharedPrice) }),
-          h("p", { class: "meta", text: locked ? "Shared lead. Your first 3 are free once you are verified." : freeNow ? "Uses 1 of your " + pro.freeLeadsLeft + " free leads. Normally " + money(o.sharedPrice) + " shared." : "Shared lead" }),
+          h("p", { class: "meta", text: locked ? (pro.freeLeadsLeft > 0 ? "Shared lead. Your first " + pro.freeLeadsLeft + " are free once you are verified." : "Shared lead. Verify to claim it.") : freeNow ? "Uses 1 of your " + pro.freeLeadsLeft + " free leads. Normally " + money(o.sharedPrice) + " shared." : "Shared lead" }),
           locked ? h("div", { class: "offer-actions" }, [h("button", { class: "btn btn--outline btn--locked", type: "button", text: "Verify to claim this lead", on: { click: function () { tab = "verify"; render(); } } })])
           : h("div", { class: "offer-actions" }, [
             h("button", { class: "btn btn--yellow", type: "button", text: freeNow ? "Claim free lead" : "Buy lead", on: { click: act("shared") } }),
