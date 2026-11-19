@@ -94,7 +94,10 @@ the pricing engine, the owner request form's endpoint, and bad-lead scoring.
 - **Browse before verifying.** Any signed-in pro can see open leads and prices. Owner details are never in an offer. Only a verified pro can claim, buy or get offers by text.
 - **To verify:** legal business name, EIN (9 digits, one account per EIN, never a Social Security number), one proof of business from the accepted list in `DOC_TYPES` (`src/worker.js`), a certificate of insurance and its expiry date.
 - **Verified Pro badge** shows on the account page and lapses on the insurance expiry date.
-- **Document check.** `POST /api/pro/documents` (multipart) stores both files in the private R2 bucket `hammer-hound-docs` (binding `DOCS`), then sends them to the AI model in `AI_MODEL` (default `claude-sonnet-5-5`). `decide()` in `src/worker.js` re-checks dates and the EIN in code. Results: `Verified`, `Declined` (clear problem), `In review` (unsure, or the AI could not be reached). An AI outage never passes anyone.
+- **Document check.** `POST /api/pro/documents` (multipart) stores both files in the private R2 bucket `hammer-hound-docs` (binding `DOCS`), then has the AI read them.
+  - **Three attempts:** `AI_MODEL` with a JSON schema, `AI_MODEL` with a plain JSON prompt, then `AI_MODEL_BACKUP`. Forced tool calls are not used: `claude-sonnet-5-5` rejects them.
+  - **Permissive by design:** a pro is verified unless there is a clear problem. `decide()` hard-stops only on a wrong EIN, an expired proof of business or expired insurance, plus anything the model marks a clear fail (not a business document, blank, an unrelated business).
+  - **In review** only when neither file could be read, or all three AI attempts failed. An outage never passes anyone.
 - **Limits.** PDF, JPG, PNG or WebP, 5 MB each, 3 checks a day per account.
 - **Emails.** `Declined` and `In review` send an email from `support@hammerhound.com` through the `EMAIL` binding (Cloudflare Email Sending). A failed email is logged and never blocks the check.
 - **Review queue.** In the Pros table, filter `Verification` = `In review`. `Verification Detail` holds what the AI read. Set `Verification` to `Verified` (and `Verified At`) or `Declined` by hand.

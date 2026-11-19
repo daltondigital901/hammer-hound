@@ -45,14 +45,18 @@ function matches(table, rec, formula) {
   throw new Error("mock: unknown formula " + formula);
 }
 // ---- stand-in AI: decides from words inside the uploaded test files ----
-export const ai = { calls: 0, down: false, last: null };
+export const ai = { calls: 0, down: false, last: null, models: [], noSchema: false, chatty: false, garbage: false };
 function aiMock(body, headers) {
-  ai.calls++; ai.last = { body, headers };
+  ai.calls++; ai.last = { body, headers }; ai.models.push(body.model + (body.output_config ? "+schema" : ""));
   if (ai.down) return new Response("overloaded", { status: 529 });
+  // Matches the live API: this model refuses a forced tool call.
+  if (body.tool_choice && ["tool", "any"].includes(body.tool_choice.type)) return new Response(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: 'tool_choice: type "tool" and "any" are not supported for this model.' } }), { status: 400 });
+  if (ai.noSchema && body.output_config) return new Response(JSON.stringify({ type: "error", error: { message: "output_config is not supported" } }), { status: 400 });
   const docs = body.messages[0].content.filter((c) => c.source).map((c) => Buffer.from(c.source.data, "base64").toString());
   const read = (text, extra) => ({ result: /FAIL/.test(text) ? "fail" : /UNSURE/.test(text) ? "unsure" : "pass", reason_for_pro: /FAIL/.test(text) ? "This looks like the wrong kind of document." : /UNSURE/.test(text) ? "The photo is too blurry to read." : "", name_on_document: "Test Pro", expires: (text.match(/EXPIRES (\d{4}-\d{2}-\d{2})/) || [])[1] || "", ...extra });
-  const input = { business: read(docs[0], { document_type_matches: true, ein_on_document: (docs[0].match(/EIN (\d{9})/) || [])[1] || "" }), insurance: read(docs[1], { shows_general_liability: true }) };
-  return new Response(JSON.stringify({ content: [{ type: "tool_use", name: "report", input }] }), { status: 200 });
+  const report = { business: read(docs[0], { ein_on_document: (docs[0].match(/EIN (\d{9})/) || [])[1] || "" }), insurance: read(docs[1], { shows_general_liability: true }) };
+  const text = ai.chatty && !body.output_config ? "Here is the report:\n```json\n" + JSON.stringify(report) + "\n```" : ai.garbage ? "I cannot help with that." : JSON.stringify(report);
+  return new Response(JSON.stringify({ content: [{ type: "text", text }] }), { status: 200 });
 }
 export const stored = new Map(), sent = [];
 const realFetch = globalThis.fetch;
