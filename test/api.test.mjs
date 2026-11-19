@@ -1,7 +1,8 @@
 // Rule checks for the pro API. Run: node test/api.test.mjs
 import assert from "node:assert/strict";
-import { worker, env, db, seedForm, ingest, SITE_GBP, SITE_CLIENT, ai, stored, sent } from "./dev-server.mjs";
-import { decide, reminderFor, sendReminders, brandEmail, tradeOf, AGREEMENT_VERSION } from "../src/worker.js";
+import { worker, env, db, seedForm, ingest, SITE_GBP, SITE_CLIENT, ai, stored, sent, texts } from "./dev-server.mjs";
+import { createHmac } from "node:crypto";
+import { decide, reminderFor, sendReminders, brandEmail, tradeOf, AGREEMENT_VERSION, alertPros, creditBacks, buildInvoice, sendInvoices, offerText } from "../src/worker.js";
 import { readFileSync } from "node:fs";
 import { parseForm } from "../src/worker.js";
 
@@ -135,7 +136,7 @@ assert.equal((await call("/api/pro/buy", { leadId: offers[2].id, kind: "exclusiv
 
 // five pros at most
 const others = []; for (let n = 3; n <= 6; n++) others.push(await signUp(n));
-const short = await call("/api/pro/buy", { leadId: L, kind: "shared" }, b); assert.equal(short.status, 402); assert.match(short.error, /wallet has \$15\.00\. Add \$60 or more/, "the $15 left after an exclusive is not enough for another lead");
+const short = await call("/api/pro/buy", { leadId: L, kind: "shared" }, b); assert.equal(short.status, 402); assert.match(short.error, /wallet has \$15\.00\. Add a card to claim it/, "the $15 left after an exclusive is not enough for another lead");
 for (const c of others) assert.equal((await call("/api/pro/buy", { leadId: L, kind: "shared" }, c)).status, 200);
 assert.equal((await call("/api/pro/buy", { leadId: L, kind: "shared" }, await signUp(7))).status, 410, "sixth pro is refused");
 assert.equal(leads.find((l) => l.id === L).fields.Status, "Sold out");
@@ -145,10 +146,26 @@ seedForm(20); seedForm(21); seedForm(22); await ingest(env);
 const open = (await call(ALL, null, a)).offers;
 await call("/api/pro/buy", { leadId: open[0].id, kind: "shared" }, a); await call("/api/pro/buy", { leadId: open[1].id, kind: "shared" }, a);
 assert.equal((await call("/api/pro/me", null, a)).pro.balance, 15, "three leads leave $15"); assert.equal((await call("/api/pro/me", null, a)).pro.credit, 15);
-assert.equal((await call("/api/pro/buy", { leadId: open[2].id, kind: "shared" }, a)).status, 402, "the fourth lead needs a top-up");
-assert.equal((await call("/api/pro/add-funds", { amount: 100 }, a)).pro.balance, 115);
-const paid = await call("/api/pro/buy", { leadId: open[2].id, kind: "shared" }, a); assert.equal(paid.creditUsed, 15); assert.equal(paid.paidUsed, 60); assert.equal(paid.balance, 40); assert.equal(paid.credit, 0);
+// ---- card on file, reloads and the ledger ----
+const LG = db.tblZ2EIWCgOb36JR2, mineL = (id) => LG.filter((r) => r.fields["Pro ID"] === id), aId = db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550101").id;
+assert.deepEqual(mineL(aId).map((r) => [r.fields.Type, r.fields.Amount, r.fields["Balance After"]]), [["Welcome credit", 240, 240], ["Lead", -75, 165], ["Lead", -75, 90], ["Lead", -75, 15]], "every movement is in the ledger");
+const noCard = await call("/api/pro/buy", { leadId: open[2].id, kind: "shared", reload: true }, a);
+assert.equal(noCard.status, 402); assert.equal(noCard.card, ""); assert.equal(noCard.short, 60); assert.equal(noCard.reloadAmount, 150); assert.match(noCard.error, /Add a card to claim it/);
+assert.equal((await call("/api/pro/add-funds", { amount: 150 }, a)).status, 402, "no card, no top-up");
+assert.equal((await call("/api/pro/reload-settings", { autoReload: true, reloadAmount: 150 }, a)).status, 400, "auto-reload needs a card");
+assert.equal((await call("/api/pro/card", { action: "save" }, a)).pro.card, "Test card ending 4242");
+const unconfirmed = await call("/api/pro/buy", { leadId: open[2].id, kind: "shared" }, a); assert.equal(unconfirmed.status, 402, "a card alone does not charge: the button must say so first"); assert.match(unconfirmed.error, /Reload \$150\.00 on Test card ending 4242/);
+const mailsBefore = sent.length;
+const paid = await call("/api/pro/buy", { leadId: open[2].id, kind: "shared", reload: true }, a);
+assert.equal(paid.reloaded, 150); assert.equal(paid.creditUsed, 15); assert.equal(paid.paidUsed, 60); assert.equal(paid.balanceBefore, 15); assert.equal(paid.balance, 90); assert.equal(paid.credit, 0);
 assert.equal(db.tblJnYLq2aCiCVU1C.at(-1).fields["Credit Used"], 15);
+assert.deepEqual(mineL(aId).slice(-2).map((r) => [r.fields.Type, r.fields.Amount, r.fields["Balance After"], r.fields.Via]), [["Top-up", 150, 165, "Portal"], ["Lead", -75, 90, "Portal"]]);
+assert.match(mineL(aId).at(-2).fields["Payment ID"], /^TEST-/); assert.match(sent[mailsBefore].subject, /Receipt: \$150\.00 added/);
+assert.equal((await call("/api/pro/add-funds", { amount: 20 }, a)).status, 400); assert.equal((await call("/api/pro/add-funds", { amount: 300 }, a)).pro.balance, 390);
+assert.equal((await call("/api/pro/reload-settings", { autoReload: true, reloadAmount: 150, monthlyLimit: 100 }, a)).status, 400, "the limit must cover one reload");
+assert.equal((await call("/api/pro/reload-settings", { autoReload: true, reloadAmount: 150, monthlyLimit: 500 }, a)).pro.autoReload, true);
+assert.match((await call("/api/pro/add-funds", { amount: 150 }, a)).error, /monthly limit of \$500\.00 \(\$450\.00 charged/, "the monthly limit stops a reload");
+const walA = await call("/api/pro/wallet", null, a); assert.equal(walA.chargedThisMonth, 450); assert.equal(walA.card, "Test card ending 4242"); assert.equal(walA.rows[0].type, "Top-up"); assert.equal(walA.months.length, 1); assert.equal(walA.membership.inFreeYear, true);
 const mine = (await call("/api/pro/leads", null, a)).leads; assert.equal(mine.length, 4);
 assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "wrong number" }, a)).status, 200);
 assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "again" }, a)).status, 409);
@@ -205,15 +222,74 @@ assert.equal((await call("/api/pro/lead-status", { purchaseId: pl.purchaseId, pi
 assert.equal((await call("/api/pro/lead-status", { purchaseId: pl.purchaseId, pipeline: "Quoted", notes: "Sent quote" }, m1)).status, 200);
 assert.equal((await call("/api/pro/lead-status", { purchaseId: pl.purchaseId, pipeline: "Won" }, a)).status, 404, "cannot change another pro's lead");
 const pl2 = (await call("/api/pro/leads", null, m1)).leads[0]; assert.equal(pl2.pipeline, "Quoted"); assert.equal(pl2.notes, "Sent quote");
-const wal = await call("/api/pro/wallet", null, m1); assert.equal(wal.balance, 165); assert.equal(wal.credit, 165); assert.equal(wal.rows[0].creditUsed, 75); assert.equal(wal.rows.length, 1); assert.equal(wal.cardsReady, false); assert.equal(wal.membership.waived, true);
-assert.equal((await call("/api/pro/add-funds", { amount: 7 }, m1)).status, 400); assert.equal((await call("/api/pro/add-funds", { amount: 100 }, m1)).pro.balance, 265, "test accounts can add test funds");
+const wal = await call("/api/pro/wallet", null, m1); assert.equal(wal.balance, 165); assert.equal(wal.credit, 165); assert.deepEqual(wal.rows.map((r) => [r.type, r.amount, r.creditPart]), [["Lead", -75, -75], ["Welcome credit", 240, 240]]); assert.equal(wal.cardsReady, false); assert.equal(wal.membership.fee, 300); assert.match(wal.membership.freeUntil, /^\d{4}-\d{2}-\d{2}$/);
 db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550170").fields.Test = false;
-assert.equal((await call("/api/pro/add-funds", { amount: 100 }, m1)).status, 503, "real accounts cannot add funds until Square is connected");
+assert.equal((await call("/api/pro/card", { action: "save" }, m1)).status, 503, "real accounts cannot save a card until Square is connected");
 assert.equal((await call("/api/pro/tickets", { subject: "", message: "" }, m1)).status, 400);
 assert.equal((await call("/api/pro/tickets", { topic: "Billing", subject: "Charge question", message: "Why was I charged?" }, m1)).status, 200);
 assert.equal((await call("/api/pro/tickets", null, m1)).tickets[0].subject, "Charge question"); assert.equal((await call("/api/pro/tickets", null, a)).tickets.length, 0, "tickets are private to the pro");
 assert.equal((await call("/api/pro/close", { confirm: "yes" }, m1)).status, 400); assert.equal((await call("/api/pro/close", { confirm: "CLOSE" }, m1)).status, 200);
 assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed account is signed out"); assert.equal((await call("/api/pro/sign-in", { phone: "9015550170" })).status, 403, "and cannot sign back in");
+
+// ---- auto-reload, credit back, text-to-claim, lead alerts, invoices ----
+{
+  const P = db.tbl9bEGuy8DPkkee7, LD = db.tblfA6ivDIlWVp4us, PU = db.tblJnYLq2aCiCVU1C, find = (mob) => P.find((p) => p.fields.Mobile === mob);
+  // auto-reload keeps a lead's worth in the wallet without being asked
+  const r1 = await signUp(80); await call("/api/pro/card", { action: "save" }, r1); await call("/api/pro/reload-settings", { autoReload: true, reloadAmount: 150 }, r1);
+  seedForm(50, { service: "Roof Repair", city: "Memphis" }); seedForm(51, { service: "Roof Repair", city: "Memphis" }); seedForm(52, { service: "Roof Repair", city: "Memphis" }); seedForm(53, { service: "Roof Repair", city: "Memphis" }); await ingest(env);
+  const four = (await call(ALL, null, r1)).offers.slice(0, 4);
+  for (const o of four.slice(0, 2)) await call("/api/pro/buy", { leadId: o.id, kind: "shared" }, r1);
+  const third = await call("/api/pro/buy", { leadId: four[2].id, kind: "shared" }, r1); assert.equal(third.autoReloaded, 150, "below a lead's price after the third claim, the wallet reloads itself"); assert.equal(third.balance, 165);
+  // an approved bad-lead report puts the money straight back
+  const pur = PU.at(-1), before = find("9015550180").fields.Balance, m0 = sent.length; pur.fields["Review Status"] = "Approved";
+  assert.equal(await creditBacks(env), 1); assert.equal(find("9015550180").fields.Balance, before + 75); assert.equal(pur.fields.Credited, true); assert.equal(await creditBacks(env), 0, "credited once");
+  assert.match(sent[m0].subject, /\$75\.00 is back in your wallet/); assert.equal(db.tblZ2EIWCgOb36JR2.at(-1).fields.Type, "Credit back");
+
+  // lead alerts: a text and an email to the pro whose market and trade match, and nobody else
+  Object.assign(env, { TWILIO_ACCOUNT_SID: "AC1", TWILIO_AUTH_TOKEN: "tok", TWILIO_FROM: "+19015550000" });
+  for (const l of LD) l.fields.Alerted = "old";
+  const real = { id: "recREALPRO00000001", fields: { "Business Name": "Real Roofing", Mobile: "9012223333", Email: "real@example.com", Trade: "roofing", City: "memphis", Verification: "Verified", "Text Offers": true, "Email Offers": true, Balance: 15, "Welcome Credit": 15, Card: "Visa ending 1111", "Card Token": "TEST", Test: true, "Created At": new Date().toISOString() } };
+  const other = { id: "recOTHERPRO0000001", fields: { "Business Name": "Other Fence", Mobile: "9014445555", Email: "other@example.com", Trade: "fencing", City: "Memphis", Verification: "Verified", "Text Offers": true, "Email Offers": true, Balance: 240 } };
+  P.push(real, other);
+  seedForm(60, { service: "Roof Repair", city: "Memphis" }); await ingest(env);
+  const fresh = LD.at(-1), t0 = texts.length, e0 = sent.length, al = await alertPros(env);
+  assert.equal(al.leads, 1); const toReal = texts.slice(t0); assert.equal(toReal.length, 1, "only the matching pro with a real number is texted"); assert.equal(toReal[0].to, "+19012223333");
+  assert.match(toReal[0].body, /New ROOFING lead in Memphis, TN\. Roof Repair\. Size: Small\. .*\$75 from your wallet; if it is short we charge Visa ending 1111\. Reply YES to claim, ONLY for exclusive \(\$225\)\. Reply STOP/);
+  assert.ok(!/Sample Owner|owner\d+@|555-?01\d\d/.test(toReal[0].body), "the text carries no owner details");
+  assert.ok(sent.slice(e0).some((e) => e.to === "real@example.com" && /New roofing lead in Memphis, TN/.test(e.subject)) && !sent.slice(e0).some((e) => e.to === "other@example.com"));
+  assert.equal(real.fields["Last Offer"].split("|")[0], fresh.id); assert.match(fresh.fields.Alerted, / \| \d+$/); assert.equal((await alertPros(env)).leads, 0, "a lead is announced once");
+  // reply YES: claimed, and the card on file covers the short wallet
+  const sms = async (from, body, sign = true) => {
+    const url = "https://hammerhound.com/api/sms/inbound", p = { Body: body, From: from, To: "+19015550000" };
+    const sig = createHmac("sha1", "tok").update(url + Object.keys(p).sort().map((k) => k + p[k]).join("")).digest("base64");
+    const r = await worker.fetch(new Request(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Twilio-Signature": sign ? sig : "nope" }, body: new URLSearchParams(p) }), env);
+    return { status: r.status, text: await r.text() };
+  };
+  assert.equal((await sms("+19012223333", "YES", false)).status, 403, "an unsigned text is refused");
+  const yes = await sms("+19012223333", " yes ");
+  assert.match(yes.text, /claimed\. Roof Repair, Memphis, TN\. Owner: Sample Owner 60, 9015550160.*\$75\.00 from your wallet after a \$150\.00 reload on Visa ending 1111\. \$90\.00 left\. Call now\./);
+  assert.equal(real.fields.Balance, 90); assert.deepEqual(db.tblZ2EIWCgOb36JR2.slice(-2).map((r) => [r.fields.Type, r.fields.Via]), [["Top-up", "Text"], ["Lead", "Text"]]);
+  assert.match((await sms("+19012223333", "YES")).text, /not claimed\. You already have this lead/);
+  assert.match((await sms("+19012223333", "balance")).text, /wallet has \$90\.00/); assert.match((await sms("+19019990000", "YES")).text, /not on a pro account/);
+  await sms("+19012223333", "STOP"); assert.equal(real.fields["Text Offers"], false, "STOP turns text offers off");
+  assert.match(offerText({ Trade: "roofing", City: "Memphis", State: "TN", Job: "Roof Repair", "Shared Price": 75, "Exclusive Price": 225 }, {}), /\$75 from your wallet\. Reply YES/, "no card, no mention of a charge");
+
+  // monthly invoice: totals from the ledger, a real PDF, emailed once
+  const month = new Date().toLocaleDateString("en-CA", { timeZone: "America/Chicago" }).slice(0, 7), proA = find("9015550101");
+  const inv = await buildInvoice(env, proA, month);
+  assert.match(inv.number, /^HH-\d{6}-[A-Z0-9]{5}$/); assert.deepEqual([inv.totals.opening, inv.totals.added, inv.totals.charged, inv.totals.leadCount, inv.totals.leadsTotal, inv.totals.creditUsed, inv.totals.closing], [0, 690, 450, 4, 300, 240, 390]);
+  assert.equal(await buildInvoice(env, proA, "2020-01"), null, "no activity, no invoice");
+  const pdf = await worker.fetch(new Request("http://x/api/pro/invoice?month=" + month, { headers: { Cookie: a } }), env);
+  assert.equal(pdf.headers.get("Content-Type"), "application/pdf"); const bytes = new Uint8Array(await pdf.arrayBuffer()); assert.equal(String.fromCharCode(...bytes.slice(0, 5)), "%PDF-"); assert.ok(bytes.length > 3000);
+  assert.equal((await worker.fetch(new Request("http://x/api/pro/invoice?month=" + month), env)).status, 401, "invoices are private");
+  proA.fields.Email = "a@example.com"; const i0 = sent.length, run = await sendInvoices(env, { month });
+  const mail = sent.slice(i0).find((e) => e.to === "a@example.com"); assert.ok(run.sent >= 1 && mail); assert.match(mail.subject, /Your Hammer Hound invoice for/);
+  assert.equal(mail.attachments[0].type, "application/pdf"); assert.ok(mail.attachments[0].content.startsWith("JVBERi0"), "the PDF is attached"); assert.match(mail.html, /hammer hound/);
+  assert.ok(stored.has(`invoices/${proA.id}/${month}.pdf`)); assert.equal(proA.fields["Last Invoice"], month);
+  const again = await sendInvoices(env, { month }); assert.ok(!again.list.some((x) => x.pro === proA.fields["Business Name"] && again.sent), "the same invoice is not emailed twice");
+  assert.equal((await call("/api/admin/invoices", { dry: true }, null)).status, 401);
+  for (const p of [real, other]) P.splice(P.indexOf(p), 1);
+}
 
 // ---- insurance reminders and nudges ----
 const R = (f, now) => (reminderFor({ Email: "a@b.co", Verification: "Verified", ...f }, now) || {}).stage;

@@ -233,9 +233,11 @@
   // Every lead is drawn the same way: job, place, the same three facts in the same order, then the summary.
   function jobBlock(o) {
     var fact = function (k, v) { return h("div", {}, [h("dt", { text: k }), h("dd", { class: v === "Not stated" ? "is-unknown" : "", text: v })]); };
-    return [h("h3", { text: o.job }), h("p", { class: "lead-place", text: o.place }),
-      h("dl", { class: "lead-facts" }, [fact("Timing", o.timing), fact("Property", o.propertyType), fact("Job size", o.jobSize)]),
-      o.summary ? h("p", { class: "lead-summary", text: o.summary }) : null];
+    var sum = h("p", { class: "lead-summary", text: o.summary || "The owner did not add details." });
+    var more = h("button", { class: "lead-more", type: "button", text: "Read more", hidden: "", on: { click: function () { var open = sum.classList.toggle("is-open"); more.textContent = open ? "Show less" : "Read more"; } } });
+    requestAnimationFrame(function () { if (sum.scrollHeight > sum.clientHeight + 2) more.hidden = false; });
+    return [h("h3", { title: o.job, text: o.job }), h("p", { class: "lead-place", text: o.place }),
+      h("dl", { class: "lead-facts" }, [fact("Timing", o.timing), fact("Property", o.propertyType), fact("Job size", o.jobSize)]), sum, more];
   }
 
   // The claim moment: a toast that drops in, and the wallet in the header counting down to the new balance.
@@ -245,14 +247,15 @@
       var tick = function (ts) { if (start === null) start = ts; var k = Math.min(1, (ts - start) / 900); b.textContent = money(from + (to - from) * (1 - Math.pow(1 - k, 3)));
         if (k < 1) requestAnimationFrame(tick); else { b.textContent = money(to); b.removeAttribute("data-counting"); setTimeout(function () { b.classList.remove("is-spending"); }, 600); } };
       requestAnimationFrame(tick); }
-    var how = res.creditUsed >= res.price ? "Paid with your free credit" : res.creditUsed > 0 ? money(res.creditUsed) + " free credit + " + money(res.paidUsed) + " from your wallet" : "Paid from your wallet";
-    var low = to < res.nextPrice, close = function () { t.classList.add("is-leaving"); setTimeout(function () { t.remove(); }, 300); };
+    var how = res.reloaded ? "Reloaded " + money0(res.reloaded) + " on " + res.card + ", then paid from your wallet" : res.creditUsed >= res.price ? "Paid with your free credit" : res.creditUsed > 0 ? money(res.creditUsed) + " free credit + " + money(res.paidUsed) + " from your wallet" : "Paid from your wallet";
+    if (res.autoReloaded) how += ". Auto-reload added " + money0(res.autoReloaded);
+    var low = to < res.nextPrice && !res.card, close = function () { t.classList.add("is-leaving"); setTimeout(function () { t.remove(); }, 300); };
     var t = h("div", { class: "toast", role: "status" }, [
       h("img", { src: "/assets/img/badge.png", alt: "", width: "58", height: "70" }),
       h("div", {}, [h("p", { class: "toast-title", text: res.kind === "exclusive" ? "It's all yours!" : "Lead claimed!" }), h("p", { class: "toast-job", text: res.lead.job + " · " + res.lead.place }),
         h("p", { class: "toast-money" }, [h("strong", { text: "-" + money(res.price) }), h("span", { text: " " + how + ". " + money(to) + " left." })]),
-        h("p", { class: "toast-next", text: low ? "That is not enough for another lead. Top up to keep them coming." : "Call the owner now. The first pro to call usually wins the job." }),
-        low ? h("button", { class: "btn btn--black btn--sm", type: "button", text: "Top up my wallet", on: { click: function () { close(); go("wallet"); } } }) : null]),
+        h("p", { class: "toast-next", text: low ? "That is not enough for another lead. Add a card and the next one is one tap." : "Call the owner now. The first pro to call usually wins the job." }),
+        low ? h("button", { class: "btn btn--black btn--sm", type: "button", text: "Add a card", on: { click: function () { close(); go("wallet"); } } }) : null]),
       h("button", { class: "toast-x", type: "button", "aria-label": "Close", text: "\u00d7", on: { click: function () { close(); } } }),
       h("i", { class: "toast-sparks", "aria-hidden": "true" }),
     ]);
@@ -307,24 +310,30 @@
         mine ? h("p", { class: "hint", text: "Showing your market and trade." }) : h("button", { class: "btn btn--text", type: "button", text: "Back to my market and trade", on: { click: function () { pick = { market: null, trade: null }; offersView(); } } })]);
       var items = r.offers.map(function (o) {
         var status = h("div");
-        var act = function (kind) { return function () {
-          call("/api/pro/buy", { leadId: o.id, kind: kind }).then(function (res) {
-            if (res.error) { status.innerHTML = ""; status.appendChild(note(res.error, res.status === 402 ? "" : "bad")); if (res.status === 402) status.appendChild(h("button", { class: "btn btn--outline btn--sm", type: "button", text: "Add funds", on: { click: function () { go("wallet"); } } })); return; }
+        var act = function (kind, reload) { return function () {
+          call("/api/pro/buy", { leadId: o.id, kind: kind, reload: !!reload }).then(function (res) {
+            if (res.error) { status.innerHTML = ""; status.appendChild(note(res.error, res.status === 402 ? "" : "bad")); if (res.status === 402) status.appendChild(h("button", { class: "btn btn--outline btn--sm", type: "button", text: "Open wallet", on: { click: function () { go("wallet"); } } })); return; }
             pro.balance = res.balance; pro.credit = res.credit; claimed(res); go("leads");
           });
         }; };
-        var covered = pro.credit >= o.sharedPrice, short = pro.balance < o.sharedPrice;
+        var covered = pro.credit >= o.sharedPrice, short = pro.balance < o.sharedPrice, unit = pro.reloadAmount || 150;
+        var need = function (price) { return Math.ceil((price - pro.balance) / unit) * unit; };
+        // When the wallet is short the button says what will be charged, before the tap.
+        var label = function (kind, price) { var base = (kind === "exclusive" ? "Exclusive " : "Claim lead · ") + money0(price); return pro.balance >= price ? base : pro.card ? base + " · reloads " + money0(need(price)) : base; };
+        var press = function (kind, price) { return function () { if (pro.balance < price && !pro.card) { status.innerHTML = ""; status.appendChild(note("Your wallet has " + money(pro.balance) + ". Add a card and this lead is one tap away.")); status.appendChild(h("button", { class: "btn btn--black btn--sm", type: "button", text: "Add a card", on: { click: function () { go("wallet"); } } })); return; } act(kind, pro.balance < price)(); }; };
         return h("div", { class: "card offer" }, [
           h("div", { class: "offer-top" }, [h("span", { class: "chip", text: o.tradeName }), h("span", { class: "chip chip--yellow", text: "Ends " + when(o.endsAt) })])].concat(jobBlock(o), [
-          h("p", { class: "meta", text: "Received " + when(o.receivedAt) + " · " + o.spotsTaken + " of " + o.maxPros + " spots taken" }),
-          h("p", { class: "offer-price", text: money(o.sharedPrice) }),
-          h("p", { class: "meta", text: locked ? (pro.credit > 0 ? "Shared lead. Your " + money0(pro.credit) + " in free credit unlocks when you are verified." : "Shared lead. Verify to claim it.") : covered ? "Shared lead. Covered by your free credit." : short ? "Shared lead. Your wallet has " + money(pro.balance) + "." : "Shared lead. Paid from your wallet." }),
-          locked ? h("div", { class: "offer-actions" }, [h("button", { class: "btn btn--outline btn--locked", type: "button", text: "Verify to claim this lead", on: { click: function () { go("verify"); } } })])
-          : h("div", { class: "offer-actions" }, [
-            h("button", { class: "btn btn--yellow", type: "button", text: "Claim lead · " + money0(o.sharedPrice), on: { click: act("shared") } }),
-            o.exclusiveAvailable ? h("button", { class: "btn btn--outline", type: "button", text: "Exclusive " + money(o.exclusivePrice), on: { click: act("exclusive") } }) : null,
+          h("div", { class: "offer-foot" }, [
+            h("p", { class: "meta", text: "Received " + when(o.receivedAt) + " · " + o.spotsTaken + " of " + o.maxPros + " spots taken" }),
+            h("p", { class: "offer-price", text: money(o.sharedPrice) }),
+            h("p", { class: "meta", text: locked ? (pro.credit > 0 ? "Shared lead. Your " + money0(pro.credit) + " in free credit unlocks when you are verified." : "Shared lead. Verify to claim it.") : covered ? "Shared lead. Covered by your free credit." : short ? (pro.card ? "Shared lead. Your wallet has " + money(pro.balance) + "; " + pro.card + " covers the rest." : "Shared lead. Your wallet has " + money(pro.balance) + ".") : "Shared lead. Paid from your wallet." }),
+            locked ? h("div", { class: "offer-actions" }, [h("button", { class: "btn btn--outline btn--locked", type: "button", text: "Verify to claim this lead", on: { click: function () { go("verify"); } } })])
+            : h("div", { class: "offer-actions" }, [
+              h("button", { class: "btn btn--yellow", type: "button", text: label("shared", o.sharedPrice), on: { click: press("shared", o.sharedPrice) } }),
+              o.exclusiveAvailable ? h("button", { class: "btn btn--outline", type: "button", text: label("exclusive", o.exclusivePrice), on: { click: press("exclusive", o.exclusivePrice) } }) : null,
+            ]),
+            status,
           ]),
-          status,
         ]));
       });
       var empty = card([h("h2", { text: "No open leads for this market and trade" }), h("p", { class: "sub", text: f.total ? f.total + " lead" + (f.total === 1 ? " is" : "s are") + " open in other markets or trades." : "New leads show up here as they come in." }),
@@ -375,21 +384,35 @@
     call("/api/pro/wallet").then(function (r) {
       if (r.error) return shell([note(r.error, "bad")]);
       pro = r.pro; if (tab !== "wallet") return;
-      var status = h("div"), amount = select("w-amount", [["50", "$50"], ["100", "$100"], ["250", "$250"], ["500", "$500"]], "100");
-      var add = h("button", { class: "btn btn--yellow btn--block", type: "button", text: r.cardsReady ? "Add funds" : r.testFunds ? "Add test funds" : "Add funds", on: { click: function () { saver(status, add, "/api/pro/add-funds", { amount: Number(amount.value) }, function () { walletView(); }); } } });
-      var rows = r.rows.map(function (x) { return h("tr", {}, [h("td", { text: when(x.date) }), h("td", { text: x.label + (x.review !== "None" ? " (report: " + x.review + ")" : "") }), h("td", { text: x.kind }), h("td", { class: "num", text: x.amount ? "-" + money(-x.amount) + (x.creditUsed >= -x.amount ? " (free credit)" : x.creditUsed > 0 ? " (" + money(x.creditUsed) + " free credit)" : "") : "Free" })]); });
-      shell([head("Wallet", "Your balance, what you have spent and your membership."),
+      var status = h("div"), cardStatus = h("div"), reloadStatus = h("div");
+      var amounts = r.reloads.map(function (a) { return [String(a), money0(a)]; });
+      var amount = select("w-amount", amounts, String(r.reloadAmount)), short = r.balance < r.leadPrice;
+      var add = h("button", { class: "btn btn--yellow btn--block", type: "button", text: "Add funds", on: { click: function () { saver(status, add, "/api/pro/add-funds", { amount: Number(amount.value) }, function () { walletView(); }); } } });
+      // Card on file. Real cards arrive with Square; a test account can save a test card to try the whole flow.
+      var cardBox = r.card
+        ? [h("p", { class: "pp-cardline" }, [h("strong", { text: r.card }), h("button", { class: "btn btn--text btn--sm", type: "button", text: "Remove", on: { click: function () { call("/api/pro/card", { action: "remove" }).then(function () { walletView(); }); } } })]), field("w-amount", "Amount to add", amount), add, status]
+        : [h("p", { class: "sub", text: "Save a card once and every lead is one tap or one text away. You are not charged until your wallet cannot cover a lead you claim." }),
+           h("button", { class: "btn btn--yellow btn--block", type: "button", text: r.cardsReady ? "Add a card" : r.testCard ? "Save a test card" : "Add a card", on: { click: function () { call("/api/pro/card", { action: "save" }).then(function (res) { if (res.error) { cardStatus.innerHTML = ""; cardStatus.appendChild(note(res.error)); return; } walletView(); }); } } }),
+           r.cardsReady ? null : h("p", { class: "hint", text: r.testCard ? "Card payments are not switched on yet. This is a test account, so a test card stands in. Nothing is charged." : "Card payments are not switched on yet. We will email you when they are." }), cardStatus];
+      var auto = toggle("w-auto", "Auto-reload", "When your wallet cannot cover a lead, charge my card the reload amount so the claim goes through.", r.autoReload);
+      var unit = select("w-unit", amounts, String(r.reloadAmount)), limit = input("w-limit", "number", r.monthlyLimit || "", { min: "75", step: "25", placeholder: "No limit" });
+      var saveReload = h("button", { class: "btn btn--outline btn--block", type: "button", text: "Save reload settings", on: { click: function () { saver(reloadStatus, saveReload, "/api/pro/reload-settings", { autoReload: auto.box.checked, reloadAmount: Number(unit.value), monthlyLimit: limit.value }, function () { walletView(); }); } } });
+      var rows = r.rows.map(function (x) { return h("tr", {}, [h("td", { text: when(x.date) }), h("td", { text: x.entry }), h("td", { text: x.type }), h("td", { class: "num" + (x.amount > 0 ? " is-in" : ""), text: (x.amount > 0 ? "+" : "-") + money(Math.abs(x.amount)) }), h("td", { class: "num", text: money(x.balanceAfter) })]); });
+      var m = r.membership;
+      shell([head("Wallet", "Your balance, your card, your invoices."),
         h("div", { class: "pp-two" }, [
-          card([h("h2", { text: "Balance" }), h("p", { class: "offer-price", text: money(r.balance) }), h("p", { class: "meta", text: r.credit > 0 ? money(r.credit) + " of this is free welcome credit. It is spent before money you add." : "Leads are paid from this balance." }),
-            r.balance < r.leadPrice ? h("p", { class: "form-status", text: "A lead is " + money(r.leadPrice) + ". Add " + money0(Math.ceil((r.leadPrice - r.balance) / 5) * 5) + " or more to claim your next one." }) : null,
-            field("w-amount", "Amount to add", amount),
-            r.cardsReady ? null : h("p", { class: "form-status", text: r.testFunds ? "Card payments are not switched on yet. This is a test account, so you can add test funds. No card is charged." : "Card payments are not switched on yet. We will email you when you can add funds." }),
-            add, status]),
-          card([h("h2", { text: "Membership" }), h("div", { class: "fee-offer" }, [h("span", { class: "fee-tag", text: "Limited-time offer" }), h("p", { class: "fee-line" }, [h("s", { text: "$" + r.membership.fee }), h("span", { class: "fee-now", text: " $0" })]), h("p", { class: "fee-what", text: "Annual membership fee waived" })]),
-            h("p", { class: "hint", text: "We give notice before the fee starts. You can close your account before then without paying it. See the Pro Agreement, section 5.5." }),
-            h("h2", { text: "Saved card" }), h("p", { class: "meta", text: "No card on file. Saving a card and automatic reloads arrive with card payments." })]),
+          card([h("h2", { text: "Balance" }), h("p", { class: "offer-price", text: money(r.balance) }),
+            h("p", { class: "meta", text: r.credit > 0 ? money(r.credit) + " of this is free welcome credit. It is spent before money you add." : "Leads are paid from this balance." }),
+            short ? h("p", { class: "form-status", text: "A lead is " + money(r.leadPrice) + ". " + (r.card ? "Your next claim reloads " + money0(r.reloadAmount) + " on " + r.card + "." : "Add a card to claim your next one.") }) : null,
+            h("h2", { text: "Card on file" })].concat(cardBox)),
+          card([h("h2", { text: "Reloads" }), auto.el, field("w-unit", "Reload amount", unit, "Charged each time a reload is needed."), field("w-limit", "Monthly limit", limit, r.chargedThisMonth ? money(r.chargedThisMonth) + " charged so far this month." : "The most your card can be charged for reloads in a month. Leave empty for no limit."),
+            h("p", { class: "hint", text: "Every charge is emailed to you as a receipt. Replying YES to a lead text also uses your card on file when your wallet is short." }), reloadStatus, saveReload]),
         ]),
-        card([h("h2", { text: "Activity" }), rows.length ? h("div", { class: "table-wrap" }, [h("table", { class: "pp-table" }, [h("thead", {}, [h("tr", {}, [h("th", { text: "Date" }), h("th", { text: "Lead" }), h("th", { text: "Type" }), h("th", { class: "num", text: "Amount" })])]), h("tbody", {}, rows)])]) : h("p", { class: "sub", text: "Nothing yet. Leads you claim or buy are listed here." })], "pp-wide"),
+        card([h("h2", { text: "Invoices" }), h("p", { class: "sub", text: "A PDF invoice is emailed on the 1st of each month. Open any month here." }),
+          r.months.length ? h("ul", { class: "summary" }, r.months.map(function (x) { return h("li", {}, [h("a", { class: "link-more", href: "/api/pro/invoice?month=" + x.month, target: "_blank", rel: "noopener", text: x.label + (x.open ? " (so far)" : "") + " · PDF" })]); })) : h("p", { class: "meta", text: "No invoices yet." })], "pp-wide"),
+        card([h("h2", { text: "Activity" }), rows.length ? h("div", { class: "table-wrap" }, [h("table", { class: "pp-table" }, [h("thead", {}, [h("tr", {}, [h("th", { text: "Date" }), h("th", { text: "What" }), h("th", { text: "Type" }), h("th", { class: "num", text: "Amount" }), h("th", { class: "num", text: "Balance" })])]), h("tbody", {}, rows)])]) : h("p", { class: "sub", text: "Nothing yet." })], "pp-wide"),
+        card([h("h2", { text: "Membership" }), h("div", { class: "fee-offer" }, [h("span", { class: "chip chip--yellow", text: m.inFreeYear ? "First year free" : "Member" }), h("p", { class: "fee-text", text: m.inFreeYear ? "Free until " + day(m.freeUntil) : "$" + m.fee + " a year" })]),
+          h("p", { class: "hint", text: "Membership renews automatically at $" + m.fee + " a year on your card on file, starting " + day(m.freeUntil) + ", until you close your account. We email you before each charge. Close your account in Account to stop it. See the Pro Agreement, section 5.5." })], "pp-wide"),
       ]);
     });
   }

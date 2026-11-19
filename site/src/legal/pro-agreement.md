@@ -12,7 +12,8 @@ This summary is here to help you read the agreement. It is not part of the agree
 - Purchases are final, except that a bad lead gets a credit or a refund under the Lead Credit Policy.
 - You must be verified, and keep your insurance current, to claim or buy leads.
 - You may use an owner's details only to contact that owner about that job.
-- A $300 annual membership fee exists and is waived for now. We will give you notice before it starts, and you can close your account first.
+- Membership is free for your first year. From the second year it renews automatically at $300 a year on your card on file, until you close your account. We email you before each charge.
+- Replying YES to a lead we text you is an order. The price comes out of your wallet, and if the wallet is short your card on file is charged a reload.
 - Disputes go to individual arbitration in Tennessee. You can opt out within 30 days.
 
 ### 1. This agreement
@@ -71,13 +72,21 @@ The person who accepts this Agreement confirms that they are at least 18 and hav
 
 **5.1 Lead prices.** The price of each lead is shown in the offer before you buy. Prices vary by trade, job and market and may change at any time for leads you have not yet bought.
 
-**5.2 Balance and card on file.** Leads are paid from your account balance. You add to your balance with a card, and you may turn on automatic reloads. You authorize us and our payment processor to charge your card on file for the amounts you choose and for any reload you turn on. A balance is not a bank deposit and earns no interest.
+**5.2 Wallet and card on file.** Leads are paid from your wallet. You add to your wallet with a card, and you may save that card on file. A wallet balance is not a bank deposit and earns no interest.
+
+**5.2.1 Claiming by text.** A lead offer we text you states the job and the price. Replying YES, or ONLY for an exclusive lead, is an order for that lead. The price is taken from your wallet. If your wallet does not cover it and you have a card on file, you authorize us to charge that card a reload, in the reload amount set in your wallet, and to take the price from the reloaded wallet. We text you a confirmation with the amount.
+
+**5.2.2 Claiming in your account.** If your wallet does not cover a lead, the claim button states the reload amount and the card before you press it. Pressing it authorizes that charge.
+
+**5.2.3 Automatic reload.** If you turn on automatic reload, you authorize us to charge your card on file the reload amount you chose whenever your wallet cannot cover the price of a lead, up to any monthly limit you set. You can change the amount, set a limit or turn it off at any time in your wallet. We email a receipt for every charge.
+
+**5.2.4 Invoices.** We email an invoice each month, as a PDF, listing every charge, lead and credit. Your invoices are also in your wallet.
 
 **5.3 Welcome credit.** A new pro account starts with $240 of welcome credit, which is enough for 3 shared leads at the standard price of $75. Welcome credit can be spent only on leads, only after you pass verification, and is spent before money you add. It has no cash value, cannot be withdrawn, transferred or refunded, and may be changed or ended for new accounts at any time. If a lead paid for with welcome credit qualifies under the Lead Credit Policy, the welcome credit is returned to your balance; it is not paid out.
 
 **5.4 All purchases are final** except as stated in the Lead Credit Policy in section 6.
 
-**5.5 Annual membership.** A pro account carries an annual membership fee of $300. We are currently waiving this fee, and you are not charged a membership fee while the waiver is in effect. We may end the waiver by giving account holders at least \[30\] days' notice by email or text. If you do not want to pay the fee, close your account before the date in that notice and you will not be charged. Once the waiver ends, the fee is charged to your card on file, covers 12 months, and renews each year until you close your account. \[Membership fees are not refundable once charged.\] The membership fee is separate from the price of leads.
+**5.5 Annual membership and automatic renewal.** A pro account carries an annual membership fee of $300. Membership is free for your first year, counted from the day you create your account. On the first anniversary of that day, and on each anniversary after it, the fee of $300 is charged automatically to your card on file and covers the next 12 months. It renews every year until you close your account. We will email you at least \[30\] days before each charge with the amount and the date. To avoid a charge, close your account before that date from the Account page or by contacting support; there is no fee to close. If the charge fails, we may pause your ability to claim leads until it is paid. \[Membership fees are not refundable once charged.\] The membership fee is separate from the price of leads and is not paid from welcome credit.
 
 **5.6 Taxes.** Prices do not include taxes. You are responsible for any taxes on what you buy, other than taxes on our income.
 

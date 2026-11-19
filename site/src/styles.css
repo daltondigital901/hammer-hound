@@ -353,7 +353,7 @@ legend + .option-grid { margin-top: 0; }
 .pp-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; align-items: end; padding: 14px 16px; margin-bottom: 16px; border-radius: var(--r); background: var(--white); box-shadow: var(--shadow); }
 .pp-filters .hint, .pp-filters .btn--text { grid-column: 1 / -1; justify-self: start; padding: 0; }
 /* Cards never get narrower than 300px, whatever the window or sidebar width */
-.pp-main .pp-grid { align-items: start; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); }
+.pp-main .pp-grid { align-items: stretch; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); }
 .pp-toggle, .pp-check { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; }
 .pp-toggle input, .pp-check input { flex: none; width: 22px; height: 22px; margin-top: 2px; accent-color: var(--asphalt); }
 .pp-toggle strong { display: block; } .pp-toggle small { display: block; font-size: 13px; color: var(--steel); }
@@ -370,6 +370,7 @@ legend + .option-grid { margin-top: 0; }
 .card.form.verify, .pp-main .card.form { display: grid; gap: 14px; }
 .pp-main .card.form h2 { font-size: 19px; }
 /* agreement at sign-up */
+.renewal-note { margin-top: 14px; padding: 12px 14px; border-left: 4px solid var(--asphalt); background: var(--yellow-tint); font-size: 14px; line-height: 1.5; border-radius: 0 8px 8px 0; }
 .agree-title { margin-top: 24px; }
 .agree-box { max-height: 260px; overflow-y: auto; margin-top: 8px; padding: 14px 16px; border: 2px solid var(--asphalt); border-radius: 10px; background: var(--concrete); font-size: 13px; line-height: 1.5; }
 .agree-box h2 { font-size: 15px; margin: 14px 0 6px; } .agree-box h2:first-child { margin-top: 0; }
@@ -590,3 +591,21 @@ legend + .option-grid { margin-top: 0; }
   .trust-grid { grid-template-columns: minmax(0, 1.400fr) minmax(0, 1fr); gap: 64px; align-items: center; }
 }
 @media (prefers-reduced-motion: reduce) { .promise:hover .promise-hound { transform: rotate(-4deg); } * { scroll-behavior: auto !important; transition: none !important; } }
+
+/* Lead cards are all the same size: two-line title, four-line summary, price and buttons pinned to the bottom. */
+.pp-grid .offer { display: flex; flex-direction: column; }
+.pp-grid .offer > * { min-width: 0; }
+.pp-grid .offer h3 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; min-height: 2.6em; }
+.pp-grid .lead-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; min-height: 6.2em; line-height: 1.55; }
+.pp-grid .lead-summary.is-open { display: block; }
+.lead-more { align-self: flex-start; margin-top: -6px; padding: 0; border: 0; background: none; font: 600 13px/1.2 inherit; font-family: inherit; color: var(--steel); text-decoration: underline; cursor: pointer; }
+.lead-more[hidden] { display: none; }
+.pp-grid .offer .offer-foot { margin-top: auto; display: grid; gap: 10px; }
+.pp-cardline { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px; background: var(--concrete); }
+.pp-table .num.is-in { color: var(--green); font-weight: 700; }
+.pp-main .card.form.pp-wide { margin-bottom: 16px; }
+/* On phones the two buttons stack; space for both is always reserved so every card is the same height. */
+@media (max-width: 639px) {
+  .pp-grid .offer-actions { display: grid; grid-template-columns: 1fr; align-content: start; min-height: 110px; }
+  .pp-grid .lead-facts dd { min-height: 2.9em; }
+}

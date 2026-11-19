@@ -147,3 +147,14 @@ Every lead is rewritten by the AI into one format before any pro sees it (`style
 - Every claim deducts from `Balance`. `Welcome Credit` is spent before paid funds, and each purchase records `Credit Used`.
 - `Free Leads Left` is no longer used. New accounts get 0.
 - The portal shows a toast on each claim and counts the header balance down. When the balance is below the lead price the toast and the Wallet ask for a top-up.
+
+## Wallet, reloads, text-to-claim and invoices
+
+- **Ledger** (`tblZ2EIWCgOb36JR2`): one row per movement of money (welcome credit, top-up, lead, credit back). The wallet page and invoices are built from it.
+- **Card on file.** `chargeCard()` in `src/worker.js` is the one place a card is charged. **It is a placeholder for Square.** Until `SQUARE_ACCESS_TOKEN` is set and the call is written, only a test account's "test card" charges (nothing real). Real accounts are told card payments are not on yet.
+- **Claim and reload.** If the wallet is short and a card is on file, the claim button reads "Claim lead · $75 · reloads $150" and does both. The API charges only when the request carries `reload: true` or the pro turned on auto-reload.
+- **Auto-reload** tops the wallet up after a claim leaves it below one lead's price. `Monthly Limit` caps card charges per calendar month.
+- **Text-to-claim.** `alertPros()` texts and emails verified pros whose market and trade match a newly opened lead (respecting pause, daily cap and quiet hours, Central time). A reply of YES or ONLY to `POST /api/sms/inbound` claims the last lead sent; the card on file covers a short wallet. Needs `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`, and the Twilio number's inbound webhook set to `https://hammerhound.com/api/sms/inbound`. Requests are checked against Twilio's signature.
+- **Credit back.** Set a purchase's `Review Status` to `Approved` in Airtable and the price returns to the wallet within a minute, with an email. `Credited` is ticked so it happens once.
+- **Invoices.** `src/pdf.js` writes a branded PDF with no libraries. On the 1st to 3rd of each month each pro with activity is emailed last month's invoice; a copy goes to R2 at `invoices/<pro>/<YYYY-MM>.pdf`. Pros can open any month from the wallet (`GET /api/pro/invoice?month=YYYY-MM`). `POST /api/admin/invoices` with `X-Admin-Key` runs it by hand; `{"dry":true}` lists without sending, `{"month":"2026-11"}` picks the month.
+- **Membership.** Free for the first year from `Created At`, then $300 a year. The wallet shows the date. The charge itself is not built: it needs Square.

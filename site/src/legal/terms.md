@@ -52,7 +52,7 @@ A Pro also accepts the Pro Agreement when creating an account. Where the Pro Agr
 
 **5.9 No guarantee.** We try to filter out bad requests, but we do not guarantee the accuracy of any lead, that the owner will answer, or that you will win the job.
 
-**5.10 Annual membership.** A Pro account carries an annual membership fee of $300. We are currently waiving this fee, and you are not charged a membership fee while the waiver is in effect. We may end the waiver by giving account holders at least \[30\] days' notice by email or text. If you do not want to pay the fee, close your account before the date in that notice and you will not be charged. Once the waiver ends, the fee is charged to your card on file, covers 12 months, and renews each year until you close your account. \[Membership fees are not refundable once charged.\] The membership fee is separate from the price of leads.
+**5.10 Annual membership and automatic renewal.** A pro account carries an annual membership fee of $300. Membership is free for your first year, counted from the day you create your account. On the first anniversary of that day, and on each anniversary after it, the fee of $300 is charged automatically to your card on file and covers the next 12 months. It renews every year until you close your account. We will email you at least \[30\] days before each charge with the amount and the date. To avoid a charge, close your account before that date from the Account page or by contacting support; there is no fee to close. If the charge fails, we may pause your ability to claim leads until it is paid. \[Membership fees are not refundable once charged.\] The membership fee is separate from the price of leads and is not paid from welcome credit.
 
 ### 6. Lead Credit Policy
 
