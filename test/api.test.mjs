@@ -1,6 +1,7 @@
 // Rule checks for the pro API. Run: node test/api.test.mjs
 import assert from "node:assert/strict";
-import { worker, env, db, seedForm, ingest, SITE_GBP, SITE_CLIENT } from "./dev-server.mjs";
+import { worker, env, db, seedForm, ingest, SITE_GBP, SITE_CLIENT, ai, stored, sent } from "./dev-server.mjs";
+import { decide } from "../src/worker.js";
 import { parseForm } from "../src/worker.js";
 
 const call = async (path, body, cookie) => {
@@ -8,12 +9,24 @@ const call = async (path, body, cookie) => {
   return { status: r.status, cookie: (r.headers.get("Set-Cookie") || "").split(";")[0], ...(await r.json()) };
 };
 const nextYear = new Date(Date.now() + 365 * 864e5).toISOString().slice(0, 10);
-const docs = (n, o = {}) => ({ legalName: "Test Pro " + n + " LLC", ein: "12-34567" + String(n).padStart(2, "0"), docType: "City or county business license", businessFile: "a.pdf", insuranceFile: "b.pdf", insuranceExpires: nextYear, ...o });
+// Builds the multipart upload. File text steers the stand-in AI: FAIL, UNSURE, EXPIRES yyyy-mm-dd, EIN 123456789.
+const docs = (n, o = {}) => {
+  const v = { legalName: "Test Pro " + n + " LLC", ein: "12-34567" + String(n).padStart(2, "0"), email: "pro" + n + "@example.com", docType: "City or county business license", insuranceExpires: nextYear, business: "license", insurance: "certificate EXPIRES " + nextYear, type: "application/pdf", ...o };
+  const f = new FormData();
+  for (const k of ["legalName", "ein", "email", "docType", "insuranceExpires"]) f.append(k, v[k]);
+  if (v.business !== null) f.append("businessFile", new Blob([v.business], { type: v.type }), "a.pdf");
+  if (v.insurance !== null) f.append("insuranceFile", new Blob([v.insurance], { type: "application/pdf" }), "b.pdf");
+  return f;
+};
+const send = async (form, cookie) => {
+  const r = await worker.fetch(new Request("http://x/api/pro/documents", { method: "POST", headers: { Cookie: cookie }, body: form }), env);
+  return { status: r.status, ...(await r.json()) };
+};
 const signUp = async (n) => {
   const phone = "90155501" + String(n).padStart(2, "0");
   assert.equal((await call("/api/pro/join", { business: "Test Pro " + n, phone, trade: "roofing", zip: "38103" })).next, "code");
   const v = await call("/api/pro/verify-code", { phone, code: "424242" }); assert.equal(v.status, 200);
-  assert.equal((await call("/api/pro/documents", docs(n), v.cookie)).pro.verified, true);
+  assert.equal((await send(docs(n), v.cookie)).pro.verified, true);
   return v.cookie;
 };
 
@@ -50,15 +63,39 @@ assert.equal(browse.status, 200); assert.equal(browse.canBuy, false); assert.ok(
 assert.ok(!JSON.stringify(browse.offers).match(/owner|Phone|example\.com/i), "browsing shows no owner details");
 assert.equal((await call("/api/pro/buy", { leadId: browse.offers[0].id, kind: "shared" }, u.cookie)).status, 403, "cannot claim before verification");
 // verification rules: EIN, document type, expiry, one account per EIN
-assert.equal((await call("/api/pro/documents", docs(50, { ein: "123-45-678" }), u.cookie)).status, 400, "8 digits is not an EIN");
-assert.equal((await call("/api/pro/documents", docs(50, { ein: "111111111" }), u.cookie)).status, 400);
-assert.equal((await call("/api/pro/documents", docs(50, { docType: "Business card" }), u.cookie)).status, 400, "document type must be on the list");
-assert.equal((await call("/api/pro/documents", docs(50, { insuranceExpires: "2020-01-01" }), u.cookie)).status, 400, "expired insurance refused");
-assert.equal((await call("/api/pro/documents", docs(50, { legalName: "" }), u.cookie)).status, 400);
-assert.equal((await call("/api/pro/documents", docs(1), u.cookie)).status, 409, "one account per EIN");
-const uv = await call("/api/pro/documents", docs(50), u.cookie);
+assert.equal((await send(docs(50, { ein: "123-45-678" }), u.cookie)).status, 400, "8 digits is not an EIN");
+assert.equal((await send(docs(50, { ein: "111111111" }), u.cookie)).status, 400);
+assert.equal((await send(docs(50, { docType: "Business card" }), u.cookie)).status, 400, "document type must be on the list");
+assert.equal((await send(docs(50, { insuranceExpires: "2020-01-01" }), u.cookie)).status, 400, "expired insurance refused");
+assert.equal((await send(docs(50, { legalName: "" }), u.cookie)).status, 400);
+assert.equal((await send(docs(1), u.cookie)).status, 409, "one account per EIN");
+const uv = await send(docs(50), u.cookie);
 assert.equal(uv.pro.verified, true); assert.equal(uv.pro.einLast4, "6750"); assert.ok(!JSON.stringify(uv).includes("123456750"), "full EIN never returned");
 assert.equal((await call("/api/pro/offers", null, u.cookie)).canBuy, true);
+assert.ok([...stored.keys()].some((k) => k.endsWith("-business.pdf")) && [...stored.keys()].some((k) => k.endsWith("-insurance.pdf")), "both files are kept");
+assert.equal(ai.last.headers["anthropic-version"], "2026-10-21"); assert.equal(ai.last.body.model, "claude-sonnet-5-5"); assert.equal(ai.last.body.tool_choice.name, "report");
+// the AI check: fail, unsure, expired, EIN mismatch, AI down, daily limit, review request
+const v2 = async (n) => { const phone = "90155501" + n; await call("/api/pro/join", { business: "Check " + n, phone }); return (await call("/api/pro/verify-code", { phone, code: "424242" })).cookie; };
+const c1 = await v2(60), before = sent.length;
+assert.equal((await send(docs(60, { type: "text/plain" }), c1)).status, 400, "file type refused");
+assert.equal((await send(docs(60, { email: "nope" }), c1)).status, 400, "email required");
+assert.equal((await send(docs(60, { insurance: null }), c1)).status, 400, "both files required");
+const failed = await send(docs(60, { business: "FAIL" }), c1);
+assert.equal(failed.pro.verification, "Declined"); assert.equal(failed.pro.verified, false); assert.match(failed.pro.verificationReason, /wrong kind/); assert.equal(failed.pro.checksLeft, 2);
+assert.equal(sent.length, before + 1); assert.equal(sent.at(-1).to, "pro60@example.com"); assert.equal(sent.at(-1).from.email, "support@hammerhound.com"); assert.match(sent.at(-1).text, /wrong kind/);
+assert.equal((await call("/api/pro/buy", { leadId: browse.offers[0].id, kind: "shared" }, c1)).status, 403, "a failed check cannot buy");
+const rev = await call("/api/pro/review", {}, c1); assert.equal(rev.pro.verification, "In review"); assert.equal((await call("/api/pro/review", {}, c1)).status, 409);
+const expired = await send(docs(60, { insurance: "certificate EXPIRES 2021-03-01" }), c1); assert.equal(expired.pro.verification, "Declined"); assert.match(expired.pro.verificationReason, /expired/);
+const passed = await send(docs(60), c1); assert.equal(passed.pro.verified, true); assert.equal(passed.pro.insuranceExpires, nextYear);
+assert.equal((await send(docs(60), c1)).status, 429, "three checks a day");
+const c2 = await v2(61);
+const unsure = await send(docs(61, { insurance: "UNSURE EXPIRES " + nextYear }), c2); assert.equal(unsure.pro.verification, "In review"); assert.match(sent.at(-1).subject, /closer look/);
+const wrongEin = await send(docs(61, { business: "license EIN 999999999" }), c2); assert.equal(wrongEin.pro.verification, "Declined"); assert.match(wrongEin.pro.verificationReason, /EIN/);
+ai.down = true; const down = await send(docs(61), c2); ai.down = false;
+assert.equal(down.pro.verification, "In review", "an AI outage sends the documents to a person, never auto-passes");
+// the decision never passes insurance without a readable future expiry date
+assert.equal(decide({ business: { result: "pass" }, insurance: { result: "pass", expires: "" } }, { ein: "123456789" }).status, "In review");
+assert.equal(decide({ business: { result: "pass" }, insurance: { result: "pass", expires: "2020-01-01" } }, { ein: "123456789" }).status, "Declined");
 // insurance expiry ends verification
 db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === unverifiedPhone).fields["Insurance Expires"] = "2020-01-01";
 const lapsed = await call("/api/pro/me", null, u.cookie); assert.equal(lapsed.pro.verified, false); assert.equal(lapsed.pro.verification, "Insurance expired");

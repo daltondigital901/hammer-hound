@@ -20,7 +20,7 @@ This policy explains what Dalton Enterprises LLC ("Hammer Hound", "we") collects
 | Contact details | Name, mobile number, email, job or business address | You |
 | Request details | Trade, job description, size, budget, timing, property type | You, and your confirmation call |
 | Call and message records | Recordings and transcripts of calls with our AI assistant, text messages with us, call times and outcomes | Your calls and texts with us |
-| Pro business records | Business name, legal business name, Employer Identification Number (EIN), trades, service area, proof-of-business documents, insurance certificates and their expiry date | The Pro |
+| Pro business records | Business name, legal business name, email address, Employer Identification Number (EIN), trades, service area, proof-of-business documents, insurance certificates and their expiry date | The Pro |
 | Payment details | Card type and last four digits, charges, balance history. Full card numbers are held by our payment processor, not by us. | The Pro, our payment processor |
 | Device and usage | IP address, browser, pages viewed, approximate location, cookies | Your device |
 | Support records | Chat messages, tickets, dispute decisions | You |
@@ -42,7 +42,7 @@ We use automated tools, including AI, to make the confirmation call, transcribe 
 
 - **Pros.** The Pros who take a property owner's request receive that owner's contact and job details. Pros pay us for this introduction. They may use the information only to contact the owner about that request. \[Some state laws may treat this as a "sale" of personal information. You can opt out by not submitting a request, by stopping further calls from your status page, or by contacting us.\]
 - **Property owners.** A property owner sees the business name of each Pro who accepted their request.
-- **Service providers.** Companies that work for us under contract: telephone and text carriers, voice AI and transcription, payment processing, hosting, database, email, analytics and advertising measurement.
+- **Service providers.** Companies that work for us under contract: telephone and text carriers, voice AI and transcription, AI document review, payment processing, hosting, database, email, analytics and advertising measurement.
 - **Legal and safety.** When required by law or needed to protect rights, safety or the Service.
 - **Business transfers.** If the business is sold or merged, records may transfer to the new owner under this policy.
 

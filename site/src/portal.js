@@ -5,6 +5,13 @@
   if (!root) return;
   var pro = null, tab = "offers";
   var DOC_TYPES = ["State contractor license", "City or county business license", "Secretary of State registration", "IRS EIN letter (CP 575 or 147C)", "DBA or assumed-name certificate", "State tax registration certificate"];
+  var BANNER = {
+    "Not started": ["Verify your business to unlock your Verified Pro badge and 3 free leads.", "You can look at every lead in your market now. Claiming and buying unlock when you are verified.", "Get verified"],
+    "Pending": ["We are checking your documents.", "You can look at leads now. Claiming unlocks as soon as both documents pass.", "See status"],
+    "In review": ["A person is taking a closer look at your documents.", "We will email you the result. You can look at leads while you wait.", "See status"],
+    "Declined": ["Your documents did not pass yet.", "Send a clearer or different document to unlock your Verified Pro badge and 3 free leads.", "Fix it now"],
+    "Insurance expired": ["Your insurance on file has expired.", "Upload a current certificate to get your badge back and keep buying leads.", "Update insurance"],
+  };
   var store = { get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
   var h = function (tag, attrs, kids) {
     var el = document.createElement(tag);
@@ -21,6 +28,11 @@
     return fetch(path, { method: body ? "POST" : "GET", credentials: "same-origin", headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { j.status = r.status; return j; }); })
       .catch(function () { return { status: 0, error: "The portal could not reach the server. It only works on the live site." }; });
+  }
+  function upload(path, form) {
+    return fetch(path, { method: "POST", credentials: "same-origin", body: form })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { j.status = r.status; return j; }); })
+      .catch(function () { return { status: 0, error: "The upload did not reach the server. Check your connection and try again." }; });
   }
   function note(text, kind) { return h("p", { class: "form-status" + (kind ? " is-" + kind : ""), role: "status", text: text }); }
   function setHeader() {
@@ -39,42 +51,92 @@
       })));
       if (!pro.verified && tab !== "verify") root.appendChild(h("div", { class: "unlock" }, [
         h("img", { src: "/assets/img/badge.png", alt: "", width: "50", height: "60" }),
-        h("div", {}, [h("strong", { text: pro.verification === "Pending" ? "We are checking your documents." : pro.verification === "Insurance expired" ? "Your insurance on file has expired." : "Verify your business to unlock your Verified Pro badge and 3 free leads." }),
-          h("span", { text: pro.verification === "Pending" ? "You can look at leads now. Claiming unlocks as soon as both documents pass." : pro.verification === "Insurance expired" ? "Upload a current certificate to get your badge back and keep buying leads." : "You can look at every lead in your market now. Claiming and buying unlock when you are verified." })]),
-        h("button", { class: "btn btn--black", type: "button", text: pro.verification === "Pending" ? "Send new documents" : pro.verification === "Insurance expired" ? "Update insurance" : "Get verified", on: { click: function () { tab = "verify"; render(); } } }),
+        h("div", {}, [h("strong", { text: BANNER[pro.verification] ? BANNER[pro.verification][0] : BANNER["Not started"][0] }), h("span", { text: BANNER[pro.verification] ? BANNER[pro.verification][1] : BANNER["Not started"][1] })]),
+        h("button", { class: "btn btn--black", type: "button", text: BANNER[pro.verification] ? BANNER[pro.verification][2] : "Get verified", on: { click: function () { tab = "verify"; render(); } } }),
       ]));
     }
     content.forEach(function (c) { root.appendChild(c); });
     setHeader();
   }
 
+  var STEPS = ["Checking your proof of business", "Matching your business name and EIN", "Reading your insurance certificate", "Measuring twice", "Stamping your badge"];
+  function checkingView(slow) {
+    var line = h("p", { class: "checking-line", role: "status", text: STEPS[0] }), n = 0;
+    var timer = setInterval(function () { if (!line.isConnected) return clearInterval(timer); n = Math.min(n + 1, STEPS.length - 1); line.textContent = STEPS[n]; }, 4000);
+    shell([h("div", { class: "card form checking" }, [
+      h("div", { class: "checking-hound" }, [h("img", { src: "/assets/img/badge-large.png", alt: "", width: "150", height: "181" }), h("span", { class: "checking-spark" })]),
+      h("h1", { text: slow ? "This one is taking longer" : "Checking your documents" }),
+      slow ? h("p", { class: "sub", text: "We are still on it. We will email you the result, and you can look at leads while you wait." }) : line,
+      h("div", { class: "checking-bar", role: "progressbar", "aria-label": "Checking your documents" }),
+      slow ? h("button", { class: "btn btn--black btn--block", type: "button", text: "See leads in my market", on: { click: function () { tab = "offers"; render(); } } }) : h("p", { class: "hint hint--center", text: "This usually takes under a minute. Keep this page open." }),
+    ])]);
+  }
+  function resultView() {
+    var status = h("div"), again = function () { resubmit = true; render(); };
+    if (pro.verification === "Declined") return shell([h("div", { class: "card form result" }, [
+      h("p", { class: "chips" }, [h("span", { class: "chip chip--orange", text: "Not verified yet" })]),
+      h("h1", { text: "Your documents did not pass" }),
+      h("p", { class: "result-reason", text: pro.verificationReason || "We could not verify your business from the documents you sent." }),
+      h("p", { class: "sub", text: "We emailed this to " + (pro.email || "you") + " as well. Pick how you want to fix it:" }),
+      pro.checksLeft > 0 ? h("button", { class: "btn btn--yellow btn--block btn--lg", type: "button", text: "Send different documents", on: { click: again } }) : h("p", { class: "hint", text: "You have used today's 3 checks. You can send new documents tomorrow, or ask for a person now." }),
+      h("button", { class: "btn btn--outline btn--block", type: "button", text: "Ask for a person to review it", on: { click: function () {
+        call("/api/pro/review", {}).then(function (r) { if (r.error) { status.innerHTML = ""; status.appendChild(note(r.error, "bad")); return; } pro = r.pro; render(); });
+      } } }),
+      h("a", { class: "btn btn--text btn--block", href: "/contact/", text: "Open a support ticket" }),
+      status,
+    ])]);
+    shell([h("div", { class: "card form result" }, [
+      h("p", { class: "chips" }, [h("span", { class: "chip chip--yellow", text: "In review" })]),
+      h("h1", { text: "We are taking a closer look" }),
+      h("p", { class: "sub", text: "Our automated check could not make a clear call, so a person is going to look at your documents. We will email " + (pro.email || "you") + " with the result. You do not need to do anything." }),
+      pro.verificationReason ? h("p", { class: "result-reason", text: pro.verificationReason }) : null,
+      h("button", { class: "btn btn--black btn--block", type: "button", text: "See leads in my market", on: { click: function () { tab = "offers"; render(); } } }),
+      pro.checksLeft > 0 ? h("button", { class: "btn btn--text btn--block", type: "button", text: "Send clearer documents instead", on: { click: again } }) : null,
+    ])]);
+  }
+  function passedView() {
+    justPassed = false;
+    shell([h("div", { class: "card form passed" }, [
+      h("img", { class: "passed-badge", src: "/assets/img/badge-large.png", alt: "", width: "170", height: "205" }),
+      h("p", { class: "vbadge-title", text: "Verified Pro" }),
+      h("h1", { text: "You are a Verified Pro." }),
+      h("p", { class: "sub", text: "Your 3 free leads are ready. Pick any three and call the owner." }),
+      h("button", { class: "btn btn--yellow btn--block btn--lg", type: "button", text: "Claim my free leads", on: { click: function () { tab = "offers"; render(); } } }),
+    ])]);
+  }
+  var resubmit = false, justPassed = false;
+
   function verifyView() {
+    if (justPassed) return passedView();
+    if ((pro.verification === "Declined" || pro.verification === "In review") && !resubmit) return resultView();
     var status = h("div");
     var field = function (id, label, input, hint) { return h("div", { class: "vfield" }, [h("label", { class: "label", for: id, text: label }), input, hint ? h("p", { class: "hint", text: hint }) : null]); };
-    var file = function (id) { return h("input", { class: "input", id: id, type: "file", accept: ".pdf,image/*", required: "" }); };
+    var file = function (id) { return h("input", { class: "input", id: id, type: "file", accept: ".pdf,image/jpeg,image/png,image/webp", required: "" }); };
     var ein = h("input", { class: "input", id: "v-ein", type: "text", inputmode: "numeric", autocomplete: "off", placeholder: "12-3456789", maxlength: "10", required: "" });
     ein.addEventListener("input", function () { var d = ein.value.replace(/\D/g, "").slice(0, 9); ein.value = d.length > 2 ? d.slice(0, 2) + "-" + d.slice(2) : d; });
+    var email = h("input", { class: "input", id: "v-email", type: "email", autocomplete: "email", required: "", value: pro.email || "" });
     var legal = h("input", { class: "input", id: "v-legal", type: "text", autocomplete: "organization", required: "", value: pro.legalName || "" });
     var type = h("select", { class: "input", id: "v-type", required: "" }, [h("option", { value: "", text: "Choose a document" })].concat(DOC_TYPES.map(function (t) { return h("option", { value: t, text: t }); })));
     var bFile = file("doc-business"), iFile = file("doc-insurance");
     var expires = h("input", { class: "input", id: "v-expires", type: "date", required: "", min: new Date().toISOString().slice(0, 10) });
     var s1 = h("li", { text: "1. Your business" }), s2 = h("li", { text: "2. Your insurance" });
     var progress = function () { s1.className = legal.value.trim() && ein.value.length === 10 && type.value && bFile.files[0] ? "is-done" : ""; s2.className = iFile.files[0] && expires.value ? "is-done" : ""; };
-    var title = pro.verification === "Pending" ? "We are checking your documents" : pro.verification === "Insurance expired" ? "Update your insurance" : "Get verified";
+    var title = pro.verification === "Insurance expired" ? "Update your insurance" : resubmit ? "Send new documents" : "Get verified";
     var form = h("form", { class: "card form verify" }, [
       h("div", { class: "verify-hero" }, [h("img", { src: "/assets/img/badge-large.png", alt: "", width: "106", height: "128" }), h("div", {}, [
         h("h1", { text: title }),
-        h("p", { class: "sub", text: pro.verification === "Pending" ? "Your badge and free leads unlock as soon as both documents pass. You can send new ones below." : "Two steps unlock your Verified Pro badge and your 3 free leads." }),
+        h("p", { class: "sub", text: "Two steps unlock your Verified Pro badge and your 3 free leads. We check your documents while you wait." }),
       ])]),
       h("ul", { class: "verify-unlocks" }, [h("li", { text: "Verified Pro badge" }), h("li", { text: "3 free leads" }), h("li", { text: "Claim and buy leads" })]),
       h("ol", { class: "verify-steps" }, [s1, s2]),
       h("h2", { text: "Your business" }),
       field("v-legal", "Legal business name", legal, "The name on your EIN and your documents."),
       field("v-ein", "EIN", ein, "Your 9-digit federal tax ID. One account per EIN. We never accept a Social Security number."),
+      field("v-email", "Email", email, "We send your result here."),
       field("v-type", "Proof of business", type),
-      field("doc-business", "Upload that document", bFile, "PDF or photo. It must show your business name."),
+      field("doc-business", "Upload that document", bFile, "PDF, JPG or PNG up to 5 MB. It must show your business name."),
       h("h2", { text: "Your insurance" }),
-      field("doc-insurance", "Certificate of insurance", iFile, "PDF or photo showing general liability cover."),
+      field("doc-insurance", "Certificate of insurance", iFile, "PDF, JPG or PNG up to 5 MB, showing general liability cover."),
       field("v-expires", "Insurance expiry date", expires, "Your badge stays active until this date."),
       status,
       h("button", { class: "btn btn--yellow btn--block btn--lg", type: "submit", text: "Verify my business" }),
@@ -87,9 +149,20 @@
       var b = bFile.files[0], i = iFile.files[0];
       var bad = function (t) { status.innerHTML = ""; status.appendChild(note(t, "bad")); };
       if (!b || !i) return bad("Choose both documents.");
-      call("/api/pro/documents", { legalName: legal.value, ein: ein.value, docType: type.value, businessFile: b.name, insuranceFile: i.name, insuranceExpires: expires.value }).then(function (r) {
-        if (r.error) return bad(r.error);
-        pro = r.pro; tab = pro.verified ? "account" : "offers"; render();
+      var data = new FormData();
+      data.append("legalName", legal.value); data.append("ein", ein.value); data.append("email", email.value); data.append("docType", type.value);
+      data.append("insuranceExpires", expires.value); data.append("businessFile", b); data.append("insuranceFile", i);
+      var done = false, started = Date.now();
+      checkingView(false);
+      var slow = setTimeout(function () { if (!done && tab === "verify") checkingView(true); }, 30000);
+      upload("/api/pro/documents", data).then(function (r) {
+        // Hold the screen a moment so a fast answer does not flash past.
+        setTimeout(function () {
+          done = true; clearTimeout(slow);
+          if (r.error) { if (tab === "verify") { shell([form]); bad(r.error); } return; }
+          pro = r.pro; resubmit = false; justPassed = pro.verified;
+          if (tab === "verify" || pro.verified) { tab = "verify"; render(); } else setHeader();
+        }, Math.max(0, 2500 - (Date.now() - started)));
       });
     });
     shell([form]);
@@ -172,7 +245,7 @@
   }
 
   function render() {
-    if (pro.verified && tab === "verify") tab = "offers";
+    if (pro.verified && tab === "verify" && !justPassed) tab = "offers";
     if (!pro.verified && tab === "leads") tab = "offers";
     if (tab === "verify") return verifyView();
     if (tab === "leads") return leadsView();

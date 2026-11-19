@@ -7,5 +7,8 @@ if (missing.length) {
   console.error("Missing or empty repository secret(s): " + missing.join(", "));
   process.exit(1);
 }
-writeFileSync("secrets.json", JSON.stringify(Object.fromEntries(names.map((n) => [n, process.env[n]]))));
-console.log("Wrote " + names.length + " secrets.");
+// Optional: set when present, skipped when not.
+const optional = ["ANTHROPIC_API_KEY"].filter((n) => process.env[n]);
+const all = [...names, ...optional];
+writeFileSync("secrets.json", JSON.stringify(Object.fromEntries(all.map((n) => [n, process.env[n]]))));
+console.log("Wrote " + all.length + " secrets." + (optional.length ? "" : " ANTHROPIC_API_KEY is not set, so documents will wait for a person."));

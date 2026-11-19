@@ -94,4 +94,8 @@ the pricing engine, the owner request form's endpoint, and bad-lead scoring.
 - **Browse before verifying.** Any signed-in pro can see open leads and prices. Owner details are never in an offer. Only a verified pro can claim, buy or get offers by text.
 - **To verify:** legal business name, EIN (9 digits, one account per EIN, never a Social Security number), one proof of business from the accepted list in `DOC_TYPES` (`src/worker.js`), a certificate of insurance and its expiry date.
 - **Verified Pro badge** shows on the account page and lapses on the insurance expiry date.
-- **Not built yet:** document storage, the AI document check, failure emails, the public "what Verified means" page and the downloadable badge. Test accounts pass at once; any other account waits as Pending.
+- **Document check.** `POST /api/pro/documents` (multipart) stores both files in the private R2 bucket `hammer-hound-docs` (binding `DOCS`), then sends them to the AI model in `AI_MODEL` (default `claude-sonnet-5-5`). `decide()` in `src/worker.js` re-checks dates and the EIN in code. Results: `Verified`, `Declined` (clear problem), `In review` (unsure, or the AI could not be reached). An AI outage never passes anyone.
+- **Limits.** PDF, JPG, PNG or WebP, 5 MB each, 3 checks a day per account.
+- **Emails.** `Declined` and `In review` send an email from `support@hammerhound.com` through the `EMAIL` binding (Cloudflare Email Sending). A failed email is logged and never blocks the check.
+- **Review queue.** In the Pros table, filter `Verification` = `In review`. `Verification Detail` holds what the AI read. Set `Verification` to `Verified` (and `Verified At`) or `Declined` by hand.
+- **Not built yet:** the public "what Verified means" page, the downloadable badge, expiry reminder emails.
