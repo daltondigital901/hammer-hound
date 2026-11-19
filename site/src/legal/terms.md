@@ -50,6 +50,8 @@ You must be at least 18 and able to enter a binding contract. Information you gi
 
 **5.9 No guarantee.** We try to filter out bad requests, but we do not guarantee the accuracy of any lead, that the owner will answer, or that you will win the job.
 
+**5.10 Annual membership.** A Pro account carries an annual membership fee of $300. We are currently waiving this fee, and you are not charged a membership fee while the waiver is in effect. We may end the waiver by giving account holders at least \[30\] days' notice by email or text. If you do not want to pay the fee, close your account before the date in that notice and you will not be charged. Once the waiver ends, the fee is charged to your card on file, covers 12 months, and renews each year until you close your account. \[Membership fees are not refundable once charged.\] The membership fee is separate from the price of leads.
+
 ### 6. Lead Credit Policy
 
 **6.1 What qualifies.** You may ask for a credit if a lead you paid for had a wrong or disconnected phone number, was a duplicate of a lead you already bought from us, was not a real request for service, or was outside the trades or service area in your account when you bought it.
