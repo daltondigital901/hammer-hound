@@ -1,4 +1,5 @@
 site/dist/
+site/dist-preview/
 node_modules/
 .wrangler/
 .DS_Store

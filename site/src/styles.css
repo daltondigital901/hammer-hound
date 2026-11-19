@@ -1,9 +1,9 @@
 /* Hammer Hound. Mobile first; desktop rules live in the min-width blocks. */
-@font-face { font-family: Archivo; font-weight: 400; font-display: swap; src: url(/assets/fonts/archivo-latin-400-normal.woff2) format("woff2"); }
-@font-face { font-family: Archivo; font-weight: 500; font-display: swap; src: url(/assets/fonts/archivo-latin-500-normal.woff2) format("woff2"); }
-@font-face { font-family: Archivo; font-weight: 600; font-display: swap; src: url(/assets/fonts/archivo-latin-600-normal.woff2) format("woff2"); }
-@font-face { font-family: Archivo; font-weight: 700; font-display: swap; src: url(/assets/fonts/archivo-latin-700-normal.woff2) format("woff2"); }
-@font-face { font-family: Archivo; font-weight: 800; font-display: swap; src: url(/assets/fonts/archivo-latin-800-normal.woff2) format("woff2"); }
+@font-face { font-family: Archivo; font-weight: 400; font-display: swap; src: url(fonts/archivo-latin-400-normal.woff2) format("woff2"); }
+@font-face { font-family: Archivo; font-weight: 500; font-display: swap; src: url(fonts/archivo-latin-500-normal.woff2) format("woff2"); }
+@font-face { font-family: Archivo; font-weight: 600; font-display: swap; src: url(fonts/archivo-latin-600-normal.woff2) format("woff2"); }
+@font-face { font-family: Archivo; font-weight: 700; font-display: swap; src: url(fonts/archivo-latin-700-normal.woff2) format("woff2"); }
+@font-face { font-family: Archivo; font-weight: 800; font-display: swap; src: url(fonts/archivo-latin-800-normal.woff2) format("woff2"); }
 
 :root {
   --white: #FFFFFF; --concrete: #F0F1F2; --concrete-2: #E2E4E7; --line: #D3D7DB;

@@ -1,7 +1,10 @@
 // Hammer Hound site behaviour. No dependencies.
 (function () {
   "use strict";
+  function init() {
   var HH = window.HH || { endpoints: {} };
+  // The preview build routes inside one page, so it supplies the address itself.
+  var LOC = window.HH_ROUTE || location;
   var NOT_OPEN = "Hammer Hound is not open yet, so nothing was sent. Check back soon.";
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $$ = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
@@ -64,7 +67,7 @@
       if (bad) { status(st, "Check your " + fieldName(bad) + ".", "bad"); bad.focus(); return; }
       var data = {};
       new FormData(form).forEach(function (v, k) { data[k] = v; });
-      data.page = location.pathname;
+      data.page = LOC.pathname;
       send(form.getAttribute("data-form"), data, st, $("button[type=submit]", form), OK[form.getAttribute("data-form")]);
     });
   });
@@ -175,7 +178,7 @@
       var p = problem();
       if (p) { status(st, p, "bad"); return; }
       if (step < 4) { step++; show(); save(); window.scrollTo(0, 0); return; }
-      var data = { trade: val("trade"), type: typeVal, pros: Number(val("pros")), consent: true, consentText: $(".consent span", form).textContent.trim(), submittedAt: new Date().toISOString(), page: location.href };
+      var data = { trade: val("trade"), type: typeVal, pros: Number(val("pros")), consent: true, consentText: $(".consent span", form).textContent.trim(), submittedAt: new Date().toISOString(), page: LOC.href };
       ["property", "size", "budget", "timing"].forEach(function (n) { data[n] = val(n); });
       ["details", "address", "zip", "name", "phone"].forEach(function (n) { data[n] = text(n); });
       send("request", data, st, next, "Request sent. Keep your phone close: we will call to confirm.").then(function (ok) {
@@ -198,7 +201,7 @@
         typeVal = saved.type || ""; step = Math.min(Math.max(Number(saved.step) || 1, 1), 4);
       }
     } catch (e) { /* start fresh */ }
-    var qs = new URLSearchParams(location.search);
+    var qs = new URLSearchParams(LOC.search);
     if (qs.get("trade")) {
       var qt = qs.get("trade");
       if (qt !== "other" && TR[qt] && !$('input[name="trade"][value="' + qt + '"]', form)) {
@@ -214,4 +217,7 @@
     if (qs.get("zip") && validZip(qs.get("zip"))) form.elements.zip.value = qs.get("zip");
     renderTypes(); show();
   }
+  }
+  window.HHInit = init;
+  if (!window.HH_PREVIEW) init();
 })();
