@@ -1,0 +1,41 @@
+# Builds the site and deploys the "hammer-hound" Worker to Cloudflare on every push to main.
+# Also copies the Worker's secrets from GitHub repository secrets, so GitHub is the one place they are kept.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build site
+        run: npm run build
+      - name: API rule checks
+        run: node test/api.test.mjs
+      - name: Deploy Worker and secrets
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy
+          secrets: |
+            AIRTABLE_TOKEN
+            SESSION_SECRET
+            TEST_CODE
+            ADMIN_KEY
+        env:
+          AIRTABLE_TOKEN: ${{ secrets.AIRTABLE_TOKEN }}
+          SESSION_SECRET: ${{ secrets.SESSION_SECRET }}
+          TEST_CODE: ${{ secrets.TEST_CODE }}
+          ADMIN_KEY: ${{ secrets.ADMIN_KEY }}
