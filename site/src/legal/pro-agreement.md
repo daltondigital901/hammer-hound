@@ -84,7 +84,7 @@ The person who accepts this Agreement confirms that they are at least 18 and hav
 
 **5.2.5 Invoices.** We email an invoice each month, as a PDF, listing every charge, lead and credit. Your invoices are also in your wallet.
 
-**5.3 Welcome credit.** A new pro account starts with $240 of welcome credit, which is enough for 3 shared leads at the standard price of $75. Welcome credit can be spent only on leads, only after you pass verification, and is spent before money you add. It has no cash value, cannot be withdrawn, transferred or refunded, and may be changed or ended for new accounts at any time. If a lead paid for with welcome credit qualifies under the Lead Credit Policy, the welcome credit is returned to your balance; it is not paid out.
+**5.3 Welcome credit.** A new pro account starts with $240 of welcome credit, which is enough for 3 shared leads at the standard price of $75. Welcome credit can be spent only on leads that are still in their first 72 hours, only after you pass verification, and is spent before money you add. Older leads, which are offered at a lower price, are shown only to pros with a card on file and are paid for with money you add, not with welcome credit. It has no cash value, cannot be withdrawn, transferred or refunded, and may be changed or ended for new accounts at any time. If a lead paid for with welcome credit qualifies under the Lead Credit Policy, the welcome credit is returned to your balance; it is not paid out.
 
 **5.4 All purchases are final** except as stated in the Lead Credit Policy in section 6.
 

@@ -520,18 +520,21 @@ async function purchase(env, pro, { leadId, kind, reload = false, via = "Portal"
   if (bought.length >= lead.fields["Max Pros"]) return no(410, "All spots on this lead are taken.");
 
   // Every lead comes out of the wallet. Free welcome credit is spent before paid funds.
-  const price = priceOf(env, lead, kind);
+  // Welcome credit is for hot leads only. Older, marked-down leads need a card on file and are paid with the pro's own funds.
+  const price = priceOf(env, lead, kind), hot = isHot(lead);
+  if (!hot && !pro.fields.Card) return no(403, "Add a card to your wallet to claim older leads.", { needsCard: true });
   let balance = pro.fields.Balance || 0, reloaded = 0;
-  if (price > balance) {
-    const unit = reloadUnit(pro.fields), need = Math.ceil((price - balance) / unit) * unit, card = pro.fields.Card || "";
-    const short = `This lead is ${usd2(price)} and your wallet has ${usd2(balance)}.`;
-    if (!card) return no(402, `${short} Add a card to claim it.`, { short: cents(price - balance), card: "", reloadAmount: need });
-    if (!reload && !pro.fields["Auto Reload"]) return no(402, `${short} Reload ${usd2(need)} on ${card} to claim it.`, { short: cents(price - balance), card, reloadAmount: need });
+  const own = (f) => hot ? f.Balance || 0 : cents((f.Balance || 0) - Math.min(f["Welcome Credit"] || 0, f.Balance || 0));
+  if (price > own(pro.fields)) {
+    const have = own(pro.fields), unit = reloadUnit(pro.fields), need = Math.ceil((price - have) / unit) * unit, card = pro.fields.Card || "";
+    const short = hot ? `This lead is ${usd2(price)} and your wallet has ${usd2(have)}.` : `This lead is ${usd2(price)} and you have ${usd2(have)} of your own funds. Welcome credit is for hot leads only.`;
+    if (!card) return no(402, `${short} Add a card to claim it.`, { short: cents(price - have), card: "", reloadAmount: need });
+    if (!reload && !pro.fields["Auto Reload"]) return no(402, `${short} Reload ${usd2(need)} on ${card} to claim it.`, { short: cents(price - have), card, reloadAmount: need });
     const t = await topUp(env, pro, need, via === "Text" ? "Text" : reload ? via : "Auto-reload", { leadId, kind, replying: via === "Text" });
-    if (!t.ok) return no(402, t.declined ? `${card} was declined, so this lead is not yours yet. Update your card and we will reload and claim it for you.` : `${short} ${t.error}`, { short: cents(price - balance), card, reloadAmount: need, declined: !!t.declined, link: t.link });
+    if (!t.ok) return no(402, t.declined ? `${card} was declined, so this lead is not yours yet. Update your card and we will reload and claim it for you.` : `${short} ${t.error}`, { short: cents(price - have), card, reloadAmount: need, declined: !!t.declined, link: t.link });
     pro = t.pro; balance = pro.fields.Balance || 0; reloaded = need;
   }
-  const credit = Math.min(pro.fields["Welcome Credit"] || 0, balance), creditUsed = Math.min(credit, price), after = cents(balance - price), creditAfter = cents(credit - creditUsed);
+  const credit = Math.min(pro.fields["Welcome Credit"] || 0, balance), creditUsed = hot ? Math.min(credit, price) : 0, after = cents(balance - price), creditAfter = cents(credit - creditUsed);
   const made = await create(env, HH.purchases, { Purchase: `${leadId}:${pro.id}`, Lead: [leadId], Pro: [pro.id], Kind: kind === "exclusive" ? "Exclusive" : "Shared", Price: price, "Credit Used": creditUsed, "Bought At": new Date().toISOString(), Test: !!pro.fields.Test || !!lead.fields.Test, "Review Status": "None" });
   let saved = await update(env, HH.pros, pro.id, { Balance: after, "Welcome Credit": creditAfter });
   await post(env, saved, { entry: `${kind === "exclusive" ? "Exclusive lead" : "Lead"}: ${lead.fields.Lead}`, type: "Lead", amount: -price, creditPart: -creditUsed, balanceAfter: after, purchaseId: made.id, via });
@@ -1104,7 +1107,8 @@ async function api(request, env, path) {
     const mineIds = new Set(mine.map((p) => p.fields.Purchase.split(":")[0]));
     const count = {}, excl = {};
     for (const p of all) { const id = p.fields.Purchase.split(":")[0]; count[id] = (count[id] || 0) + 1; if (p.fields.Kind === "Exclusive") excl[id] = true; }
-    const open = leads.filter((l) => !mineIds.has(l.id)).map((l) => offerView(env, l, count[l.id] || 0, !!excl[l.id]));
+    // Older, marked-down leads are only shown to a pro with a card on file.
+    const open = leads.filter((l) => !mineIds.has(l.id) && (pro.fields.Card || isHot(l))).map((l) => offerView(env, l, count[l.id] || 0, !!excl[l.id]));
     // Filters default to the pro's own market and trade. "all" widens either one.
     const q = new URL(request.url).searchParams, home = { market: pro.fields.City || "", trade: pro.fields.Trade || "" };
     const market = q.has("market") ? q.get("market") : home.market || "all", trade = q.has("trade") ? q.get("trade") : home.trade || "all";
@@ -1112,7 +1116,7 @@ async function api(request, env, path) {
     const markets = tally(open, (o) => o.city).map(([name, n]) => ({ name, count: n })).sort((a, b) => a.name.localeCompare(b.name));
     const trades = tally(open, (o) => o.trade).map(([slug, n]) => ({ slug, name: TRADE_NAME[slug] || "Other", count: n })).sort((a, b) => a.name.localeCompare(b.name));
     const offers = open.filter((o) => (market === "all" || sameCity(o.city, market)) && (trade === "all" || o.trade === trade));
-    return json({ offers, hot: offers.filter((o) => o.hot).length, older: offers.filter((o) => !o.hot).length, hotHours: HOT_HOURS, leadDays: LEAD_DAYS, canBuy: isVerified(pro), filters: { market, trade, markets, trades, home, total: open.length }, pro: proView(pro) });
+    return json({ offers, hot: offers.filter((o) => o.hot).length, older: offers.filter((o) => !o.hot).length, hotHours: HOT_HOURS, leadDays: LEAD_DAYS, olderShown: !!pro.fields.Card, canBuy: isVerified(pro), filters: { market, trade, markets, trades, home, total: open.length }, pro: proView(pro) });
   }
   if (path === "/api/pro/buy" && request.method === "POST") return buy(env, pro, body);
   // "I want more leads here": a pro tells us a market and trade had nothing for them. One row per pro, market and trade.

@@ -199,3 +199,7 @@ A valid form or email, not assigned to a client, on a site with `Active Clients`
 - "New lead" alerts only go out for leads received in the last `ALERT_HOURS` (12).
 - Any successful reload clears a reload left waiting by a declined card.
 - A DD1 row with no created time can no longer stop the copy.
+
+## Older leads need a card; welcome credit is for hot leads
+
+Older leads (3 to 7 days) are left out of `/api/pro/offers` until the pro has a card on file (`olderShown`), and `purchase()` refuses them without one. Welcome credit only pays for hot leads: an older lead is paid from the pro's own funds (balance minus welcome credit), reloading the card if those are short. Pro Agreement 5.3 says the same.

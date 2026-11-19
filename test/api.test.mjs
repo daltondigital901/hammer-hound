@@ -411,7 +411,11 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   const LD = db.tblfA6ivDIlWVp4us, c = await signUp(85), hrs = (h) => new Date(Date.now() - h * 3600e3).toISOString();
   const mk = (id, h, extra = {}) => { LD.push({ id, fields: { Lead: "Age Test · Memphis, TN", Job: "Age Test", Trade: "roofing", City: "Memphis", State: "TN", Status: "Offered", Style: "v2", Qualified: "Yes", "Received At": hrs(h), "Shared Price": 75, "Exclusive Price": 225, "Max Pros": 5, Alerted: "x", ...extra } }); return id; };
   const hot = mk("recAGEHOT00000001", 71), old = mk("recAGEOLD00000001", 73), week = mk("recAGEWEEK0000001", 7 * 24 - 1), gone = mk("recAGEGONE0000001", 7 * 24 + 1);
-  const r = await call(ALL, null, c), by = (id) => r.offers.find((o) => o.id === id);
+  // older leads are hidden until a card is on file, and cannot be claimed without one
+  { const v = await call(ALL, null, c); assert.equal(v.olderShown, false); assert.equal(v.older, 0); assert.ok(v.offers.every((o) => o.hot)); assert.ok(v.offers.find((o) => o.id === hot));
+    const blocked = await call("/api/pro/buy", { leadId: old, kind: "shared" }, c); assert.equal(blocked.status, 403); assert.match(blocked.error, /Add a card/); }
+  const meP = db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550185"); await call("/api/pro/card", { action: "save" }, c);
+  const r = await call(ALL, null, c), by = (id) => r.offers.find((o) => o.id === id); assert.equal(r.olderShown, true);
   assert.equal(by(hot).hot, true, "under 72 hours is hot"); assert.equal(by(old).hot, false, "past 72 hours is an older lead"); assert.equal(by(week).hot, false); assert.equal(by(gone), undefined, "a week old is closed");
   assert.equal(r.hot + r.older, r.offers.length); assert.equal(r.hotHours, 72); assert.equal(r.leadDays, 7);
   assert.equal((await call("/api/pro/buy", { leadId: gone, kind: "shared" }, c)).status, 410); // older leads are marked down by age: 50, 40, 30, 20 percent of the hot price, to the nearest $5
@@ -419,7 +423,11 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   { const v = (await call(ALL, null, c)).offers, g = (id) => v.find((o) => o.id === id);
     assert.deepEqual([g(hot).sharedPrice, g(hot).percentOff], [75, 0]); assert.deepEqual([g(old).sharedPrice, g(old).exclusivePrice, g(old).fullPrice, g(old).percentOff], [40, 115, 75, 50]);
     assert.deepEqual([g(d5).sharedPrice, g(d5).exclusivePrice], [25, 70]); assert.deepEqual([g(week).sharedPrice, g(week).exclusivePrice, g(week).percentOff], [15, 45, 80]); }
-  const paid = await call("/api/pro/buy", { leadId: old, kind: "shared" }, c); assert.equal(paid.status, 200, "older leads can still be claimed"); assert.equal(paid.price, 40, "and the marked-down price is what is charged");
+  // welcome credit does not pay for an older lead: with $240 of credit and no funds of their own, the card is charged
+  const need = await call("/api/pro/buy", { leadId: old, kind: "shared" }, c); assert.equal(need.status, 402); assert.match(need.error, /\$0\.00 of your own funds\. Welcome credit is for hot leads only/); assert.equal(need.reloadAmount, 150);
+  const paid = await call("/api/pro/buy", { leadId: old, kind: "shared", reload: true }, c); assert.equal(paid.status, 200, "older leads can still be claimed"); assert.equal(paid.price, 40, "and the marked-down price is what is charged");
+  assert.equal(paid.creditUsed, 0); assert.equal(paid.reloaded, 150); assert.equal(meP.fields.Balance, 350); assert.equal(meP.fields["Welcome Credit"], 240, "welcome credit is untouched");
+  const hotBuy = await call("/api/pro/buy", { leadId: hot, kind: "shared" }, c); assert.equal(hotBuy.creditUsed, 75, "and still pays for a hot lead");
   // text and email alerts only go out for hot leads
   const { alertPros, styleLeads } = await import("../src/worker.js");
   for (const l of LD) l.fields.Alerted = "x"; LD.find((l) => l.id === week).fields.Alerted = ""; assert.equal((await alertPros(env)).leads, 0);
