@@ -179,7 +179,7 @@ const proView = (p) => ({
   verified: isVerified(p), verification: p.fields.Verification === "Verified" && !isVerified(p) ? "Insurance expired" : p.fields.Verification || "Not started",
   legalName: p.fields["Legal Business Name"] || "", einLast4: (p.fields.EIN || "").slice(-4), insuranceExpires: p.fields["Insurance Expires"] || "", verifiedAt: p.fields["Verified At"] || "",
   email: p.fields.Email || "", verificationReason: p.fields["Verification Reason"] || "", checksLeft: checksLeft(p),
-  balance: p.fields.Balance || 0, freeLeadsLeft: p.fields["Free Leads Left"] || 0,
+  balance: p.fields.Balance || 0, credit: Math.min(p.fields["Welcome Credit"] || 0, p.fields.Balance || 0),
   city: p.fields.City || "", extraTrades: String(p.fields["Extra Trades"] || "").split(",").filter(Boolean), tradeName: TRADE_NAME[p.fields.Trade] || "",
   textOffers: !!p.fields["Text Offers"], emailOffers: !!p.fields["Email Offers"], paused: !!p.fields.Paused, dailyCap: p.fields["Daily Cap"] || 0, quietHours: p.fields["Quiet Hours"] || "",
   agreement: String(p.fields.Agreement || "").split(" | ")[0], memberSince: p.fields["Created At"] || "",
@@ -313,8 +313,9 @@ async function sendEmail(env, to, subject, lines, opts = {}) {
 }
 const APP = "https://hammerhound.com/pros/app/";
 // What verifying gets this pro. A new pro still has free leads; a pro who has used them is told what they actually get back.
-const freeLeft = (f) => f["Free Leads Left"] || 0;
-const prize = (f) => freeLeft(f) > 0 ? `your Verified Pro badge and ${freeLeft(f)} free lead${freeLeft(f) === 1 ? "" : "s"}` : "your Verified Pro badge and the leads in your market";
+const creditOf = (f) => Math.min(f["Welcome Credit"] || 0, f.Balance || 0);
+const usd = (n) => "$" + (Number.isInteger(n) ? n : n.toFixed(2));
+const prize = (f) => creditOf(f) > 0 ? `your Verified Pro badge and ${usd(creditOf(f))} in free lead credit` : "your Verified Pro badge and the leads in your market";
 const resultEmail = (env, pro, status, reason) => status === "Declined"
   ? sendEmail(env, pro.fields.Email, "Your Hammer Hound documents need another look", [
     `Hi ${pro.fields["Business Name"]},`, "We checked the documents you sent and could not verify your business yet.", `What we found: ${reason}`,
@@ -382,6 +383,7 @@ async function submitDocuments(request, env, pro) {
 
 
 // ---------- leads ----------
+const cents = (n) => Math.round(n * 100) / 100;
 const PIPELINE = ["New", "Contacted", "Quoted", "Won", "Lost"];
 const purchasesFor = (env, key) => list(env, HH.base, HH.purchases, { filterByFormula: `FIND('${esc(key)}',{Purchase})>0`, pageSize: 100 });
 // The uniform part of a lead: the same fields, in the same order, for every lead. No owner details.
@@ -409,16 +411,17 @@ async function buy(env, pro, { leadId, kind }) {
   if (kind === "exclusive" && bought.length) return fail(409, "Exclusive is gone because another pro has already bought this lead.");
   if (bought.length >= lead.fields["Max Pros"]) return fail(410, "All spots on this lead are taken.");
 
-  const free = kind === "shared" && (pro.fields["Free Leads Left"] || 0) > 0;
-  const price = free ? 0 : kind === "exclusive" ? lead.fields["Exclusive Price"] : lead.fields["Shared Price"];
-  const balance = pro.fields.Balance || 0;
-  if (price > balance) return fail(402, `Your balance is $${balance.toFixed(2)} and this lead is $${price.toFixed(2)}. Add funds to buy it.`);
+  // Every lead comes out of the wallet. Free welcome credit is spent before paid funds.
+  const price = kind === "exclusive" ? lead.fields["Exclusive Price"] : lead.fields["Shared Price"];
+  const balance = pro.fields.Balance || 0, credit = Math.min(pro.fields["Welcome Credit"] || 0, balance);
+  if (price > balance) return fail(402, `This lead is $${price.toFixed(2)} and your wallet has $${balance.toFixed(2)}. Add $${(Math.ceil((price - balance) / 5) * 5).toFixed(0)} or more to claim it.`);
+  const creditUsed = Math.min(credit, price), after = cents(balance - price), creditAfter = cents(credit - creditUsed);
 
-  await create(env, HH.purchases, { Purchase: `${leadId}:${pro.id}`, Lead: [leadId], Pro: [pro.id], Kind: free ? "Free" : kind === "exclusive" ? "Exclusive" : "Shared", Price: price, "Bought At": new Date().toISOString(), Test: !!pro.fields.Test || !!lead.fields.Test, "Review Status": "None" });
-  await update(env, HH.pros, pro.id, free ? { "Free Leads Left": pro.fields["Free Leads Left"] - 1 } : { Balance: Math.round((balance - price) * 100) / 100 });
+  await create(env, HH.purchases, { Purchase: `${leadId}:${pro.id}`, Lead: [leadId], Pro: [pro.id], Kind: kind === "exclusive" ? "Exclusive" : "Shared", Price: price, "Credit Used": creditUsed, "Bought At": new Date().toISOString(), Test: !!pro.fields.Test || !!lead.fields.Test, "Review Status": "None" });
+  await update(env, HH.pros, pro.id, { Balance: after, "Welcome Credit": creditAfter });
   if (kind === "exclusive") await update(env, HH.leads, leadId, { Status: "Exclusive" });
   else if (bought.length + 1 >= lead.fields["Max Pros"]) await update(env, HH.leads, leadId, { Status: "Sold out" });
-  return json({ lead: leadView(lead), price, free, balance: free ? balance : Math.round((balance - price) * 100) / 100, freeLeadsLeft: (pro.fields["Free Leads Left"] || 0) - (free ? 1 : 0) });
+  return json({ lead: leadView(lead), kind, price, creditUsed, paidUsed: cents(price - creditUsed), balanceBefore: balance, balance: after, credit: creditAfter, nextPrice: lead.fields["Shared Price"] });
 }
 
 // ---------- uniform leads ----------
@@ -523,8 +526,8 @@ function reminderCopy(f, r) {
     lines: [`Hi ${name},`, `Your badge has been paused since your insurance expired on ${exp}. Property owners in your market are still asking for quotes.`, "Upload a current certificate to get your badge back and start claiming again."],
     cta: ["Get my badge back", APP], leadsTitle: "Open in your market right now" };
   return {
-    subject: r.stage !== "fail2" ? "Jobs are open in your market. Finish verifying to claim them." : freeLeft(f) > 0 ? `You are one upload away from ${freeLeft(f)} free lead${freeLeft(f) === 1 ? "" : "s"}` : "You are one upload away from claiming leads again",
-    heading: r.stage !== "fail2" ? "Finish verifying and claim these." : freeLeft(f) > 0 ? `One upload away from ${freeLeft(f)} free lead${freeLeft(f) === 1 ? "" : "s"}.` : "One upload away from claiming leads again.",
+    subject: r.stage !== "fail2" ? "Jobs are open in your market. Finish verifying to claim them." : creditOf(f) > 0 ? `You are one upload away from ${usd(creditOf(f))} in free leads` : "You are one upload away from claiming leads again",
+    heading: r.stage !== "fail2" ? "Finish verifying and claim these." : creditOf(f) > 0 ? `One upload away from ${usd(creditOf(f))} in free leads.` : "One upload away from claiming leads again.",
     lines: [`Hi ${name},`, `Your documents did not pass last time, so ${prize(f)} are still locked.`, f["Verification Reason"] ? `What we found: ${f["Verification Reason"]}` : "", "Send a clearer or different document, or ask for a person to review it."].filter(Boolean),
     cta: ["Finish verifying", APP], leadsTitle: "Open in your market right now" };
 }
@@ -591,7 +594,7 @@ async function api(request, env, path) {
     if (sent.error) return fail(503, sent.error);
     const test = env.SHADOW_MODE === "true";
     await create(env, HH.pros, { "Business Name": business, Mobile: phone, Trade: TRADE_NAME[body.trade] ? body.trade : "", ZIP: String(body.zip || "").slice(0, 5), City: city, "Email Offers": true,
-      Agreement: `${AGREEMENT_VERSION} | ${new Date().toISOString()} | ${request.headers.get("CF-Connecting-IP") || "unknown"}`, Test: test, Verification: "Not started", Balance: test ? num(env.TEST_BALANCE, 240) : 0, "Free Leads Left": 3, "Text Offers": body.sms === "yes", "Created At": new Date().toISOString() });
+      Agreement: `${AGREEMENT_VERSION} | ${new Date().toISOString()} | ${request.headers.get("CF-Connecting-IP") || "unknown"}`, Test: test, Verification: "Not started", Balance: num(env.WELCOME_CREDIT, 240), "Welcome Credit": num(env.WELCOME_CREDIT, 240), "Free Leads Left": 0, "Text Offers": body.sms === "yes", "Created At": new Date().toISOString() });
     return json({ next: "code", phone, sent: sent.sent });
   }
   if (path === "/api/pro/sign-in" && request.method === "POST") {
@@ -647,7 +650,7 @@ async function api(request, env, path) {
     const out = [];
     for (const p of mine.sort((a, b) => String(b.fields["Bought At"]).localeCompare(String(a.fields["Bought At"]))).slice(0, 40)) {
       const lead = await at(env, HH.base, HH.leads, { id: p.fields.Purchase.split(":")[0] }).catch(() => null);
-      if (lead) out.push({ purchaseId: p.id, kind: p.fields.Kind, price: p.fields.Price || 0, boughtAt: p.fields["Bought At"], review: p.fields["Review Status"] || "None", pipeline: p.fields.Pipeline || "New", notes: p.fields.Notes || "", ...leadView(lead), id: lead.id });
+      if (lead) out.push({ purchaseId: p.id, kind: p.fields.Kind, price: p.fields.Price || 0, creditUsed: p.fields["Credit Used"] || 0, boughtAt: p.fields["Bought At"], review: p.fields["Review Status"] || "None", pipeline: p.fields.Pipeline || "New", notes: p.fields.Notes || "", ...leadView(lead), id: lead.id });
     }
     return json({ leads: out, pro: proView(pro) });
   }
@@ -689,10 +692,10 @@ async function api(request, env, path) {
     const mine = await purchasesFor(env, pro.id), rows = [];
     for (const p of mine.sort((a, b) => String(b.fields["Bought At"]).localeCompare(String(a.fields["Bought At"]))).slice(0, 40)) {
       const lead = await at(env, HH.base, HH.leads, { id: p.fields.Purchase.split(":")[0] }).catch(() => null);
-      rows.push({ id: p.id, date: p.fields["Bought At"], label: lead ? lead.fields.Lead : "Lead", kind: p.fields.Kind, amount: -(p.fields.Price || 0), review: p.fields["Review Status"] || "None" });
+      rows.push({ id: p.id, date: p.fields["Bought At"], label: lead ? lead.fields.Lead : "Lead", kind: p.fields.Kind, amount: -(p.fields.Price || 0), creditUsed: p.fields["Credit Used"] || 0, review: p.fields["Review Status"] || "None" });
     }
     // Card payments run through Square. Until its keys are set, only test accounts can add (test) funds.
-    return json({ balance: pro.fields.Balance || 0, freeLeadsLeft: pro.fields["Free Leads Left"] || 0, rows, cardsReady: !!env.SQUARE_ACCESS_TOKEN, testFunds: !!pro.fields.Test, membership: { fee: 300, waived: true }, pro: proView(pro) });
+    return json({ balance: pro.fields.Balance || 0, credit: creditOf(pro.fields), leadPrice: num(env.SHADOW_SHARED_PRICE, 75), rows, cardsReady: !!env.SQUARE_ACCESS_TOKEN, testFunds: !!pro.fields.Test, membership: { fee: 300, waived: true }, pro: proView(pro) });
   }
   if (path === "/api/pro/add-funds" && request.method === "POST") {
     const amount = Number(body.amount);

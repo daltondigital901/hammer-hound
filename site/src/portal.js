@@ -7,7 +7,8 @@
   var pro = null, tab = "home";
   var DOC_TYPES = ["State contractor license", "City or county business license", "Secretary of State registration", "IRS EIN letter (CP 575 or 147C)", "DBA or assumed-name certificate", "State tax registration certificate"];
   // What verifying gets this pro: free leads while they still have some, otherwise the leads themselves.
-  function prize() { var n = pro ? pro.freeLeadsLeft : 3; return n > 0 ? "your Verified Pro badge and " + n + " free lead" + (n === 1 ? "" : "s") : "your Verified Pro badge and claim leads again"; }
+  function prize() { var c = pro ? pro.credit : 240; return c > 0 ? "your Verified Pro badge and " + money0(c) + " in free lead credit" : "your Verified Pro badge and claim leads again"; }
+  function money0(n) { return "$" + (n % 1 ? Number(n).toFixed(2) : n); }
   var BANNER = {
     "Not started": [function () { return "Verify your business to unlock " + prize() + "."; }, "You can look at every lead in your market now. Claiming and buying unlock when you are verified.", "Get verified"],
     "Pending": ["We are checking your documents.", "You can look at leads now. Claiming unlocks as soon as both documents pass.", "See status"],
@@ -42,7 +43,7 @@
   function setHeader() {
     var b = document.querySelector("[data-balance]"), s = document.querySelector("[data-signout]");
     if (!pro) return;
-    b.textContent = money(pro.balance) + (pro.freeLeadsLeft ? " · " + pro.freeLeadsLeft + " free left" : ""); b.hidden = false;
+    if (!b.hasAttribute("data-counting")) b.textContent = money(pro.balance); b.hidden = false; b.title = pro.credit > 0 ? money(pro.credit) + " of this is free welcome credit" : "Wallet balance";
     s.hidden = false; s.onclick = function () { call("/api/pro/sign-out", {}).then(function () { try { localStorage.removeItem("hh_pro"); } catch (e) {} location.href = "/pros/sign-in/"; }); };
   }
 
@@ -139,8 +140,8 @@
       h("img", { class: "passed-badge", src: "/assets/img/badge-large.png", alt: "", width: "170", height: "205" }),
       h("p", { class: "vbadge-title", text: "Verified Pro" }),
       h("h1", { text: "You are a Verified Pro." }),
-      h("p", { class: "sub", text: pro.freeLeadsLeft > 0 ? "Your " + pro.freeLeadsLeft + " free lead" + (pro.freeLeadsLeft === 1 ? " is" : "s are") + " ready. Pick a job and call the owner." : "You can claim and buy leads again. Pick a job and call the owner." }),
-      h("button", { class: "btn btn--yellow btn--block btn--lg", type: "button", text: pro.freeLeadsLeft > 0 ? "Claim my free leads" : "See open leads", on: { click: function () { go("offers"); } } }),
+      h("p", { class: "sub", text: pro.credit > 0 ? money0(pro.credit) + " in free lead credit is in your wallet. Pick a job and call the owner." : "You can claim and buy leads again. Pick a job and call the owner." }),
+      h("button", { class: "btn btn--yellow btn--block btn--lg", type: "button", text: pro.credit > 0 ? "Spend my free credit" : "See open leads", on: { click: function () { go("offers"); } } }),
     ])]);
   }
   var resubmit = false, justPassed = false;
@@ -167,7 +168,7 @@
         h("h1", { text: title }),
         h("p", { class: "sub", text: "Two steps unlock " + prize() + ". We check your documents while you wait." }),
       ])]),
-      h("ul", { class: "verify-unlocks" }, [h("li", { text: "Verified Pro badge" }), pro.freeLeadsLeft > 0 ? h("li", { text: pro.freeLeadsLeft + " free lead" + (pro.freeLeadsLeft === 1 ? "" : "s") }) : null, h("li", { text: "Claim and buy leads" })]),
+      h("ul", { class: "verify-unlocks" }, [h("li", { text: "Verified Pro badge" }), pro.credit > 0 ? h("li", { text: money0(pro.credit) + " in free lead credit" }) : null, h("li", { text: "Claim and buy leads" })]),
       h("ol", { class: "verify-steps" }, [s1, s2]),
       h("h2", { text: "Your business" }),
       field("v-legal", "Legal business name", legal, "The name on your EIN and your documents."),
@@ -237,6 +238,27 @@
       o.summary ? h("p", { class: "lead-summary", text: o.summary }) : null];
   }
 
+  // The claim moment: a toast that drops in, and the wallet in the header counting down to the new balance.
+  function claimed(res) {
+    var b = document.querySelector("[data-balance]"), from = res.balanceBefore, to = res.balance, start = null;
+    if (b) { b.setAttribute("data-counting", ""); b.classList.add("is-spending");
+      var tick = function (ts) { if (start === null) start = ts; var k = Math.min(1, (ts - start) / 900); b.textContent = money(from + (to - from) * (1 - Math.pow(1 - k, 3)));
+        if (k < 1) requestAnimationFrame(tick); else { b.textContent = money(to); b.removeAttribute("data-counting"); setTimeout(function () { b.classList.remove("is-spending"); }, 600); } };
+      requestAnimationFrame(tick); }
+    var how = res.creditUsed >= res.price ? "Paid with your free credit" : res.creditUsed > 0 ? money(res.creditUsed) + " free credit + " + money(res.paidUsed) + " from your wallet" : "Paid from your wallet";
+    var low = to < res.nextPrice, close = function () { t.classList.add("is-leaving"); setTimeout(function () { t.remove(); }, 300); };
+    var t = h("div", { class: "toast", role: "status" }, [
+      h("img", { src: "/assets/img/badge.png", alt: "", width: "58", height: "70" }),
+      h("div", {}, [h("p", { class: "toast-title", text: res.kind === "exclusive" ? "It's all yours!" : "Lead claimed!" }), h("p", { class: "toast-job", text: res.lead.job + " · " + res.lead.place }),
+        h("p", { class: "toast-money" }, [h("strong", { text: "-" + money(res.price) }), h("span", { text: " " + how + ". " + money(to) + " left." })]),
+        h("p", { class: "toast-next", text: low ? "That is not enough for another lead. Top up to keep them coming." : "Call the owner now. The first pro to call usually wins the job." }),
+        low ? h("button", { class: "btn btn--black btn--sm", type: "button", text: "Top up my wallet", on: { click: function () { close(); go("wallet"); } } }) : null]),
+      h("button", { class: "toast-x", type: "button", "aria-label": "Close", text: "\u00d7", on: { click: function () { close(); } } }),
+      h("i", { class: "toast-sparks", "aria-hidden": "true" }),
+    ]);
+    document.body.appendChild(t); setTimeout(close, low ? 12000 : 7000);
+  }
+
   // ---------- home ----------
   function homeView() {
     shell([h("p", { class: "meta", text: "Loading your account." })]);
@@ -246,7 +268,8 @@
       pro = o.pro; if (tab !== "home") return;
       var mine = l.leads || [], count = function (st) { return mine.filter(function (x) { return x.pipeline === st; }).length; };
       var next = !pro.verified ? ["Get verified", "Unlock " + prize() + ".", "verify"]
-        : o.offers.length && pro.freeLeadsLeft > 0 ? ["Claim a free lead", "You have " + pro.freeLeadsLeft + " free lead" + (pro.freeLeadsLeft === 1 ? "" : "s") + " and " + o.offers.length + " open in your market.", "offers"]
+        : o.offers.length && pro.credit >= 1 && pro.balance >= o.offers[0].sharedPrice ? ["Claim a lead with your free credit", "You have " + money(pro.credit) + " in free credit and " + o.offers.length + " lead" + (o.offers.length === 1 ? "" : "s") + " open in your market.", "offers"]
+        : o.offers.length && pro.balance < o.offers[0].sharedPrice ? ["Top up your wallet", "You have " + money(pro.balance) + " left. Add " + money0(Math.ceil((o.offers[0].sharedPrice - pro.balance) / 5) * 5) + " or more and " + o.offers.length + " open lead" + (o.offers.length === 1 ? " is" : "s are") + " yours to claim.", "wallet"]
         : count("New") ? ["Call your new leads", count("New") + " lead" + (count("New") === 1 ? " is" : "s are") + " waiting on a first call.", "leads"]
         : o.offers.length ? ["See open leads", o.offers.length + " open in your market right now.", "offers"] : ["Check your service area", "Nothing is open in your market right now. Widen your market or add a trade.", "profile"];
       var stat = function (n, label, to) { return h("button", { class: "pp-stat", type: "button", on: { click: function () { go(to); } } }, [h("strong", { text: String(n) }), h("span", { text: label })]); };
@@ -256,7 +279,7 @@
         h("div", { class: "pp-next" }, [h("div", {}, [h("p", { class: "eyebrow", text: "Do this next" }), h("h2", { text: next[0] }), h("p", { text: next[1] })]), h("button", { class: "btn btn--black btn--lg", type: "button", text: next[0], on: { click: function () { go(next[2]); } } })]),
         h("div", { class: "pp-stats" }, [stat(o.offers.length, "Open leads in " + where, "offers"), stat(count("New"), "New leads to call", "leads"), stat(count("Quoted"), "Quoted", "leads"), stat(count("Won"), "Jobs won", "leads")]),
         h("div", { class: "pp-two" }, [
-          card([h("h2", { text: "Wallet" }), h("p", { class: "offer-price", text: money(pro.balance) }), h("p", { class: "meta", text: pro.freeLeadsLeft ? pro.freeLeadsLeft + " free lead" + (pro.freeLeadsLeft === 1 ? "" : "s") + " left" : "Balance for buying leads" }), h("button", { class: "btn btn--outline btn--block", type: "button", text: "Open wallet", on: { click: function () { go("wallet"); } } })]),
+          card([h("h2", { text: "Wallet" }), h("p", { class: "offer-price", text: money(pro.balance) }), h("p", { class: "meta", text: pro.credit > 0 ? money(pro.credit) + " of it is free welcome credit" : "Balance for buying leads" }), h("button", { class: "btn btn--outline btn--block", type: "button", text: "Open wallet", on: { click: function () { go("wallet"); } } })]),
           card([h("h2", { text: pro.verified ? "Verified Pro" : "Verification" }), h("p", { class: "meta", text: pro.verified ? (pro.insuranceExpires ? "Active until " + day(pro.insuranceExpires) + "." : "Active.") : "Status: " + pro.verification + "." }),
             h("p", { class: "meta", text: pro.paused ? "Lead offers are paused." : "Lead offers are on." }), h("button", { class: "btn btn--outline btn--block", type: "button", text: pro.verified ? "Badge and documents" : "Get verified", on: { click: function () { go("verify"); } } })]),
         ]),
@@ -287,18 +310,18 @@
         var act = function (kind) { return function () {
           call("/api/pro/buy", { leadId: o.id, kind: kind }).then(function (res) {
             if (res.error) { status.innerHTML = ""; status.appendChild(note(res.error, res.status === 402 ? "" : "bad")); if (res.status === 402) status.appendChild(h("button", { class: "btn btn--outline btn--sm", type: "button", text: "Add funds", on: { click: function () { go("wallet"); } } })); return; }
-            pro.balance = res.balance; pro.freeLeadsLeft = res.freeLeadsLeft; go("leads");
+            pro.balance = res.balance; pro.credit = res.credit; claimed(res); go("leads");
           });
         }; };
-        var freeNow = pro.freeLeadsLeft > 0;
+        var covered = pro.credit >= o.sharedPrice, short = pro.balance < o.sharedPrice;
         return h("div", { class: "card offer" }, [
           h("div", { class: "offer-top" }, [h("span", { class: "chip", text: o.tradeName }), h("span", { class: "chip chip--yellow", text: "Ends " + when(o.endsAt) })])].concat(jobBlock(o), [
           h("p", { class: "meta", text: "Received " + when(o.receivedAt) + " · " + o.spotsTaken + " of " + o.maxPros + " spots taken" }),
-          h("p", { class: "offer-price", text: freeNow && !locked ? "Free" : money(o.sharedPrice) }),
-          h("p", { class: "meta", text: locked ? (pro.freeLeadsLeft > 0 ? "Shared lead. Your first " + pro.freeLeadsLeft + " are free once you are verified." : "Shared lead. Verify to claim it.") : freeNow ? "Uses 1 of your " + pro.freeLeadsLeft + " free leads. Normally " + money(o.sharedPrice) + " shared." : "Shared lead" }),
+          h("p", { class: "offer-price", text: money(o.sharedPrice) }),
+          h("p", { class: "meta", text: locked ? (pro.credit > 0 ? "Shared lead. Your " + money0(pro.credit) + " in free credit unlocks when you are verified." : "Shared lead. Verify to claim it.") : covered ? "Shared lead. Covered by your free credit." : short ? "Shared lead. Your wallet has " + money(pro.balance) + "." : "Shared lead. Paid from your wallet." }),
           locked ? h("div", { class: "offer-actions" }, [h("button", { class: "btn btn--outline btn--locked", type: "button", text: "Verify to claim this lead", on: { click: function () { go("verify"); } } })])
           : h("div", { class: "offer-actions" }, [
-            h("button", { class: "btn btn--yellow", type: "button", text: freeNow ? "Claim free lead" : "Buy lead", on: { click: act("shared") } }),
+            h("button", { class: "btn btn--yellow", type: "button", text: "Claim lead · " + money0(o.sharedPrice), on: { click: act("shared") } }),
             o.exclusiveAvailable ? h("button", { class: "btn btn--outline", type: "button", text: "Exclusive " + money(o.exclusivePrice), on: { click: act("exclusive") } }) : null,
           ]),
           status,
@@ -335,7 +358,7 @@
           status.innerHTML = ""; status.appendChild(reason); status.appendChild(sendBtn); report.hidden = true;
         } } }) : h("span", { class: "chip", text: "Bad-lead report: " + l.review });
         return h("div", { class: "card offer" }, [
-          h("div", { class: "offer-top" }, [h("span", { class: "chip", text: l.tradeName }), h("span", { class: "chip", text: l.kind === "Free" ? "Free lead" : l.kind + " · " + money(l.price) }), h("span", { class: "meta", text: "Bought " + when(l.boughtAt) })])].concat(jobBlock(l), [
+          h("div", { class: "offer-top" }, [h("span", { class: "chip", text: l.tradeName }), h("span", { class: "chip", text: l.kind === "Free" ? "Free lead" : l.kind + " · " + money(l.price) + (l.creditUsed >= l.price && l.price ? " free credit" : "") }), h("span", { class: "meta", text: "Bought " + when(l.boughtAt) })])].concat(jobBlock(l), [
           h("div", { class: "lead-contact" }, [h("span", { class: "lead-contact-label", text: "Owner" }), h("strong", { text: l.ownerName || "Name not given" }), l.ownerPhone ? h("a", { href: "tel:+1" + l.ownerPhone, text: phoneFmt(l.ownerPhone) }) : h("span", { class: "meta", text: "No phone number given" }), l.ownerEmail ? h("a", { href: "mailto:" + l.ownerEmail, text: l.ownerEmail }) : null, l.address ? h("span", { text: l.address }) : null]),
           l.message ? h("details", { class: "lead-words" }, [h("summary", { text: "The owner's own words" }), h("p", { text: l.message })]) : null,
           field("st-" + l.purchaseId, "Where it stands", stage), field("nt-" + l.purchaseId, "Notes", notes), saveNotes, report, status,
@@ -354,10 +377,11 @@
       pro = r.pro; if (tab !== "wallet") return;
       var status = h("div"), amount = select("w-amount", [["50", "$50"], ["100", "$100"], ["250", "$250"], ["500", "$500"]], "100");
       var add = h("button", { class: "btn btn--yellow btn--block", type: "button", text: r.cardsReady ? "Add funds" : r.testFunds ? "Add test funds" : "Add funds", on: { click: function () { saver(status, add, "/api/pro/add-funds", { amount: Number(amount.value) }, function () { walletView(); }); } } });
-      var rows = r.rows.map(function (x) { return h("tr", {}, [h("td", { text: when(x.date) }), h("td", { text: x.label + (x.review !== "None" ? " (report: " + x.review + ")" : "") }), h("td", { text: x.kind }), h("td", { class: "num", text: x.amount ? "-" + money(-x.amount) : "Free" })]); });
+      var rows = r.rows.map(function (x) { return h("tr", {}, [h("td", { text: when(x.date) }), h("td", { text: x.label + (x.review !== "None" ? " (report: " + x.review + ")" : "") }), h("td", { text: x.kind }), h("td", { class: "num", text: x.amount ? "-" + money(-x.amount) + (x.creditUsed >= -x.amount ? " (free credit)" : x.creditUsed > 0 ? " (" + money(x.creditUsed) + " free credit)" : "") : "Free" })]); });
       shell([head("Wallet", "Your balance, what you have spent and your membership."),
         h("div", { class: "pp-two" }, [
-          card([h("h2", { text: "Balance" }), h("p", { class: "offer-price", text: money(r.balance) }), h("p", { class: "meta", text: r.freeLeadsLeft ? r.freeLeadsLeft + " free lead" + (r.freeLeadsLeft === 1 ? "" : "s") + " left. Free leads are used before your balance." : "Leads are paid from this balance." }),
+          card([h("h2", { text: "Balance" }), h("p", { class: "offer-price", text: money(r.balance) }), h("p", { class: "meta", text: r.credit > 0 ? money(r.credit) + " of this is free welcome credit. It is spent before money you add." : "Leads are paid from this balance." }),
+            r.balance < r.leadPrice ? h("p", { class: "form-status", text: "A lead is " + money(r.leadPrice) + ". Add " + money0(Math.ceil((r.leadPrice - r.balance) / 5) * 5) + " or more to claim your next one." }) : null,
             field("w-amount", "Amount to add", amount),
             r.cardsReady ? null : h("p", { class: "form-status", text: r.testFunds ? "Card payments are not switched on yet. This is a test account, so you can add test funds. No card is charged." : "Card payments are not switched on yet. We will email you when you can add funds." }),
             add, status]),

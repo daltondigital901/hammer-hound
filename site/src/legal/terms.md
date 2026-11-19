@@ -34,7 +34,7 @@ You must be at least 18 and able to enter a binding contract. Information you gi
 
 A Pro also accepts the Pro Agreement when creating an account. Where the Pro Agreement and this section differ, the Pro Agreement controls.
 
-**5.1 Verification.** You may create an account and view available leads before you are verified. To claim, buy or receive leads, including free leads, you must give us your legal business name and Employer Identification Number (EIN), and upload one proof of your business and proof of insurance. We accept one account per EIN and do not accept a Social Security number in place of an EIN. We review these documents using automated tools, including AI, and may ask for more. "Verified" and the Verified Pro badge mean only that we received documents that appeared valid on the date reviewed. They are not an endorsement of your work. Verification ends when the insurance on file expires, until you upload a current certificate. We may remove verification if a document was false or is no longer valid, and you must then stop displaying the badge. You must keep your licenses and insurance current and tell us within \[5\] days if either lapses.
+**5.1 Verification.** You may create an account and view available leads before you are verified. To claim, buy or receive leads, including with welcome credit, you must give us your legal business name and Employer Identification Number (EIN), and upload one proof of your business and proof of insurance. We accept one account per EIN and do not accept a Social Security number in place of an EIN. We review these documents using automated tools, including AI, and may ask for more. "Verified" and the Verified Pro badge mean only that we received documents that appeared valid on the date reviewed. They are not an endorsement of your work. Verification ends when the insurance on file expires, until you upload a current certificate. We may remove verification if a document was false or is no longer valid, and you must then stop displaying the badge. You must keep your licenses and insurance current and tell us within \[5\] days if either lapses.
 
 **5.2 Leads are shared unless bought exclusive.** A lead may be sold to as many Pros as the property owner allowed, up to 5. If no other Pro has bought a lead, you may buy it at the exclusive price shown, and it will not be sold to anyone else.
 
@@ -44,7 +44,7 @@ A Pro also accepts the Pro Agreement when creating an account. Where the Pro Agr
 
 **5.5 Buying by text.** If you opt in to text offers, replying YES (or the exclusive keyword) to an offer is your order and your authorization to deduct the stated price from your balance. Offers expire at the time stated or when all places are taken.
 
-**5.6 Free leads.** New Pros may receive up to 3 leads at no charge once they have an account and have passed verification under section 5.1. Free leads have no cash value and are not eligible for refund.
+**5.6 Welcome credit.** A new pro account starts with $240 of welcome credit, which is enough for 3 shared leads at the standard price of $75. Welcome credit can be spent only on leads, only after you pass verification, and is spent before money you add. It has no cash value, cannot be withdrawn, transferred or refunded, and may be changed or ended for new accounts at any time. If a lead paid for with welcome credit qualifies under the Lead Credit Policy, the welcome credit is returned to your balance; it is not paid out.
 
 **5.7 All purchases are final** except as stated in the Lead Credit Policy in section 6.
 
