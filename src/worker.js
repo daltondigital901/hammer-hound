@@ -269,7 +269,9 @@ async function api(request, env, path) {
 
 export default {
   async fetch(request, env) {
-    const path = new URL(request.url).pathname;
+    const url = new URL(request.url), path = url.pathname;
+    // One address only: www goes to hammerhound.com.
+    if (url.hostname === "www.hammerhound.com") { url.hostname = "hammerhound.com"; return Response.redirect(url.toString(), 301); }
     if (path.startsWith("/api/")) {
       try { return await api(request, env, path); } catch (e) { console.error(e); return fail(500, "Something went wrong on our side. Try again."); }
     }

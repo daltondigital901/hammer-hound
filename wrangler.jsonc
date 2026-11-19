@@ -10,6 +10,12 @@
     "html_handling": "auto-trailing-slash",
     "not_found_handling": "404-page"
   },
+  // The public address. Both names must be in the same Cloudflare account as this Worker.
+  // Cloudflare creates the DNS records and certificates for these on deploy.
+  "routes": [
+    { "pattern": "hammerhound.com", "custom_domain": true },
+    { "pattern": "www.hammerhound.com", "custom_domain": true }
+  ],
   // Every minute: copy new Dalton Digital form leads into the Hammer Hound base (shadow mode only).
   "triggers": { "crons": ["* * * * *"] },
   // Keep Worker logs so a failed copy can be read in the Cloudflare dashboard.
