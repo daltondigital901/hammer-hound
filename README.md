@@ -140,3 +140,10 @@ Every lead is rewritten by the AI into one format before any pro sees it (`style
 - **No owner details before purchase.** The summary is checked in code as well: emails, phone numbers, the owner's name and street addresses are cut (`scrub()`).
 - **After purchase** the pro sees the same block, then the owner's contact details, the job address if given, and the owner's own words.
 - To change the format, edit `LEAD_RULES` and bump `STYLE`; every lead is rewritten on the next runs.
+
+## Welcome credit
+
+- Every new pro starts with `WELCOME_CREDIT` ($240) in the wallet: `Balance` 240 and `Welcome Credit` 240. At $75 a lead that is 3 leads with $15 left, which is not enough for a fourth.
+- Every claim deducts from `Balance`. `Welcome Credit` is spent before paid funds, and each purchase records `Credit Used`.
+- `Free Leads Left` is no longer used. New accounts get 0.
+- The portal shows a toast on each claim and counts the header balance down. When the balance is below the lead price the toast and the Wallet ask for a top-up.

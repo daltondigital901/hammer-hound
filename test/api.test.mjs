@@ -108,9 +108,9 @@ assert.equal(decide({ business: { result: "pass" }, insurance: { result: "pass",
 assert.equal(decide({ business: { result: "pass" }, insurance: { result: "pass", expires: "2020-01-01" } }, F).status, "Declined", "expired insurance never passes");
 assert.equal(decide({ business: { result: "pass", ein_on_document: "98-7654321" }, insurance: { result: "pass" } }, F).status, "Declined", "a wrong EIN never passes");
 // copy follows the pro's phase: free leads only while they have some
-const c6 = await v2(65); db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550165").fields["Free Leads Left"] = 0;
-await send(docs(65, { business: "FAIL" }), c6); assert.ok(!/free lead/.test(sent.at(-1).text), "a pro with no free leads left is not promised any"); assert.match(sent.at(-1).text, /leads in your market/);
-assert.match(sent.find((e) => e.to === "pro60@example.com" && /another look/.test(e.subject)).text, /Verified Pro badge and 3 free leads/);
+const c6 = await v2(65); db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550165").fields["Welcome Credit"] = 0;
+await send(docs(65, { business: "FAIL" }), c6); assert.ok(!/free lead/.test(sent.at(-1).text), "a pro with no welcome credit left is not promised any"); assert.match(sent.at(-1).text, /leads in your market/);
+assert.match(sent.find((e) => e.to === "pro60@example.com" && /another look/.test(e.subject)).text, /Verified Pro badge and \$240 in free lead credit/);
 // insurance expiry ends verification
 db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === unverifiedPhone).fields["Insurance Expires"] = "2020-01-01";
 const lapsed = await call("/api/pro/me", null, u.cookie); assert.equal(lapsed.pro.verified, false); assert.equal(lapsed.pro.verification, "Insurance expired");
@@ -121,7 +121,7 @@ const offers = (await call(ALL, null, a)).offers; assert.equal(offers.length, 5)
 assert.ok(!JSON.stringify(offers).match(/ownerName|ownerPhone|ownerEmail|example\.com|555-?01\d\d|Sample Owner/i), "offers carry no owner details");
 const L = offers[0].id;
 const first = await call("/api/pro/buy", { leadId: L, kind: "shared" }, a);
-assert.equal(first.free, true); assert.equal(first.balance, 240); assert.equal(first.freeLeadsLeft, 2); assert.ok(first.lead.ownerPhone);
+assert.equal(first.price, 75); assert.equal(first.creditUsed, 75); assert.equal(first.balanceBefore, 240); assert.equal(first.balance, 165, "every claim comes out of the wallet"); assert.equal(first.credit, 165); assert.ok(first.lead.ownerPhone);
 assert.equal((await call("/api/pro/buy", { leadId: L, kind: "shared" }, a)).status, 409, "cannot buy the same lead twice");
 assert.equal((await call(ALL, null, a)).offers.length, 4);
 
@@ -135,15 +135,20 @@ assert.equal((await call("/api/pro/buy", { leadId: offers[2].id, kind: "exclusiv
 
 // five pros at most
 const others = []; for (let n = 3; n <= 6; n++) others.push(await signUp(n));
-for (const c of [b, ...others.slice(0, 3)]) assert.equal((await call("/api/pro/buy", { leadId: L, kind: "shared" }, c)).status, 200);
-assert.equal((await call("/api/pro/buy", { leadId: L, kind: "shared" }, others[3])).status, 410, "sixth pro is refused");
+const short = await call("/api/pro/buy", { leadId: L, kind: "shared" }, b); assert.equal(short.status, 402); assert.match(short.error, /wallet has \$15\.00\. Add \$60 or more/, "the $15 left after an exclusive is not enough for another lead");
+for (const c of others) assert.equal((await call("/api/pro/buy", { leadId: L, kind: "shared" }, c)).status, 200);
+assert.equal((await call("/api/pro/buy", { leadId: L, kind: "shared" }, await signUp(7))).status, 410, "sixth pro is refused");
 assert.equal(leads.find((l) => l.id === L).fields.Status, "Sold out");
 
-// paid purchase after free leads run out, my leads, bad-lead report
+// $240 of welcome credit is three leads with $15 left; the fourth needs a top-up, then mixes credit and paid funds
 seedForm(20); seedForm(21); seedForm(22); await ingest(env);
 const open = (await call(ALL, null, a)).offers;
 await call("/api/pro/buy", { leadId: open[0].id, kind: "shared" }, a); await call("/api/pro/buy", { leadId: open[1].id, kind: "shared" }, a);
-const paid = await call("/api/pro/buy", { leadId: open[2].id, kind: "shared" }, a); assert.equal(paid.free, false); assert.equal(paid.balance, 165);
+assert.equal((await call("/api/pro/me", null, a)).pro.balance, 15, "three leads leave $15"); assert.equal((await call("/api/pro/me", null, a)).pro.credit, 15);
+assert.equal((await call("/api/pro/buy", { leadId: open[2].id, kind: "shared" }, a)).status, 402, "the fourth lead needs a top-up");
+assert.equal((await call("/api/pro/add-funds", { amount: 100 }, a)).pro.balance, 115);
+const paid = await call("/api/pro/buy", { leadId: open[2].id, kind: "shared" }, a); assert.equal(paid.creditUsed, 15); assert.equal(paid.paidUsed, 60); assert.equal(paid.balance, 40); assert.equal(paid.credit, 0);
+assert.equal(db.tblJnYLq2aCiCVU1C.at(-1).fields["Credit Used"], 15);
 const mine = (await call("/api/pro/leads", null, a)).leads; assert.equal(mine.length, 4);
 assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "wrong number" }, a)).status, 200);
 assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "again" }, a)).status, 409);
@@ -194,14 +199,14 @@ assert.equal((await call("/api/pro/offers", null, m1)).filters.market, "Nashvill
 assert.equal((await call("/api/pro/notifications", { quietStart: "21:00" }, m1)).status, 400);
 const noti = await call("/api/pro/notifications", { textOffers: true, emailOffers: false, paused: true, dailyCap: "5", quietStart: "21:00", quietEnd: "07:00" }, m1);
 assert.equal(noti.pro.paused, true); assert.equal(noti.pro.dailyCap, 5); assert.equal(noti.pro.quietHours, "21:00-07:00");
-const got = await call("/api/pro/buy", { leadId: everything.offers[0].id, kind: "shared" }, m1); assert.equal(got.free, true);
+const got = await call("/api/pro/buy", { leadId: everything.offers[0].id, kind: "shared" }, m1); assert.equal(got.creditUsed, 75);
 const pl = (await call("/api/pro/leads", null, m1)).leads[0]; assert.equal(pl.pipeline, "New");
 assert.equal((await call("/api/pro/lead-status", { purchaseId: pl.purchaseId, pipeline: "Dancing" }, m1)).status, 400);
 assert.equal((await call("/api/pro/lead-status", { purchaseId: pl.purchaseId, pipeline: "Quoted", notes: "Sent quote" }, m1)).status, 200);
 assert.equal((await call("/api/pro/lead-status", { purchaseId: pl.purchaseId, pipeline: "Won" }, a)).status, 404, "cannot change another pro's lead");
 const pl2 = (await call("/api/pro/leads", null, m1)).leads[0]; assert.equal(pl2.pipeline, "Quoted"); assert.equal(pl2.notes, "Sent quote");
-const wal = await call("/api/pro/wallet", null, m1); assert.equal(wal.balance, 240); assert.equal(wal.rows.length, 1); assert.equal(wal.cardsReady, false); assert.equal(wal.membership.waived, true);
-assert.equal((await call("/api/pro/add-funds", { amount: 7 }, m1)).status, 400); assert.equal((await call("/api/pro/add-funds", { amount: 100 }, m1)).pro.balance, 340, "test accounts can add test funds");
+const wal = await call("/api/pro/wallet", null, m1); assert.equal(wal.balance, 165); assert.equal(wal.credit, 165); assert.equal(wal.rows[0].creditUsed, 75); assert.equal(wal.rows.length, 1); assert.equal(wal.cardsReady, false); assert.equal(wal.membership.waived, true);
+assert.equal((await call("/api/pro/add-funds", { amount: 7 }, m1)).status, 400); assert.equal((await call("/api/pro/add-funds", { amount: 100 }, m1)).pro.balance, 265, "test accounts can add test funds");
 db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550170").fields.Test = false;
 assert.equal((await call("/api/pro/add-funds", { amount: 100 }, m1)).status, 503, "real accounts cannot add funds until Square is connected");
 assert.equal((await call("/api/pro/tickets", { subject: "", message: "" }, m1)).status, 400);

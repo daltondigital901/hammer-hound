@@ -32,7 +32,8 @@
     "SHADOW_EXCLUSIVE_PRICE": "225",
     "SHADOW_MAX_PROS": "5",
     "SHADOW_OFFER_HOURS": "24",
-    "TEST_BALANCE": "240",
+    // Free lead credit every new pro starts with. At $75 a lead that is 3 leads with $15 left over.
+    "WELCOME_CREDIT": "240",
     "AI_MODEL": "claude-sonnet-5-5",
     "AI_MODEL_BACKUP": "claude-haiku-5-5",
     "AI_VERSION": "2026-10-21",

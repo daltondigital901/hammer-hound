@@ -307,6 +307,23 @@ legend + .option-grid { margin-top: 0; }
 .lead-contact a { font-weight: 700; font-size: 17px; }
 .test-banner { padding: 10px 14px; border-radius: 10px; background: var(--orange-tint); color: var(--orange-text); font-weight: 600; font-size: 14px; margin-bottom: 16px; }
 .portal .card.form { max-width: 560px; }
+/* claim toast */
+.toast { position: fixed; z-index: 60; left: 12px; right: 12px; top: 16px; margin: 0 auto; max-width: 440px; display: grid; grid-template-columns: auto 1fr auto; gap: 14px; align-items: start; padding: 16px; border-radius: 16px; background: var(--yellow); color: var(--asphalt); border: 3px solid var(--asphalt); box-shadow: 6px 6px 0 var(--asphalt); animation: toast-in .5s cubic-bezier(.2, 1.5, .4, 1) both; }
+.toast.is-leaving { animation: toast-out .3s ease-in both; }
+.toast img { width: 58px; animation: toast-hound .6s .35s cubic-bezier(.3, 1.6, .5, 1) both; }
+.toast-title { font-weight: 800; font-size: 22px; line-height: 1.1; }
+.toast-job { font-weight: 700; margin-top: 2px; }
+.toast-money { margin-top: 8px; font-size: 14px; } .toast-money strong { font-size: 18px; font-weight: 800; }
+.toast-next { margin-top: 4px; font-size: 14px; } .toast .btn { margin-top: 10px; }
+.toast-x { border: 0; background: none; font-size: 26px; line-height: 1; cursor: pointer; color: var(--asphalt); padding: 0 4px; }
+.toast-sparks { position: absolute; top: -8px; left: 44px; width: 10px; height: 10px; border-radius: 50%; background: var(--orange); box-shadow: -34px 18px 0 -2px var(--asphalt), 40px 6px 0 -1px var(--white), 96px -4px 0 -2px var(--orange), 170px 10px 0 -3px var(--asphalt), 250px -2px 0 -2px var(--white); animation: toast-sparks 1.1s .25s ease-out both; pointer-events: none; }
+@keyframes toast-in { from { transform: translateY(-140%) rotate(-3deg); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes toast-out { to { transform: translateY(-140%); opacity: 0; } }
+@keyframes toast-hound { from { transform: scale(.3) rotate(-25deg); } to { transform: rotate(-6deg); } }
+@keyframes toast-sparks { 0% { transform: translateY(18px) scale(.3); opacity: 0; } 30% { opacity: 1; } 100% { transform: translateY(-34px) scale(1.2); opacity: 0; } }
+[data-balance].is-spending { color: var(--yellow); transform: scale(1.15); transition: transform .2s; }
+[data-balance] { transition: transform .4s; display: inline-block; }
+@media (prefers-reduced-motion: reduce) { .toast, .toast img, .toast-sparks { animation: none; } .toast-sparks { display: none; } }
 /* portal layout: bottom bar on phones, sidebar from 960px */
 .portal-wrap { max-width: 1180px; padding-bottom: 96px; }
 .pp-main { min-width: 0; }

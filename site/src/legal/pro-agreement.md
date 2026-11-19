@@ -51,11 +51,11 @@ The person who accepts this Agreement confirms that they are at least 18 and hav
 
 **3.6 Your account.** Your account is for your business only. You are responsible for everything done through it and for keeping your sign-in details secure. One business may hold one account. We accept one account per Employer Identification Number.
 
-**3.7 What you may not do.** You may not create an account with false information, open more than one account to obtain free leads, resell or share leads, copy or scrape the service, interfere with it, or use it to break any law.
+**3.7 What you may not do.** You may not create an account with false information, open more than one account to obtain welcome credit, resell or share leads, copy or scrape the service, interfere with it, or use it to break any law.
 
 ### 4. Verification and the Verified Pro badge
 
-**4.1 Viewing before verification.** You may create an account and view available leads before you are verified. You cannot claim, buy or receive a lead, including a free lead, until you are verified.
+**4.1 Viewing before verification.** You may create an account and view available leads before you are verified. You cannot claim, buy or receive a lead, including with welcome credit, until you are verified.
 
 **4.2 What we ask for.** To be verified you give us your legal business name and Employer Identification Number and upload one proof of your business and proof of insurance. We do not accept a Social Security number in place of an Employer Identification Number.
 
@@ -73,7 +73,7 @@ The person who accepts this Agreement confirms that they are at least 18 and hav
 
 **5.2 Balance and card on file.** Leads are paid from your account balance. You add to your balance with a card, and you may turn on automatic reloads. You authorize us and our payment processor to charge your card on file for the amounts you choose and for any reload you turn on. A balance is not a bank deposit and earns no interest.
 
-**5.3 Free leads.** A new pro may claim up to 3 leads at no charge after passing verification. Free leads have no cash value, cannot be transferred and are not eligible for credit or refund.
+**5.3 Welcome credit.** A new pro account starts with $240 of welcome credit, which is enough for 3 shared leads at the standard price of $75. Welcome credit can be spent only on leads, only after you pass verification, and is spent before money you add. It has no cash value, cannot be withdrawn, transferred or refunded, and may be changed or ended for new accounts at any time. If a lead paid for with welcome credit qualifies under the Lead Credit Policy, the welcome credit is returned to your balance; it is not paid out.
 
 **5.4 All purchases are final** except as stated in the Lead Credit Policy in section 6.
 
@@ -141,7 +141,7 @@ You will defend and indemnify Dalton Enterprises LLC and its owners, employees a
 
 **14.2 By us.** We may suspend or close an account that breaks this Agreement, gives false information, puts users at risk or abuses the Lead Credit Policy.
 
-**14.3 What happens to your balance.** \[On closure, any unused paid balance is refunded to your card on file, less amounts owed to us. Promotional credits and free leads are not refunded.\]
+**14.3 What happens to your balance.** \[On closure, any unused paid balance is refunded to your card on file, less amounts owed to us. Welcome credit and other promotional credit are not refunded.\]
 
 **14.4 What continues.** Sections 3.3, 3.4 and 8 through 13 continue after your account closes.
 
