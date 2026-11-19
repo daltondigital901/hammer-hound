@@ -331,6 +331,54 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   const ack = sent.find((e) => /Welcome to Hammer Hound: your membership terms/.test(e.subject)); assert.ok(ack); assert.match(ack.text, /renews automatically for 12 months and \$300 is charged/); assert.match(ack.text, /To cancel at any time/);
 }
 
+// ---- audit fixes: sign-in limits, declined cards, unsubscribe, writer retries, market requests ----
+{
+  const P = db.tbl9bEGuy8DPkkee7, find = (mob) => P.find((p) => p.fields.Mobile === mob);
+  // five wrong codes lock the account for the hour, even against the right code
+  await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "g@example.com", business: "Guarded", phone: "9015550183" });
+  for (let i = 0; i < 5; i++) assert.equal((await call("/api/pro/verify-code", { phone: "9015550183", code: "000000" })).status, 401);
+  assert.equal((await call("/api/pro/verify-code", { phone: "9015550183", code: "424242" })).status, 429, "locked after five wrong codes");
+  assert.equal((await call("/api/pro/sign-in", { phone: "9015550183" })).status, 429);
+  find("9015550183").fields["Sign-in Guard"] = ""; for (let i = 0; i < 5; i++) assert.equal((await call("/api/pro/sign-in", { phone: "9015550183" })).status, 200);
+  assert.equal((await call("/api/pro/sign-in", { phone: "9015550183" })).status, 429, "five codes an hour at most");
+
+  // a declined card: nothing charged, a link to fix it, and the lead is claimed once a working card is saved
+  const dc = await signUp(84), dp = find("9015550184"); dp.fields.Balance = 15; dp.fields["Welcome Credit"] = 15;
+  seedForm(70, { service: "Roof Repair", city: "Memphis" }); await ingest(env);
+  const target = (await call(ALL, null, dc)).offers[0], led = db.tblZ2EIWCgOb36JR2.length, m0 = sent.length;
+  assert.equal((await call("/api/pro/card", { action: "save", decline: true }, dc)).pro.card, "Test card ending 0002");
+  const dec = await call("/api/pro/buy", { leadId: target.id, kind: "shared", reload: true }, dc);
+  assert.equal(dec.status, 402); assert.equal(dec.declined, true); assert.match(dec.error, /was declined, so this lead is not yours yet/); assert.equal(dp.fields.Balance, 15, "nothing was charged or added"); assert.equal(db.tblZ2EIWCgOb36JR2.length, led);
+  assert.match(dp.fields["Pending Reload"], new RegExp("^150\\|" + target.id + "\\|shared\\|"));
+  const mail = sent.slice(m0).find((e) => e.subject === "Your card was declined"); assert.ok(mail); const link = mail.html.match(/https:\/\/hammerhound\.com(\/api\/pro\/link\?t=[^"]+)/)[1];
+  assert.equal((await call("/api/pro/wallet", null, dc)).pending.amount, 150);
+  const viaLink = await worker.fetch(new Request("http://x" + link), env); assert.equal(viaLink.status, 302); assert.equal(viaLink.headers.get("Location"), "/pros/app/#wallet"); assert.match(viaLink.headers.get("Set-Cookie"), /^hh_s=rec/, "the link signs the pro in");
+  assert.equal((await worker.fetch(new Request("http://x" + link.slice(0, -3) + "abc"), env)).headers.get("Location"), "/pros/sign-in/", "a tampered link does not sign anyone in");
+  const fixed = await call("/api/pro/card", { action: "save" }, dc);
+  assert.equal(fixed.reloaded, 150); assert.equal(fixed.claimed.lead.id, target.id, "the lead is claimed as soon as the card works"); assert.equal(fixed.pro.balance, 90); assert.equal(dp.fields["Pending Reload"], "");
+  assert.deepEqual(db.tblZ2EIWCgOb36JR2.slice(-2).map((r) => r.fields.Type), ["Top-up", "Lead"]);
+  // by text: the reply carries the link
+  Object.assign(env, { TWILIO_ACCOUNT_SID: "AC1", TWILIO_AUTH_TOKEN: "tok", TWILIO_FROM: "+19015550000" });
+  const tp = { id: "recTEXTDECLINE0001", fields: { "Business Name": "Text Decline", Mobile: "9013334444", Email: "td@example.com", Trade: "roofing", City: "Memphis", Verification: "Verified", "Text Offers": true, Balance: 0, Card: "Test card ending 0002", "Card Token": "TEST-DECLINE", Test: true, "Created At": new Date().toISOString() } }; P.push(tp);
+  seedForm(71, { service: "Roof Repair", city: "Memphis" }); await ingest(env); tp.fields["Last Offer"] = db.tblfA6ivDIlWVp4us.at(-1).id + "|x";
+  const sms = async (body) => { const url = "https://hammerhound.com/api/sms/inbound", p = { Body: body, From: "+19013334444" }; const r = await worker.fetch(new Request(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Twilio-Signature": createHmac("sha1", "tok").update(url + Object.keys(p).sort().map((k) => k + p[k]).join("")).digest("base64") }, body: new URLSearchParams(p) }), env); return r.text(); };
+  assert.match(await sms("YES"), /your card was declined, so that lead is not yours yet\. Update it here and we reload and claim it for you: https:\/\/hammerhound\.com\/api\/pro\/link\?t=rec/);
+  assert.match(await sms("TOPUP 300"), /card was declined, so nothing was added\. Update it here and we finish the \$300 top-up/); P.splice(P.indexOf(tp), 1);
+
+  // the lead writer stops after three failed runs on the same lead
+  const { styleLeads } = await import("../src/worker.js"), LD = db.tblfA6ivDIlWVp4us;
+  LD.push({ id: "recSTUCKLEAD000001", fields: { Lead: "raw", Service: "raw", Status: "Offered", "Offer Ends At": new Date(Date.now() + 1e7).toISOString(), "Received At": new Date().toISOString() } });
+  ai.down = true; for (let i = 0; i < 3; i++) await styleLeads(env); const calls = ai.calls; await styleLeads(env); ai.down = false;
+  assert.equal(LD.at(-1).fields.Style, "failed 3"); assert.equal(ai.calls, calls, "no more AI calls are spent on it");
+
+  // "I want more leads here": recorded once per pro, market and trade
+  const MR = db.tbl315ujQMh1PHOi8;
+  assert.equal((await call("/api/pro/market-request", { market: "all", trade: "roofing" }, dc)).status, 400);
+  assert.equal((await call("/api/pro/market-request", { market: "Tupelo", trade: "roofing", total: 12 }, dc)).status, 200); await call("/api/pro/market-request", { market: "tupelo", trade: "roofing" }, dc);
+  assert.equal(MR.length, 1); assert.deepEqual([MR[0].fields.Request, MR[0].fields.Market, MR[0].fields.Trade, MR[0].fields["Open Leads Then"], MR[0].fields.Verified], ["Roofing · Tupelo", "Tupelo", "roofing", 12, true]);
+  assert.equal((await call("/api/pro/market-request", { market: "Tupelo", trade: "roofing" }, null)).status, 401);
+}
+
 // ---- insurance reminders and nudges ----
 const R = (f, now) => (reminderFor({ Email: "a@b.co", Verification: "Verified", ...f }, now) || {}).stage;
 assert.equal(R({ "Insurance Expires": "2027-03-31" }, "2027-02-01"), undefined, "nothing more than 30 days out");
@@ -353,7 +401,7 @@ assert.ok(!lapsedMail.html.match(/owner\d+@example\.com|90155501\d\d|Sample Owne
 assert.equal((await sendReminders(env)).sent, 0, "the same reminder is not sent twice");
 const link = new URL(lapsedMail.html.match(/https:\/\/hammerhound\.com\/api\/unsubscribe[^"]+/)[0].replace(/&amp;/g, "&"));
 assert.match(await (await worker.fetch(new Request("http://x" + link.pathname + "?p=" + link.searchParams.get("p") + "&s=bad"), env)).text(), /not valid/);
-assert.match(await (await worker.fetch(new Request("http://x" + link.pathname + link.search), env)).text(), /will not send/); assert.equal(pb.fields["Nudges Off"], true);
+assert.match(await (await worker.fetch(new Request("http://x" + link.pathname + link.search), env)).text(), /will not send/); assert.equal(pb.fields["Nudges Off"], true); assert.equal(pb.fields["Email Offers"], false, "unsubscribing also stops lead alert emails");
 pb.fields["Insurance Expires"] = soon(-8); assert.equal((await sendReminders(env)).sent, 0, "unsubscribed pros get no more nudges");
 assert.equal((await call("/api/admin/reminders", { dry: true }, null)).status, 401);
 assert.equal((await call("/api/admin/ingest", {}, null)).status, 401);

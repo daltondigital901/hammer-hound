@@ -312,7 +312,7 @@
         var status = h("div");
         var act = function (kind, reload) { return function () {
           call("/api/pro/buy", { leadId: o.id, kind: kind, reload: !!reload }).then(function (res) {
-            if (res.error) { status.innerHTML = ""; status.appendChild(note(res.error, res.status === 402 ? "" : "bad")); if (res.status === 402) status.appendChild(h("button", { class: "btn btn--outline btn--sm", type: "button", text: "Open wallet", on: { click: function () { go("wallet"); } } })); return; }
+            if (res.error) { status.innerHTML = ""; status.appendChild(note(res.error, res.status === 402 ? "" : "bad")); if (res.status === 402) status.appendChild(h("button", { class: "btn btn--" + (res.declined ? "black" : "outline") + " btn--sm", type: "button", text: res.declined ? "Update my card" : "Open wallet", on: { click: function () { go("wallet"); } } })); return; }
             pro.balance = res.balance; pro.credit = res.credit; claimed(res); go("leads");
           });
         }; };
@@ -336,8 +336,16 @@
           ]),
         ]));
       });
-      var empty = card([h("h2", { text: "No open leads for this market and trade" }), h("p", { class: "sub", text: f.total ? f.total + " lead" + (f.total === 1 ? " is" : "s are") + " open in other markets or trades." : "New leads show up here as they come in." }),
-        f.total ? h("button", { class: "btn btn--black btn--block", type: "button", text: "Show all markets and trades", on: { click: function () { pick = { market: "all", trade: "all" }; offersView(); } } }) : null]);
+      var wantStatus = h("div"), askable = f.market !== "all";
+      var tradeLabel = f.trade === "all" ? "" : ((f.trades.filter(function (t) { return t.slug === f.trade; })[0] || {}).name || pro.tradeName || "").toLowerCase();
+      var want = h("button", { class: "btn btn--yellow btn--block btn--lg", type: "button", text: "I want more " + (tradeLabel ? tradeLabel + " " : "") + "leads in " + f.market + "!", on: { click: function () {
+        want.disabled = true;
+        call("/api/pro/market-request", { market: f.market, trade: f.trade, total: f.total }).then(function (res) { wantStatus.innerHTML = ""; if (res.error) { want.disabled = false; wantStatus.appendChild(note(res.error, "bad")); return; } want.hidden = true; wantStatus.appendChild(note("Got it. We have told the team you want " + (res.trade === "all trades" ? "" : res.trade.toLowerCase() + " ") + "leads in " + res.market + ". We use these requests to decide where to advertise next.", "good")); });
+      } } });
+      var empty = card([h("h2", { text: askable ? "No open leads in " + f.market + (tradeLabel ? " for " + tradeLabel : "") + " right now" : "No open leads for this trade right now" }),
+        h("p", { class: "sub", text: askable ? "Tell us you want them. We advertise where pros ask for leads." : "New leads show up here as they come in." }),
+        askable ? want : null, wantStatus,
+        f.total ? h("button", { class: "btn btn--outline btn--block", type: "button", text: "See the " + f.total + " open in other markets and trades", on: { click: function () { pick = { market: "all", trade: "all" }; offersView(); } } }) : null]);
       shell([head(r.canBuy ? "Open leads" : "Open leads in your market", r.offers.length + " showing of " + f.total + " open"), filters, items.length ? h("div", { class: "grid grid--3 pp-grid" }, items) : empty]);
     });
   }
@@ -392,14 +400,24 @@
       var cardBox = r.card
         ? [h("p", { class: "pp-cardline" }, [h("strong", { text: r.card }), h("button", { class: "btn btn--text btn--sm", type: "button", text: "Remove", on: { click: function () { call("/api/pro/card", { action: "remove" }).then(function () { walletView(); }); } } })]), field("w-amount", "Amount to add", amount), add, status]
         : [h("p", { class: "sub", text: "Save a card once and every lead is one tap or one text away. You are not charged until your wallet cannot cover a lead you claim." }),
-           h("button", { class: "btn btn--yellow btn--block", type: "button", text: r.cardsReady ? "Add a card" : r.testCard ? "Save a test card" : "Add a card", on: { click: function () { call("/api/pro/card", { action: "save" }).then(function (res) { if (res.error) { cardStatus.innerHTML = ""; cardStatus.appendChild(note(res.error)); return; } walletView(); }); } } }),
+           h("button", { class: "btn btn--yellow btn--block", type: "button", text: r.cardsReady ? "Add a card" : r.testCard ? "Save a test card" : "Add a card", on: { click: saveCard(false) } }),
+           r.testCard ? h("button", { class: "btn btn--text btn--block", type: "button", text: "Save a test card that declines", on: { click: saveCard(true) } }) : null,
            r.cardsReady ? null : h("p", { class: "hint", text: r.testCard ? "Card payments are not switched on yet. This is a test account, so a test card stands in. Nothing is charged." : "Card payments are not switched on yet. We will email you when they are." }), cardStatus];
+      // A declined card leaves a reload waiting. Saving a working card finishes it, and claims the lead it was for.
+      function saveCard(decline) { return function () { call("/api/pro/card", { action: "save", decline: decline }).then(function (res) {
+        if (res.error) { cardStatus.innerHTML = ""; cardStatus.appendChild(note(res.error)); return; }
+        pro = res.pro;
+        if (res.claimed) { claimed(res.claimed); go("leads"); return; }
+        walletView();
+        if (res.reloaded) setTimeout(function () { var m = document.querySelector(".pp-main"); if (m) m.insertBefore(note(money0(res.reloaded) + " added to your wallet." + (res.claimError ? " The lead could not be claimed: " + res.claimError : ""), "good"), m.children[1] || null); }, 400);
+      }); }; }
       var auto = toggle("w-auto", "Auto-reload", "When your wallet cannot cover a lead, charge my card the reload amount so the claim goes through.", r.autoReload);
       var unit = select("w-unit", amounts, String(r.reloadAmount)), limit = input("w-limit", "number", r.monthlyLimit || "", { min: "75", step: "25", placeholder: "No limit" });
       var saveReload = h("button", { class: "btn btn--outline btn--block", type: "button", text: "Save reload settings", on: { click: function () { saver(reloadStatus, saveReload, "/api/pro/reload-settings", { autoReload: auto.box.checked, reloadAmount: Number(unit.value), monthlyLimit: limit.value }, function () { walletView(); }); } } });
       var rows = r.rows.map(function (x) { return h("tr", {}, [h("td", { text: when(x.date) }), h("td", { text: x.entry }), h("td", { text: x.type }), h("td", { class: "num" + (x.amount > 0 ? " is-in" : ""), text: (x.amount > 0 ? "+" : "-") + money(Math.abs(x.amount)) }), h("td", { class: "num", text: money(x.balanceAfter) })]); });
       var m = r.membership;
       shell([head("Wallet", "Your balance, your card, your invoices."),
+        r.pending ? h("div", { class: "unlock unlock--alert" }, [h("img", { src: "/assets/img/badge.png", alt: "", width: "50", height: "60" }), h("div", {}, [h("strong", { text: "Your card was declined." }), h("span", { text: "Update your card below and we will add " + money0(r.pending.amount) + " to your wallet" + (r.pending.lead ? " and claim the lead you were after, if it is still open." : ".") })]), h("button", { class: "btn btn--black", type: "button", text: r.card ? "Replace my card" : "Add a card", on: { click: function () { call("/api/pro/card", { action: "remove" }).then(function () { walletView(); }); } } })]) : null,
         h("div", { class: "pp-two" }, [
           card([h("h2", { text: "Balance" }), h("p", { class: "offer-price", text: money(r.balance) }),
             h("p", { class: "meta", text: r.credit > 0 ? money(r.credit) + " of this is free welcome credit. It is spent before money you add." : "Leads are paid from this balance." }),
