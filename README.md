@@ -172,3 +172,7 @@ Every lead is rewritten by the AI into one format before any pro sees it (`style
 
 - **Age comes from when the owner sent the request** (`Received At`), not when it was copied. Hot for 72 hours (`HOT_HOURS`), then an older lead until it is 7 days old (`LEAD_DAYS`), then closed. Open leads has a tab for each. Text and email alerts only go out for hot leads.
 - **Bid invitations** from contractors and agencies are accepted. The writer marks them `request_type: bid` and the title is forced to "<Scope> Bid Invitation"; the summary starts "A contractor is inviting bids". Format `v2` re-writes every open lead and re-checks leads the writer rejected under `v1`.
+
+## Older leads are marked down
+
+`priceOf()` is the one place a lead's price is worked out, for the card and for the charge. Hot leads are full price. Past 72 hours the price is a percent of the hot price by day: `AGED_PRICING` = `50,40,30,20` (day 3, 4, 5, 6), rounded to the nearest $5, never under $10. At $75 / $225 that is $40 / $115, $30 / $90, $25 / $70, $15 / $45. The purchase row stores the price paid.

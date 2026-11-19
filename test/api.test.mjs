@@ -387,7 +387,12 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   const r = await call(ALL, null, c), by = (id) => r.offers.find((o) => o.id === id);
   assert.equal(by(hot).hot, true, "under 72 hours is hot"); assert.equal(by(old).hot, false, "past 72 hours is an older lead"); assert.equal(by(week).hot, false); assert.equal(by(gone), undefined, "a week old is closed");
   assert.equal(r.hot + r.older, r.offers.length); assert.equal(r.hotHours, 72); assert.equal(r.leadDays, 7);
-  assert.equal((await call("/api/pro/buy", { leadId: gone, kind: "shared" }, c)).status, 410); assert.equal((await call("/api/pro/buy", { leadId: old, kind: "shared" }, c)).status, 200, "older leads can still be claimed");
+  assert.equal((await call("/api/pro/buy", { leadId: gone, kind: "shared" }, c)).status, 410); // older leads are marked down by age: 50, 40, 30, 20 percent of the hot price, to the nearest $5
+  const d5 = mk("recAGEDAY50000001", 5 * 24 + 1);
+  { const v = (await call(ALL, null, c)).offers, g = (id) => v.find((o) => o.id === id);
+    assert.deepEqual([g(hot).sharedPrice, g(hot).percentOff], [75, 0]); assert.deepEqual([g(old).sharedPrice, g(old).exclusivePrice, g(old).fullPrice, g(old).percentOff], [40, 115, 75, 50]);
+    assert.deepEqual([g(d5).sharedPrice, g(d5).exclusivePrice], [25, 70]); assert.deepEqual([g(week).sharedPrice, g(week).exclusivePrice, g(week).percentOff], [15, 45, 80]); }
+  const paid = await call("/api/pro/buy", { leadId: old, kind: "shared" }, c); assert.equal(paid.status, 200, "older leads can still be claimed"); assert.equal(paid.price, 40, "and the marked-down price is what is charged");
   // text and email alerts only go out for hot leads
   const { alertPros, styleLeads } = await import("../src/worker.js");
   for (const l of LD) l.fields.Alerted = "x"; LD.find((l) => l.id === week).fields.Alerted = ""; assert.equal((await alertPros(env)).leads, 0);

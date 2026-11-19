@@ -30,6 +30,7 @@
     "BACKFILL_DAYS": "30",
     "SHADOW_SHARED_PRICE": "75",
     "SHADOW_EXCLUSIVE_PRICE": "225",
+    "AGED_PRICING": "50,40,30,20",
     "SHADOW_MAX_PROS": "5",
     // Free lead credit every new pro starts with. At $75 a lead that is 3 leads with $15 left over.
     "WELCOME_CREDIT": "240",
