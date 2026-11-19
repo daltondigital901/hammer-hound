@@ -11,7 +11,7 @@ const DIST = join(ROOT, "site", "dist");
 const TYPES = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".ico": "image/x-icon", ".json": "application/json", ".webmanifest": "application/manifest+json", ".xml": "application/xml", ".txt": "text/plain" };
 
 // ---- in-memory Airtable ----
-export const db = { tblW1A0iKDAd111iI: [], tblfA6ivDIlWVp4us: [], tbl9bEGuy8DPkkee7: [], tblJnYLq2aCiCVU1C: [], tbl9olHmI5p746DOe: [], tblFDXXEvvlb6F8vN: [], tblZ2EIWCgOb36JR2: [] };
+export const db = { tblW1A0iKDAd111iI: [], tblfA6ivDIlWVp4us: [], tbl9bEGuy8DPkkee7: [], tblJnYLq2aCiCVU1C: [], tbl9olHmI5p746DOe: [], tblFDXXEvvlb6F8vN: [], tblZ2EIWCgOb36JR2: [], tbl315ujQMh1PHOi8: [] };
 let seq = 0;
 const rid = () => "rec" + String(++seq).padStart(14, "0");
 const NUM = "fldfJJYK166eGNfxw";
@@ -40,6 +40,7 @@ function matches(table, rec, formula) {
   if ((m = formula.match(/^\{Mobile\}='(.*)'$/))) return f.Mobile === m[1];
   if ((m = formula.match(/^\{EIN\}='(.*)'$/))) return f.EIN === m[1];
   if ((m = formula.match(/^\{Pro ID\}='(.*)'$/))) return f["Pro ID"] === m[1];
+  if ((m = formula.match(/^\{Key\}='(.*)'$/))) return f.Key === m[1];
 
   if ((m = formula.match(/^FIND\('(.*)',\{Purchase\}\)>0$/))) return String(f.Purchase).includes(m[1]);
   if ((m = formula.match(/^AND\(\{Pro ID\}='(.*?)',\{Month\}='(.*?)'(,\{Type\}='Top-up')?\)$/))) return f["Pro ID"] === m[1] && f.Month === m[2] && (!m[3] || f.Type === "Top-up");
@@ -48,7 +49,7 @@ function matches(table, rec, formula) {
   if (formula === "NOT({Email}='')") return !!f.Email;
   if (formula.includes("{Alerted}=''")) return f.Status === "Offered" && f.Style === "v1" && new Date(f["Offer Ends At"]) > new Date() && !f.Alerted;
   if (formula.startsWith("AND({Status}='Offered',{Style}='v1'")) return f.Status === "Offered" && f.Style === "v1" && new Date(f["Offer Ends At"]) > new Date();
-  if (formula.startsWith("AND(NOT({Style}='v1')")) return f.Style !== "v1" && f.Status !== "Rejected";
+  if (formula.startsWith("AND(NOT({Style}='v1')")) return f.Style !== "v1" && f.Style !== "failed 3" && f.Status !== "Rejected";
   throw new Error("mock: unknown formula " + formula);
 }
 // ---- stand-in AI: decides from words inside the uploaded test files ----

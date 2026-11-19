@@ -159,3 +159,11 @@ Every lead is rewritten by the AI into one format before any pro sees it (`style
 - **Credit back.** Set a purchase's `Review Status` to `Approved` in Airtable and the price returns to the wallet within a minute, with an email. `Credited` is ticked so it happens once.
 - **Invoices.** `src/pdf.js` writes a branded PDF with no libraries. On the 1st to 3rd of each month each pro with activity is emailed last month's invoice; a copy goes to R2 at `invoices/<pro>/<YYYY-MM>.pdf`. Pros can open any month from the wallet (`GET /api/pro/invoice?month=YYYY-MM`). `POST /api/admin/invoices` with `X-Admin-Key` runs it by hand; `{"dry":true}` lists without sending, `{"month":"2026-11"}` picks the month.
 - **Membership.** Free for the first year from `Created At`, then $300 a year. The wallet shows the date. The charge itself is not built: it needs Square.
+
+## Declined cards, sign-in limits, market requests
+
+- **Declined card.** `topUp()` records `Pending Reload` (amount, lead, kind, time), emails "Your card was declined" with a one-hour link that signs the pro in and opens the wallet (`GET /api/pro/link?t=`), and texts the same link. Saving a working card within 48 hours runs the reload and claims the lead if it is still open. Test accounts can save "a test card that declines" to try it.
+- **Sign-in limits.** Five wrong codes, or five codes requested, locks an account for the rest of the hour (`Sign-in Guard`).
+- **Unsubscribe** now turns off lead alert emails as well as nudges. Receipts and renewal notices still send.
+- **Lead writer** marks a lead `failed 1` to `failed 3` when the AI cannot rewrite it and stops after three, so one bad lead cannot spend AI calls every minute. Clear `Style` to retry.
+- **Market requests.** When a pro's market and trade show no open leads, a button records the request in `Market Requests` (`tbl315ujQMh1PHOi8`), once per pro, market and trade.

@@ -609,3 +609,4 @@ legend + .option-grid { margin-top: 0; }
   .pp-grid .offer-actions { display: grid; grid-template-columns: 1fr; align-content: start; min-height: 110px; }
   .pp-grid .lead-facts dd { min-height: 2.9em; }
 }
+.unlock--alert { background: var(--orange-tint); border-color: var(--orange-text); box-shadow: 4px 4px 0 var(--orange-text); }

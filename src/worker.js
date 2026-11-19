@@ -16,7 +16,7 @@ const DD1 = {
 // Leads from these sites are never offered: GBP leads cannot be sold.
 const HAS_GBP = new Set(["Has One!", "Has One - Needs Final Owner Confirmed", "Has One - Needs Owner Transferred", "Has One, Doesn't Need Reviews", "First Suspension Appeal", "Second Suspension Appeal", "Suspended", "Soft Suspension", "Needs deletion"]);
 const RULE = "v2";
-const HH = { base: "app0PSwGlQyC6q7FW", leads: "tblfA6ivDIlWVp4us", pros: "tbl9bEGuy8DPkkee7", purchases: "tblJnYLq2aCiCVU1C", tickets: "tblFDXXEvvlb6F8vN", ledger: "tblZ2EIWCgOb36JR2" };
+const HH = { base: "app0PSwGlQyC6q7FW", leads: "tblfA6ivDIlWVp4us", pros: "tbl9bEGuy8DPkkee7", purchases: "tblJnYLq2aCiCVU1C", tickets: "tblFDXXEvvlb6F8vN", ledger: "tblZ2EIWCgOb36JR2", requests: "tbl315ujQMh1PHOi8" };
 const NOT_OPEN = "Hammer Hound is not open yet, so nothing was sent. Check back soon.";
 
 const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers } });
@@ -141,6 +141,10 @@ async function sendCode(env, phone) {
   });
   return r.ok ? { sent: "text" } : { error: "The code could not be texted. Try again." };
 }
+// Five wrong codes, or five codes requested, locks an account for the rest of the hour.
+const guardOf = (f) => { const [h, fails, sends] = String(f["Sign-in Guard"] || "").split("|"), hour = new Date().toISOString().slice(0, 13); return h === hour ? { hour, fails: Number(fails) || 0, sends: Number(sends) || 0 } : { hour, fails: 0, sends: 0 }; };
+const guardSave = (env, id, g) => update(env, HH.pros, id, { "Sign-in Guard": `${g.hour}|${g.fails}|${g.sends}` });
+const LOCKED = "Too many attempts on this account. Try again in an hour.";
 async function sessionCookie(env, proId) {
   const exp = Date.now() + 30 * 864e5, body = `${proId}.${exp}`;
   return `hh_s=${body}.${await hmac(env.SESSION_SECRET, body)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`;
@@ -346,6 +350,7 @@ function membershipCopy(f, n) {
       "The membership fee is separate from the leads you buy. The full terms are in section 5.5 of the Pro Agreement: https://hammerhound.com/pro-agreement/"].filter(Boolean),
     cta: ["Manage or cancel my membership", APP + "#account"] };
 }
+const pendingOf = (f) => { const [amount, leadId, , at] = String(f["Pending Reload"] || "").split("|"); return amount && Date.now() - Date.parse(at) < 48 * 3600e3 ? { amount: Number(amount), lead: !!leadId } : null; };
 const creditOf = (f) => Math.min(f["Welcome Credit"] || 0, f.Balance || 0);
 const usd = (n) => "$" + (Number.isInteger(n) ? n : n.toFixed(2));
 const prize = (f) => creditOf(f) > 0 ? `your Verified Pro badge and ${usd(creditOf(f))} in free lead credit` : "your Verified Pro badge and the leads in your market";
@@ -448,15 +453,29 @@ async function chargeCard(env, pro, amount) {
   const token = pro.fields["Card Token"];
   if (!token) return { ok: false, error: "There is no card on file." };
   if (token === "TEST" && pro.fields.Test) return { ok: true, id: "TEST-" + Date.now().toString(36).toUpperCase() };
+  if (token === "TEST-DECLINE" && pro.fields.Test) return { ok: false, declined: true, error: "Your card was declined." };
   return { ok: false, error: "Card payments are not switched on yet." };
 }
 const chargedThisMonth = async (env, pro) => (await list(env, HH.base, HH.ledger, { filterByFormula: `AND({Pro ID}='${pro.id}',{Month}='${monthOf()}',{Type}='Top-up')`, pageSize: 100, maxRecords: 100 })).reduce((n, r) => n + (r.fields.Amount || 0), 0);
 // Adds paid funds from the card on file. Honours the pro's monthly limit. Returns { ok, pro, paymentId } or { ok: false, error }.
-async function topUp(env, pro, amount, via) {
+// A one-hour link that signs the pro in and opens the wallet, for "update your card" messages.
+const walletLink = async (env, id) => { const body = `${id}.${Date.now() + 3600e3}`; return `${SITE}/api/pro/link?t=${body}.${(await hmac(env.SESSION_SECRET, "link:" + body)).slice(0, 40)}`; };
+// The card was declined: remember what was being paid for, and send a link to update the card.
+// When a working card is saved the reload runs and the lead is claimed (see /api/pro/card).
+async function cardDeclined(env, pro, amount, ctx) {
+  const link = await walletLink(env, pro.id), f = pro.fields;
+  await update(env, HH.pros, pro.id, { "Pending Reload": `${amount}|${ctx.leadId || ""}|${ctx.kind || ""}|${new Date().toISOString()}` });
+  await sendEmail(env, f.Email, "Your card was declined", [`Hi ${f["Business Name"]},`, `We tried to add ${usd2(amount)} to your wallet from ${f.Card || "your card on file"} and the card was declined. Nothing was charged.`,
+    ctx.leadId ? "The lead you claimed is not yours yet. Update your card and we will reload your wallet and claim it for you, if it is still open." : "Update your card and we will finish the reload for you.", "The button signs you in. It works for one hour."],
+    { heading: "Update your card to keep claiming", cta: ["Update my card", link] });
+  if (!ctx.replying && f["Text Offers"] && twilioReady(env) && !isTestPhone(f.Mobile)) await sendText(env, f.Mobile, `Hammer Hound: your card was declined, so ${ctx.leadId ? "that lead is not yours yet" : "your wallet was not reloaded"}. Update it here and we finish it for you: ${link}`);
+  return link;
+}
+async function topUp(env, pro, amount, via, ctx = {}) {
   const limit = pro.fields["Monthly Limit"] || 0;
   if (limit) { const used = await chargedThisMonth(env, pro); if (used + amount > limit) return { ok: false, error: `That would pass your monthly limit of ${usd2(limit)} (${usd2(used)} charged so far this month). Raise the limit in your wallet to continue.` }; }
   const paid = await chargeCard(env, pro, amount);
-  if (!paid.ok) return paid;
+  if (!paid.ok) { if (paid.declined) paid.link = await cardDeclined(env, pro, amount, ctx); return paid; }
   const after = cents((pro.fields.Balance || 0) + amount), saved = await update(env, HH.pros, pro.id, { Balance: after });
   await post(env, saved, { entry: `${via === "Auto-reload" ? "Auto-reload" : "Reload"} on ${pro.fields.Card || "card on file"}`, type: "Top-up", amount, balanceAfter: after, paymentId: paid.id, via });
   await sendEmail(env, saved.fields.Email, `Receipt: ${usd2(amount)} added to your Hammer Hound wallet`, [`Hi ${saved.fields["Business Name"]},`, `We charged ${usd2(amount)} to ${pro.fields.Card || "your card on file"} and added it to your wallet.`, `Wallet balance: ${usd2(after)}. Reference: ${paid.id}.`,
@@ -487,8 +506,8 @@ async function purchase(env, pro, { leadId, kind, reload = false, via = "Portal"
     const short = `This lead is ${usd2(price)} and your wallet has ${usd2(balance)}.`;
     if (!card) return no(402, `${short} Add a card to claim it.`, { short: cents(price - balance), card: "", reloadAmount: need });
     if (!reload && !pro.fields["Auto Reload"]) return no(402, `${short} Reload ${usd2(need)} on ${card} to claim it.`, { short: cents(price - balance), card, reloadAmount: need });
-    const t = await topUp(env, pro, need, via === "Text" ? "Text" : reload ? via : "Auto-reload");
-    if (!t.ok) return no(402, `${short} ${t.error}`, { short: cents(price - balance), card, reloadAmount: need });
+    const t = await topUp(env, pro, need, via === "Text" ? "Text" : reload ? via : "Auto-reload", { leadId, kind, replying: via === "Text" });
+    if (!t.ok) return no(402, t.declined ? `${card} was declined, so this lead is not yours yet. Update your card and we will reload and claim it for you.` : `${short} ${t.error}`, { short: cents(price - balance), card, reloadAmount: need, declined: !!t.declined, link: t.link });
     pro = t.pro; balance = pro.fields.Balance || 0; reloaded = need;
   }
   const credit = Math.min(pro.fields["Welcome Credit"] || 0, balance), creditUsed = Math.min(credit, price), after = cents(balance - price), creditAfter = cents(credit - creditUsed);
@@ -502,7 +521,17 @@ async function purchase(env, pro, { leadId, kind, reload = false, via = "Portal"
   if (saved.fields["Auto Reload"] && saved.fields.Card && after < lead.fields["Shared Price"]) { const t = await topUp(env, saved, reloadUnit(saved.fields), "Auto-reload"); if (t.ok) { saved = t.pro; autoReloaded = reloadUnit(saved.fields); } }
   return { status: 200, data: { lead: leadView(lead), kind, price, creditUsed, paidUsed: cents(price - creditUsed), balanceBefore: cents(balance - reloaded), reloaded, autoReloaded, card: saved.fields.Card || "", balance: saved.fields.Balance || 0, credit: Math.min(saved.fields["Welcome Credit"] || 0, saved.fields.Balance || 0), nextPrice: lead.fields["Shared Price"], low: (saved.fields.Balance || 0) < lead.fields["Shared Price"] }, pro: saved };
 }
-const buy = async (env, pro, body) => { const r = await purchase(env, pro, { leadId: body.leadId, kind: body.kind, reload: body.reload === true }); if (r.status === 200 && r.data.low) await promptTopUp(env, r.pro); return r.status === 200 ? json(r.data) : json({ error: r.error, short: r.short, card: r.card, reloadAmount: r.reloadAmount }, r.status); };
+const buy = async (env, pro, body) => { const r = await purchase(env, pro, { leadId: body.leadId, kind: body.kind, reload: body.reload === true }); if (r.status === 200 && r.data.low) await promptTopUp(env, r.pro); return r.status === 200 ? json(r.data) : json({ error: r.error, short: r.short, card: r.card, reloadAmount: r.reloadAmount, declined: r.declined }, r.status); };
+// After a card is saved: finish a reload that was declined, and claim the lead it was for if it is still open.
+async function finishPending(env, pro) {
+  const [amount, leadId, kind, at] = String(pro.fields["Pending Reload"] || "").split("|");
+  if (!amount || Date.now() - Date.parse(at) > 48 * 3600e3) return { pro };
+  const t = await topUp(env, pro, Number(amount), "Portal", { leadId, kind });
+  if (!t.ok) return { pro, pendingError: t.error };
+  let saved = await update(env, HH.pros, pro.id, { "Pending Reload": "" }), claimed = null, claimError = "";
+  if (leadId) { const r = await purchase(env, saved, { leadId, kind: kind || "shared" }); if (r.status === 200) { claimed = r.data; saved = r.pro; } else claimError = r.error; }
+  return { pro: saved, reloaded: Number(amount), claimed, claimError };
+}
 
 // Existing accounts from before the ledger: write their history once so the wallet and invoices are complete.
 async function ensureLedger(env, pro) {
@@ -602,8 +631,9 @@ async function inboundText(request, env) {
   }
   if (amount) {
     if (!pro.fields.Card) return reply("Hammer Hound: there is no card on file. Add one at hammerhound.com/pros/app/#wallet");
-    const t = await topUp(env, pro, amount, "Text");
+    const t = await topUp(env, pro, amount, "Text", { replying: true });
     await update(env, HH.pros, pro.id, { "Text State": "" });
+    if (t.declined) return reply(`Hammer Hound: your card was declined, so nothing was added. Update it here and we finish the ${usd(amount)} top-up for you: ${t.link}`);
     return reply(t.ok ? `Hammer Hound: done. ${usd(amount)} added to your wallet from ${pro.fields.Card}. A receipt is in your email.` : `Hammer Hound: not added. ${t.error}`);
   }
   if (pick) return reply(`Hammer Hound: to top up, reply TOPUP and pick an amount: 1 for ${usd(RELOADS[0])}, 2 for ${usd(RELOADS[1])}, 3 for ${usd(RELOADS[2])}.`);
@@ -612,7 +642,7 @@ async function inboundText(request, env) {
   const leadId = String(pro.fields["Last Offer"] || "").split("|")[0];
   if (!leadId) return reply("Hammer Hound: there is no open offer to claim. See open leads at hammerhound.com/pros/app/");
   const r = await purchase(env, pro, { leadId, kind, reload: true, via: "Text" });
-  if (r.status !== 200) return reply(`Hammer Hound: not claimed. ${r.error}${r.status === 402 ? " hammerhound.com/pros/app/#wallet" : ""}`);
+  if (r.status !== 200) return reply(r.declined ? `Hammer Hound: your card was declined, so that lead is not yours yet. Update it here and we reload and claim it for you: ${r.link}` : `Hammer Hound: not claimed. ${r.error}${r.status === 402 ? " hammerhound.com/pros/app/#wallet" : ""}`);
   const d = r.data, o = d.lead;
   // The whole lead, at once: the pro should be able to call from this text without opening anything.
   const facts = [["Timing", o.timing], ["Property", o.propertyType], ["Size", o.jobSize]].filter(([, v]) => v && v !== "Not stated").map(([k, v]) => `${k}: ${v}`).join(". ");
@@ -723,10 +753,12 @@ async function styleOne(env, lead) {
 // Rewrites leads that are not yet in the current format, newest first, a few per run.
 export async function styleLeads(env) {
   if (!env.ANTHROPIC_API_KEY) return { styled: 0, waiting: 0, note: "no AI key" };
-  const todo = await list(env, HH.base, HH.leads, { filterByFormula: `AND(NOT({Style}='${STYLE}'),NOT({Status}='Rejected'))`, "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 100 });
+  const todo = await list(env, HH.base, HH.leads, { filterByFormula: `AND(NOT({Style}='${STYLE}'),NOT({Style}='failed 3'),NOT({Status}='Rejected'))`, "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 100 });
   const batch = todo.slice(0, num(env.STYLE_BATCH, 6));
   const done = await Promise.allSettled(batch.map((l) => styleOne(env, l)));
   const failed = done.filter((d) => d.status === "rejected");
+  // Count the misses on the lead itself. After three it is left for a person, so one bad lead cannot burn AI calls every minute.
+  for (let i = 0; i < done.length; i++) if (done[i].status === "rejected") { const n = (Number(String(batch[i].fields.Style || "").replace("failed ", "")) || 0) + 1; await update(env, HH.leads, batch[i].id, { Style: `failed ${n}` }).catch(() => {}); }
   if (failed.length) console.error("lead writer failed:", String(failed[0].reason && failed[0].reason.message || failed[0].reason).slice(0, 300));
   return { styled: done.length - failed.length, failed: failed.length, waiting: todo.length - batch.length };
 }
@@ -833,12 +865,17 @@ async function api(request, env, path) {
     if (!env.ADMIN_KEY || request.headers.get("X-Admin-Key") !== env.ADMIN_KEY) return fail(401, "Not allowed.");
     try { return json(await sendInvoices(env, { month: body.month, dry: !!body.dry })); } catch (e) { return json({ error: String(e && e.message || e) }, 500); }
   }
+  if (path === "/api/pro/link") {
+    const [id, exp, sig] = (new URL(request.url).searchParams.get("t") || "").split(".");
+    const good = /^rec[A-Za-z0-9]{14}$/.test(id || "") && Number(exp) > Date.now() && sig === (await hmac(env.SESSION_SECRET, `link:${id}.${exp}`)).slice(0, 40);
+    return new Response(null, { status: 302, headers: good ? { Location: "/pros/app/#wallet", "Set-Cookie": await sessionCookie(env, id), "Cache-Control": "no-store" } : { Location: "/pros/sign-in/", "Cache-Control": "no-store" } });
+  }
   if (path === "/api/unsubscribe") {
     const q = new URL(request.url).searchParams, id = q.get("p") || "";
     const page = (t) => new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hammer Hound</title><body style="font-family:Arial,sans-serif;max-width:480px;margin:60px auto;padding:0 20px;color:#1D2125"><h1>${t}</h1><p><a href="/pros/app/" style="color:#1D2125">Go to my account</a></p>`, { headers: { "Content-Type": "text/html;charset=utf-8", "Cache-Control": "no-store" } });
     if (!/^rec[A-Za-z0-9]{14}$/.test(id) || q.get("s") !== (await hmac(env.SESSION_SECRET, "unsub:" + id)).slice(0, 32)) return page("That link is not valid.");
-    await update(env, HH.pros, id, { "Nudges Off": true });
-    return page("Done. We will not send you these reminders again.");
+    await update(env, HH.pros, id, { "Nudges Off": true, "Email Offers": false });
+    return page("Done. We will not send you lead alerts or reminders by email again. Account notices, such as receipts and renewal notices, still come.");
   }
   if (path === "/api/pro/join" && request.method === "POST") {
     const phone = digits(body.phone), business = String(body.business || "").trim().slice(0, 120);
@@ -872,12 +909,19 @@ async function api(request, env, path) {
     const known = await proByPhone(env, phone);
     if (!known) return fail(404, "No account uses that number. Join as a pro first.");
     if (known.fields["Closed At"]) return fail(403, "This account is closed. Contact support to reopen it.");
+    const g = guardOf(known.fields);
+    if (g.sends >= 5 || g.fails >= 5) return fail(429, LOCKED);
+    await guardSave(env, known.id, { ...g, sends: g.sends + 1 });
     const sent = await sendCode(env, phone);
     return sent.error ? fail(503, sent.error) : json({ next: "code", phone, sent: sent.sent });
   }
   if (path === "/api/pro/verify-code" && request.method === "POST") {
     const phone = digits(body.phone), pro = phone.length === 10 ? await proByPhone(env, phone) : null;
-    if (!pro || !(await codeOk(env, phone, String(body.code || "").trim()))) return fail(401, "That code is not right. Check it and try again.");
+    if (!pro) return fail(401, "That code is not right. Check it and try again.");
+    const g = guardOf(pro.fields);
+    if (g.fails >= 5) return fail(429, LOCKED);
+    if (!(await codeOk(env, phone, String(body.code || "").trim()))) { await guardSave(env, pro.id, { ...g, fails: g.fails + 1 }); return fail(401, "That code is not right. Check it and try again."); }
+    if (g.fails) await guardSave(env, pro.id, { ...g, fails: 0 });
     return json({ ok: true, pro: proView(pro) }, 200, { "Set-Cookie": await sessionCookie(env, pro.id) });
   }
   if (path === "/api/pro/sign-out" && request.method === "POST") return json({ ok: true }, 200, { "Set-Cookie": "hh_s=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0" });
@@ -914,6 +958,15 @@ async function api(request, env, path) {
     return json({ offers, canBuy: isVerified(pro), filters: { market, trade, markets, trades, home, total: open.length }, pro: proView(pro) });
   }
   if (path === "/api/pro/buy" && request.method === "POST") return buy(env, pro, body);
+  // "I want more leads here": a pro tells us a market and trade had nothing for them. One row per pro, market and trade.
+  if (path === "/api/pro/market-request" && request.method === "POST") {
+    const market = String(body.market || "").trim().slice(0, 80) || pro.fields.City || "", trade = TRADE_NAME[body.trade] ? body.trade : body.trade === "all" ? "all" : pro.fields.Trade || "all";
+    if (!market || market === "all") return fail(400, "Pick a market first.");
+    const key = `${pro.id}|${trade}|${market.toLowerCase()}`;
+    if (!(await list(env, HH.base, HH.requests, { filterByFormula: `{Key}='${esc(key)}'`, maxRecords: 1 })).length)
+      await create(env, HH.requests, { Request: `${TRADE_NAME[trade] || "All trades"} · ${market}`, Key: key, Pro: [pro.id], Market: market, Trade: trade, "Open Leads Then": Math.max(0, Math.round(Number(body.total) || 0)), Verified: isVerified(pro), At: new Date().toISOString(), Test: !!pro.fields.Test });
+    return json({ ok: true, market, trade: TRADE_NAME[trade] || "all trades" });
+  }
   if (path === "/api/pro/leads") {
     const mine = await purchasesFor(env, pro.id);
     const out = [];
@@ -965,14 +1018,17 @@ async function api(request, env, path) {
       chargedThisMonth: cents(rows.filter((r) => r.fields.Month === month && selectName(r.fields.Type) === "Top-up").reduce((n, r) => n + (r.fields.Amount || 0), 0)),
       rows: rows.slice(0, 60).map((r) => ({ id: r.id, date: r.fields.At, entry: r.fields.Entry, type: selectName(r.fields.Type), amount: r.fields.Amount || 0, creditPart: r.fields["Credit Part"] || 0, balanceAfter: r.fields["Balance After"] || 0, via: r.fields.Via || "" })),
       months: [...new Set(rows.map((r) => r.fields.Month).filter(Boolean))].sort().reverse().map((m) => ({ month: m, label: monthLabel(m), open: m === month })),
-      membership: membershipOf(f), pro: proView(pro),
+      membership: membershipOf(f), pending: pendingOf(f), pro: proView(pro),
     });
   }
   if (path === "/api/pro/card" && request.method === "POST") {
     if (body.action === "remove") return json({ pro: proView(await update(env, HH.pros, pro.id, { Card: "", "Card Token": "", "Auto Reload": false })) });
     // PLACEHOLDER: with Square connected, the card form posts a card token here and it is saved as a card on file.
     if (!pro.fields.Test) return fail(503, "Card payments are not switched on yet. We will email you when you can add a card.");
-    return json({ pro: proView(await update(env, HH.pros, pro.id, { Card: "Test card ending 4242", "Card Token": "TEST" })), test: true });
+    // Test accounts: a working test card, or one that always declines so the declined-card flow can be tried.
+    const saved = await update(env, HH.pros, pro.id, body.decline ? { Card: "Test card ending 0002", "Card Token": "TEST-DECLINE" } : { Card: "Test card ending 4242", "Card Token": "TEST" });
+    const done = await finishPending(env, saved);
+    return json({ pro: proView(done.pro), test: true, reloaded: done.reloaded || 0, claimed: done.claimed, claimError: done.claimError || "", pendingError: done.pendingError || "" });
   }
   if (path === "/api/pro/add-funds" && request.method === "POST") {
     const amount = Math.round(Number(body.amount));
