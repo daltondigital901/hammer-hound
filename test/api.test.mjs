@@ -1,6 +1,6 @@
 // Rule checks for the pro API. Run: node test/api.test.mjs
 import assert from "node:assert/strict";
-import { worker, env, db, seedForm, ingest, SITE_GBP, SITE_CLIENT, ai, stored, sent, texts } from "./dev-server.mjs";
+import { worker, env, db, seedForm, ingest, SITE_GBP, SITE_CLIENT, SITE_PROSPECT, ai, stored, sent, texts } from "./dev-server.mjs";
 import { createHmac } from "node:crypto";
 import { membershipOf, membershipNotice, decide, reminderFor, sendReminders, brandEmail, tradeOf, AGREEMENT_VERSION, alertPros, creditBacks, buildInvoice, sendInvoices, offerText } from "../src/worker.js";
 import { readFileSync } from "node:fs";
@@ -43,12 +43,15 @@ assert.equal(db.tblfA6ivDIlWVp4us.length, 0);
 // only valid forms and emails from sites with no GBP and no client are copied
 for (let n = 1; n <= 2; n++) seedForm(n);
 seedForm(3, { kind: "Email", subject: "Quote for a retaining wall" });
-seedForm(4, { valid: false }); seedForm(5, { site: SITE_GBP }); seedForm(6, { site: SITE_CLIENT }); seedForm(7, { client: true }); seedForm(8, { site: null });
+seedForm(4, { valid: false }); seedForm(5, { site: SITE_GBP }); seedForm(6, { site: SITE_CLIENT }); seedForm(7, { client: true }); seedForm(8, { site: null }); db.tblW1A0iKDAd111iI.at(-1).fields.fldfJJYK166eGNfxw = 7.5; seedForm(8, { site: SITE_PROSPECT });
 const first1 = await ingest(env);
-assert.equal(first1.copied, 3); assert.deepEqual(first1.skipped, { noSite: 1, gbp: 1, client: 1 });
+// sites with a GBP are copied for now; a site with a client or an open prospect is not
+assert.equal(first1.copied, 4); assert.deepEqual(first1.skipped, { noSite: 1, gbp: 0, client: 1, prospect: 1 });
+assert.equal(db.tblfA6ivDIlWVp4us.find((l) => l.fields["DD1 Call Number"] === 5).fields["Site GBP"], "Has One!"); assert.equal(db.tblfA6ivDIlWVp4us.find((l) => l.fields["DD1 Call Number"] === 1).fields["Site GBP"], "Yes - Not Requested Yet");
 assert.equal((await ingest(env)).copied, 0, "does not copy the same lead twice");
 seedForm(9); assert.equal((await ingest(env)).copied, 1, "picks up a new form");
-const leads = db.tblfA6ivDIlWVp4us; assert.ok(leads.every((l) => l.fields.Test === true && l.fields.Rule === "v2"));
+{ const L0 = db.tblfA6ivDIlWVp4us; L0.splice(L0.findIndex((l) => l.fields["DD1 Call Number"] === 5), 1); }   // the later checks count the other three
+const leads = db.tblfA6ivDIlWVp4us; assert.ok(leads.every((l) => l.fields.Test === true && l.fields.Rule === "v3"));
 const mail = leads.find((l) => l.fields["Lead Source"].startsWith("Email")); assert.equal(mail.fields.Service, "Quote for a retaining wall"); assert.equal(mail.fields["Owner Phone"], "");
 
 // gates
@@ -192,7 +195,7 @@ assert.match(readFileSync(new URL("../site/dist/pros/join/index.html", import.me
   const spam = L.find((l) => l.fields["DD1 Call Number"] === 28); assert.equal(spam.fields.Status, "Rejected"); assert.match(spam.fields.Qualified, /^No: vendor pitch/);
   assert.ok(!(await call(ALL, null, a)).offers.some((o) => o.id === spam.id));
   // a lead the writer has not reached is not offered
-  L.push({ id: "recUNSTYLED0000001", fields: { Lead: "Fwd: raw subject", Service: "Fwd: raw subject", Status: "Offered", "Offer Ends At": new Date(Date.now() + 1e7).toISOString(), "Received At": new Date().toISOString(), Source: "DD1 form (shadow)", Rule: "v2" } });
+  L.push({ id: "recUNSTYLED0000001", fields: { Lead: "Fwd: raw subject", Service: "Fwd: raw subject", Status: "Offered", "Offer Ends At": new Date(Date.now() + 1e7).toISOString(), "Received At": new Date().toISOString(), Source: "DD1 form (shadow)", Rule: "v3" } });
   assert.ok(!(await call(ALL, null, a)).offers.some((o) => o.id === "recUNSTYLED0000001"), "raw leads are held back");
   ai.down = true; assert.equal((await styleLeads(env)).failed, 1); ai.down = false; assert.equal((await styleLeads(env)).styled, 1);
   assert.equal(scrub("Jane Doe at 746 Highland Springs Ct, 765-661-3431, jane@x.com wants brick fixed.", { "Owner Name": "Jane Doe" }), "The owner at [address removed], [removed], [removed] wants brick fixed.");

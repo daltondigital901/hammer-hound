@@ -185,3 +185,7 @@ Every lead is rewritten by the AI into one format before any pro sees it (`style
 - **Access setup.** Zero Trust → Access → Applications → Add → Self-hosted. Add two paths on `hammerhound.com`: `admin` and `api/admin`. Policy: Allow, Emails, your address. Then put the team name (the part before `.cloudflareaccess.com`) in `ACCESS_TEAM` and the application's Audience (AUD) tag in `ACCESS_AUD`.
 - **API.** `GET /api/admin/overview[?real=1]`, `GET /api/admin/doc?key=pros/...`, `POST /api/admin/verify {proId, decision: approve|decline, expires, reason}`, `POST /api/admin/report {purchaseId, decision: approve|deny, reason}`, `POST /api/admin/ticket {ticketId, reply}`.
 - **Not in it yet.** Property owner details never appear in step 1. Leads, Pros, Money, Messages and Settings screens are later steps.
+
+## Which Dalton Digital leads are copied (rule v3)
+
+A valid form or email, not assigned to a client, on a site with `Active Clients` = 0 (`fldVIdJR2dkmKXRf0`) and `Open Prospects` = 0 (`fldCTOMq0Mk1jUb3S`). Sites with a GBP are included for now. Each lead stores the site's `Needs GBP?` value in `Site GBP` (`fld9ylese5Vwa3twG`). To stop copying GBP sites later, set `EXCLUDE_GBP_SITES` to `"true"` in `wrangler.jsonc`. Changing the rule version removes unbought leads copied under the old rule and copies the last `BACKFILL_DAYS` days again.
