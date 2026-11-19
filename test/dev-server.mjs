@@ -40,7 +40,7 @@ function matches(table, rec, formula) {
   if ((m = formula.match(/^\{Mobile\}='(.*)'$/))) return f.Mobile === m[1];
   if ((m = formula.match(/^\{EIN\}='(.*)'$/))) return f.EIN === m[1];
   if ((m = formula.match(/^\{Pro ID\}='(.*)'$/))) return f["Pro ID"] === m[1];
-  if (formula.startsWith("AND(NOT({Email}='')")) return !!f.Email && ["Verified", "Declined"].includes(f.Verification);
+
   if ((m = formula.match(/^FIND\('(.*)',\{Purchase\}\)>0$/))) return String(f.Purchase).includes(m[1]);
   if ((m = formula.match(/^AND\(\{Pro ID\}='(.*?)',\{Month\}='(.*?)'(,\{Type\}='Top-up')?\)$/))) return f["Pro ID"] === m[1] && f.Month === m[2] && (!m[3] || f.Type === "Top-up");
   if (formula === "AND({Review Status}='Approved',NOT({Credited}))") return f["Review Status"] === "Approved" && !f.Credited;
