@@ -51,10 +51,11 @@ const header = (current) => `<header class="site-header">
       <a href="/how-it-works/"${current === "how" ? ' aria-current="page"' : ""}>How it works</a>
       <a href="/cost-guides/"${current === "guides" ? ' aria-current="page"' : ""}>Cost guides</a>
       <a href="/contact/"${current === "contact" ? ' aria-current="page"' : ""}>Contact</a>
+      <a href="/pros/sign-in/" data-pro-link>Pro sign in</a>
       <a class="btn btn--outline btn--sm" href="/pros/">For pros</a>
     </nav>
     <div class="nav-mobile">
-      <a class="nav-pros" href="/pros/">For pros</a>
+      <a class="nav-pros" href="/pros/" data-pro-swap>For pros</a>
       <button class="icon-btn" type="button" data-menu-toggle aria-expanded="false" aria-controls="mobile-menu" aria-label="Menu">${icon("menu", 24)}</button>
     </div>
   </div>
@@ -65,7 +66,7 @@ const header = (current) => `<header class="site-header">
     <a href="/cost-guides/">Cost guides</a>
     <a href="/contact/">Contact</a>
     <a href="/pros/">For pros</a>
-    <a href="/pros/sign-in/">Pro sign in</a>
+    <a href="/pros/sign-in/" data-pro-link>Pro sign in</a>
   </div>
 </header>`;
 
@@ -541,7 +542,9 @@ function md(src) {
   }
   return { html, updated, toc };
 }
-for (const [file, path, name] of [["terms.md", "/terms/", "Terms of Use"], ["privacy.md", "/privacy/", "Privacy Policy"], ["sms.md", "/sms-policy/", "SMS Policy"]]) {
+const LEGAL = [["terms.md", "/terms/", "Terms of Use"], ["privacy.md", "/privacy/", "Privacy Policy"], ["sms.md", "/sms-policy/", "SMS Policy"], ["pro-agreement.md", "/pro-agreement/", "Pro Agreement"]];
+const agreement = md(readFileSync(join(SRC, "legal", "pro-agreement.md"), "utf8"));
+for (const [file, path, name] of LEGAL) {
   const { html, updated, toc } = md(readFileSync(join(SRC, "legal", file), "utf8"));
   page({
     path,
@@ -550,7 +553,7 @@ for (const [file, path, name] of [["terms.md", "/terms/", "Terms of Use"], ["pri
     body: `
 <section class="page-hero">
   <div class="wrap"><h1>${name}</h1><p class="meta">Last updated ${esc(updated)}${site.launched ? "" : " &middot; Draft text, pending attorney review"}</p>
-  <p class="chip-links"><a class="chip chip--link${path === "/terms/" ? " is-on" : ""}" href="/terms/">Terms of Use</a><a class="chip chip--link${path === "/privacy/" ? " is-on" : ""}" href="/privacy/">Privacy Policy</a><a class="chip chip--link${path === "/sms-policy/" ? " is-on" : ""}" href="/sms-policy/">SMS Policy</a></p></div>
+  <p class="chip-links">${LEGAL.map(([, p, n]) => `<a class="chip chip--link${path === p ? " is-on" : ""}" href="${p}">${n}</a>`).join("")}</p></div>
 </section>
 <section class="section section--tight">
   <div class="wrap legal-grid">
@@ -645,7 +648,7 @@ page({
     <p class="eyebrow eyebrow--yellow">For pros</p>
     <h1>Leads by text. Buy only the ones you want.</h1>
     <p class="lead">Every job is confirmed by phone before you see it. Your first 3 leads are free.</p>
-    <p class="btn-row"><a class="btn btn--yellow" href="/pros/join/">Join as a pro</a><a class="btn btn--ghost" href="/pros/sign-in/">Pro sign in</a></p>
+    <p class="btn-row"><a class="btn btn--yellow" href="/pros/join/">Join as a pro</a><a class="btn btn--ghost" href="/pros/sign-in/" data-pro-link>Pro sign in</a></p>
     ${checks(proBullets, "checks--yellow")}
   </div>
 </section>
@@ -690,7 +693,7 @@ const feeOffer = (dark) => `<div class="fee-offer${dark ? " fee-offer--dark" : "
 const landingHeader = `<header class="site-header">
   <div class="wrap header-row">
     ${logo(false, true)}
-    <div class="header-actions"><a class="link-quiet" href="/pros/sign-in/">Pro sign in</a><a class="btn btn--yellow btn--sm" href="/pros/join/">Get 3 free leads</a></div>
+    <div class="header-actions"><a class="link-quiet" href="/pros/sign-in/" data-pro-link>Pro sign in</a><a class="btn btn--yellow btn--sm" href="/pros/join/">Get 3 free leads</a></div>
   </div>
 </header>`;
 const fixes = [
@@ -814,11 +817,16 @@ page({
         <div><label class="label" for="j-trade">Main trade</label><select class="input" id="j-trade" name="trade" required><option value="">Choose a trade</option>${trades.map((t) => `<option value="${t.slug}">${esc(t.name)}</option>`).join("")}</select></div>
         <div><label class="label" for="j-zip">Business ZIP code</label><input class="input" id="j-zip" name="zip" type="text" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" placeholder="ZIP code" autocomplete="postal-code" required></div>
       </div>
-      <p class="meta">We set you up for that trade within 25 miles of your ZIP code. You can change both later.</p>
+      <label class="label" for="j-city">City you work in</label><input class="input" id="j-city" name="city" type="text" placeholder="City" autocomplete="address-level2" required>
+      <p class="meta">Leads open on your trade and your market first. You can look at any market or trade, and change yours later.</p>
       <label class="consent"><input type="checkbox" name="sms" value="yes"><span>Text me lead offers at this number. Recurring automated messages; frequency varies. Message and data rates may apply. Reply STOP to opt out, HELP for help. Consent is not a condition of purchase. See the <a href="/sms-policy/" target="_blank" rel="noopener">SMS Policy</a>.</span></label>
+      <h3 class="agree-title">Pro Agreement</h3>
+      <p class="meta">Read it here or <a href="/pro-agreement/" target="_blank" rel="noopener">open it in a new tab</a>. Version of ${esc(agreement.updated)}.</p>
+      <div class="agree-box prose" tabindex="0" role="region" aria-label="Pro Agreement">${agreement.html}</div>
+      <label class="consent consent--strong"><input type="checkbox" name="agree" value="yes" required><span>I have read and agree to the <a href="/pro-agreement/" target="_blank" rel="noopener">Pro Agreement</a>, the <a href="/terms/" target="_blank" rel="noopener">Terms of Use</a> and the <a href="/privacy/" target="_blank" rel="noopener">Privacy Policy</a>, and I have authority to accept them for this business.</span></label>
       <p class="form-status" data-status role="status" hidden></p>
-      <button class="btn btn--yellow btn--block" type="submit">Create account and verify</button>
-      <p class="meta">By creating an account you agree to the <a href="/terms/">Terms of Use</a> and <a href="/privacy/">Privacy Policy</a>. Already a pro? <a href="/pros/sign-in/">Sign in</a></p>
+      <button class="btn btn--yellow btn--block" type="submit">Agree and create account</button>
+      <p class="meta">Already a pro? <a href="/pros/sign-in/">Sign in</a></p>
     </form>`
   ),
 });
@@ -847,7 +855,7 @@ page({
   noindex: true,
   chrome: `<header class="site-header site-header--dark"><div class="wrap header-row">${logo(true, true)}<div class="header-actions"><span class="chip chip--black" data-balance hidden></span><button class="btn btn--ghost btn--sm" type="button" data-signout hidden>Sign out</button></div></div></header>${hazard}`,
   footer: "none", bodyClass: "flow portal", script: "portal.js",
-  body: `<div class="wrap portal-wrap" data-portal><p class="meta">Loading your account.</p></div>`,
+  body: `<div class="wrap portal-wrap" data-portal data-trades="${esc(JSON.stringify(trades.map((t) => [t.slug, t.name])))}"><p class="meta">Loading your account.</p></div>`,
 });
 
 // ---------- 404 ----------

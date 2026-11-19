@@ -79,7 +79,7 @@
       e.preventDefault();
       var st = $("[data-status]", form);
       var bad = checkFields(form);
-      if (bad) { status(st, "Check your " + fieldName(bad) + ".", "bad"); bad.focus(); return; }
+      if (bad) { status(st, bad.name === "agree" ? "Tick the box to accept the Pro Agreement." : "Check your " + fieldName(bad) + ".", "bad"); bad.focus(); return; }
       var data = {};
       new FormData(form).forEach(function (v, k) { data[k] = v; });
       data.page = LOC.pathname;
@@ -90,6 +90,9 @@
       });
     });
   });
+  // A signed-in pro sees "My portal" where everyone else sees "Pro sign in".
+  // On phones the header's "For pros" link becomes "My portal" too, so the account is one tap from any page.
+  try { if (localStorage.getItem("hh_pro")) $$("[data-pro-link], [data-pro-swap]").forEach(function (l) { l.textContent = "My portal"; l.setAttribute("href", "/pros/app/"); }); } catch (e) {}
   // Pro join: carry over the trade and ZIP picked on the landing page.
   var join = $('form[data-form="proJoin"]');
   if (join) {

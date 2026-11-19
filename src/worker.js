@@ -14,7 +14,7 @@ const DD1 = {
 // Leads from these sites are never offered: GBP leads cannot be sold.
 const HAS_GBP = new Set(["Has One!", "Has One - Needs Final Owner Confirmed", "Has One - Needs Owner Transferred", "Has One, Doesn't Need Reviews", "First Suspension Appeal", "Second Suspension Appeal", "Suspended", "Soft Suspension", "Needs deletion"]);
 const RULE = "v2";
-const HH = { base: "app0PSwGlQyC6q7FW", leads: "tblfA6ivDIlWVp4us", pros: "tbl9bEGuy8DPkkee7", purchases: "tblJnYLq2aCiCVU1C" };
+const HH = { base: "app0PSwGlQyC6q7FW", leads: "tblfA6ivDIlWVp4us", pros: "tbl9bEGuy8DPkkee7", purchases: "tblJnYLq2aCiCVU1C", tickets: "tblFDXXEvvlb6F8vN" };
 const NOT_OPEN = "Hammer Hound is not open yet, so nothing was sent. Check back soon.";
 
 const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers } });
@@ -148,13 +148,30 @@ async function currentPro(env, request) {
   if (!m) return null;
   const [id, exp, sig] = m[1].split(".");
   if (!id || !exp || Number(exp) < Date.now() || sig !== (await hmac(env.SESSION_SECRET, `${id}.${exp}`))) return null;
-  try { return await at(env, HH.base, HH.pros, { id }); } catch { return null; }
+  try { const p = await at(env, HH.base, HH.pros, { id }); return p.fields["Closed At"] ? null : p; } catch { return null; }
 }
 const proByPhone = async (env, phone) => (await list(env, HH.base, HH.pros, { filterByFormula: `{Mobile}='${esc(phone)}'`, maxRecords: 1 }))[0] || null;
 const internal = (env, phone) => isTestPhone(phone) || String(env.INTERNAL_PHONES || "").split(",").map(digits).includes(phone);
 // Accepted proof-of-business documents. The pro picks one and uploads it.
 export const DOC_TYPES = ["State contractor license", "City or county business license", "Secretary of State registration", "IRS EIN letter (CP 575 or 147C)", "DBA or assumed-name certificate", "State tax registration certificate"];
 const today = () => new Date().toISOString().slice(0, 10);
+// The Pro Agreement version a pro accepts at sign-up. Must match "Last updated" in site/src/legal/pro-agreement.md.
+export const AGREEMENT_VERSION = "November 19, 2026";
+// Trades, with the words that mark a lead as that trade. Order matters: the first match wins.
+export const TRADES = [
+  ["water-heaters", "Water heaters", ["water heater"]], ["roofing", "Roofing", ["roof", "shingle"]], ["sealcoating", "Sealcoating", ["sealcoat", "seal coat", "striping", "crack fill"]],
+  ["asphalt-paving", "Asphalt paving", ["asphalt", "paving", "blacktop", "parking lot"]], ["pavers", "Pavers", ["paver"]], ["foundation-repair", "Foundation repair", ["foundation", "crawl space", "waterproof"]],
+  ["masonry", "Masonry", ["mason", "brick", "stone", "chimney", "retaining wall", "tuckpoint"]], ["concrete", "Concrete", ["concrete", "slab", "sidewalk", "driveway", "patio"]],
+  ["siding", "Siding", ["siding", "soffit"]], ["gutters", "Gutters", ["gutter"]], ["windows-and-doors", "Windows and doors", ["window", "door"]],
+  ["demolition", "Demolition", ["demol", "tear-out", "tear out", "haul"]], ["excavation", "Excavation", ["excavat", "grading", "trench", "land clearing"]],
+  ["fencing", "Fencing", ["fenc", "gate"]], ["tree-service", "Tree service", ["tree", "stump"]], ["decks", "Decks", ["deck", "pergola"]], ["landscaping", "Landscaping", ["landscap", "sod", "lawn", "irrigation"]],
+  ["heating-and-cooling", "Heating and cooling", ["hvac", "heating", "cooling", "furnace", "air condition", "heat pump"]], ["electrical", "Electrical", ["electric", "wiring", "panel", "outlet"]],
+  ["plumbing", "Plumbing", ["plumb", "drain", "sewer", "pipe", "faucet", "toilet"]], ["flooring", "Flooring", ["floor", "tile", "carpet"]], ["painting", "Painting", ["paint"]],
+  ["drywall", "Drywall", ["drywall", "sheetrock"]], ["remodeling", "Remodeling", ["remodel", "renovat", "kitchen", "bathroom", "addition", "enclosure"]],
+];
+const TRADE_NAME = Object.fromEntries(TRADES.map(([slug, name]) => [slug, name]));
+export const tradeOf = (service) => { const t = String(service || "").toLowerCase(); return (TRADES.find(([, , words]) => words.some((w) => t.includes(w))) || ["other"])[0]; };
+const sameCity = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
 // Verified means documents passed and the insurance on file has not expired.
 const isVerified = (p) => p.fields.Verification === "Verified" && (!p.fields["Insurance Expires"] || p.fields["Insurance Expires"] >= today());
 const proView = (p) => ({
@@ -163,6 +180,9 @@ const proView = (p) => ({
   legalName: p.fields["Legal Business Name"] || "", einLast4: (p.fields.EIN || "").slice(-4), insuranceExpires: p.fields["Insurance Expires"] || "", verifiedAt: p.fields["Verified At"] || "",
   email: p.fields.Email || "", verificationReason: p.fields["Verification Reason"] || "", checksLeft: checksLeft(p),
   balance: p.fields.Balance || 0, freeLeadsLeft: p.fields["Free Leads Left"] || 0,
+  city: p.fields.City || "", extraTrades: String(p.fields["Extra Trades"] || "").split(",").filter(Boolean), tradeName: TRADE_NAME[p.fields.Trade] || "",
+  textOffers: !!p.fields["Text Offers"], emailOffers: !!p.fields["Email Offers"], paused: !!p.fields.Paused, dailyCap: p.fields["Daily Cap"] || 0, quietHours: p.fields["Quiet Hours"] || "",
+  agreement: String(p.fields.Agreement || "").split(" | ")[0], memberSince: p.fields["Created At"] || "",
 });
 
 // ---------- document check ----------
@@ -368,10 +388,11 @@ async function submitDocuments(request, env, pro) {
 
 
 // ---------- leads ----------
+const PIPELINE = ["New", "Contacted", "Quoted", "Won", "Lost"];
 const purchasesFor = (env, key) => list(env, HH.base, HH.purchases, { filterByFormula: `FIND('${esc(key)}',{Purchase})>0`, pageSize: 100 });
 const offerView = (l, taken, exclusiveTaken) => ({
   id: l.id, title: l.fields.Lead, service: l.fields.Service || "", city: l.fields.City || "", receivedAt: l.fields["Received At"], endsAt: l.fields["Offer Ends At"],
-  sharedPrice: l.fields["Shared Price"], exclusivePrice: l.fields["Exclusive Price"], maxPros: l.fields["Max Pros"], spotsTaken: taken, exclusiveAvailable: taken === 0 && !exclusiveTaken,
+  trade: tradeOf(l.fields.Service), sharedPrice: l.fields["Shared Price"], exclusivePrice: l.fields["Exclusive Price"], maxPros: l.fields["Max Pros"], spotsTaken: taken, exclusiveAvailable: taken === 0 && !exclusiveTaken,
 });
 const leadView = (l) => ({ id: l.id, title: l.fields.Lead, service: l.fields.Service || "", city: l.fields.City || "", ownerName: l.fields["Owner Name"] || "", ownerPhone: l.fields["Owner Phone"] || "", ownerEmail: l.fields["Owner Email"] || "", message: l.fields.Message || "", receivedAt: l.fields["Received At"] });
 
@@ -498,19 +519,25 @@ async function api(request, env, path) {
   }
   if (path === "/api/pro/join" && request.method === "POST") {
     const phone = digits(body.phone), business = String(body.business || "").trim().slice(0, 120);
+    const city = String(body.city || "").trim().slice(0, 80);
     if (phone.length !== 10 || !business) return fail(400, "Enter your business name and a 10-digit mobile number.");
+    if (!city) return fail(400, "Enter the city you work in.");
+    if (body.agree !== "yes") return fail(400, "Tick the box to accept the Pro Agreement before creating your account.");
     if (env.SHADOW_MODE === "true" && !internal(env, phone)) return fail(403, NOT_OPEN);
     if (await proByPhone(env, phone)) return fail(409, "That number already has an account. Sign in instead.");
     const sent = await sendCode(env, phone);
     if (sent.error) return fail(503, sent.error);
     const test = env.SHADOW_MODE === "true";
-    await create(env, HH.pros, { "Business Name": business, Mobile: phone, Trade: String(body.trade || "").slice(0, 60), ZIP: String(body.zip || "").slice(0, 5), Test: test, Verification: "Not started", Balance: test ? num(env.TEST_BALANCE, 240) : 0, "Free Leads Left": 3, "Text Offers": body.sms === "yes", "Created At": new Date().toISOString() });
+    await create(env, HH.pros, { "Business Name": business, Mobile: phone, Trade: TRADE_NAME[body.trade] ? body.trade : "", ZIP: String(body.zip || "").slice(0, 5), City: city, "Email Offers": true,
+      Agreement: `${AGREEMENT_VERSION} | ${new Date().toISOString()} | ${request.headers.get("CF-Connecting-IP") || "unknown"}`, Test: test, Verification: "Not started", Balance: test ? num(env.TEST_BALANCE, 240) : 0, "Free Leads Left": 3, "Text Offers": body.sms === "yes", "Created At": new Date().toISOString() });
     return json({ next: "code", phone, sent: sent.sent });
   }
   if (path === "/api/pro/sign-in" && request.method === "POST") {
     const phone = digits(body.phone);
     if (phone.length !== 10) return fail(400, "Enter a 10-digit mobile number.");
-    if (!(await proByPhone(env, phone))) return fail(404, "No account uses that number. Join as a pro first.");
+    const known = await proByPhone(env, phone);
+    if (!known) return fail(404, "No account uses that number. Join as a pro first.");
+    if (known.fields["Closed At"]) return fail(403, "This account is closed. Contact support to reopen it.");
     const sent = await sendCode(env, phone);
     return sent.error ? fail(503, sent.error) : json({ next: "code", phone, sent: sent.sent });
   }
@@ -542,7 +569,15 @@ async function api(request, env, path) {
     const mineIds = new Set(mine.map((p) => p.fields.Purchase.split(":")[0]));
     const count = {}, excl = {};
     for (const p of all) { const id = p.fields.Purchase.split(":")[0]; count[id] = (count[id] || 0) + 1; if (p.fields.Kind === "Exclusive") excl[id] = true; }
-    return json({ offers: leads.filter((l) => !mineIds.has(l.id)).map((l) => offerView(l, count[l.id] || 0, !!excl[l.id])), canBuy: isVerified(pro), pro: proView(pro) });
+    const open = leads.filter((l) => !mineIds.has(l.id)).map((l) => offerView(l, count[l.id] || 0, !!excl[l.id]));
+    // Filters default to the pro's own market and trade. "all" widens either one.
+    const q = new URL(request.url).searchParams, home = { market: pro.fields.City || "", trade: pro.fields.Trade || "" };
+    const market = q.has("market") ? q.get("market") : home.market || "all", trade = q.has("trade") ? q.get("trade") : home.trade || "all";
+    const tally = (list, key) => Object.entries(list.reduce((m, o) => { const k = key(o); if (k) m[k] = (m[k] || 0) + 1; return m; }, {}));
+    const markets = tally(open, (o) => o.city).map(([name, n]) => ({ name, count: n })).sort((a, b) => a.name.localeCompare(b.name));
+    const trades = tally(open, (o) => o.trade).map(([slug, n]) => ({ slug, name: TRADE_NAME[slug] || "Other", count: n })).sort((a, b) => a.name.localeCompare(b.name));
+    const offers = open.filter((o) => (market === "all" || sameCity(o.city, market)) && (trade === "all" || o.trade === trade));
+    return json({ offers, canBuy: isVerified(pro), filters: { market, trade, markets, trades, home, total: open.length }, pro: proView(pro) });
   }
   if (path === "/api/pro/buy" && request.method === "POST") return buy(env, pro, body);
   if (path === "/api/pro/leads") {
@@ -550,7 +585,7 @@ async function api(request, env, path) {
     const out = [];
     for (const p of mine.sort((a, b) => String(b.fields["Bought At"]).localeCompare(String(a.fields["Bought At"]))).slice(0, 40)) {
       const lead = await at(env, HH.base, HH.leads, { id: p.fields.Purchase.split(":")[0] }).catch(() => null);
-      if (lead) out.push({ purchaseId: p.id, kind: p.fields.Kind, price: p.fields.Price || 0, boughtAt: p.fields["Bought At"], review: p.fields["Review Status"] || "None", ...leadView(lead) });
+      if (lead) out.push({ purchaseId: p.id, kind: p.fields.Kind, price: p.fields.Price || 0, boughtAt: p.fields["Bought At"], review: p.fields["Review Status"] || "None", pipeline: p.fields.Pipeline || "New", notes: p.fields.Notes || "", ...leadView(lead), trade: tradeOf(lead.fields.Service) });
     }
     return json({ leads: out, pro: proView(pro) });
   }
@@ -560,6 +595,65 @@ async function api(request, env, path) {
     if ((p.fields["Review Status"] || "None") !== "None") return fail(409, "This lead has already been reported.");
     await update(env, HH.purchases, p.id, { "Review Status": "Reported", "Review Reason": String(body.reason || "").slice(0, 1000) });
     return json({ ok: true });
+  }
+  if (path === "/api/pro/lead-status" && request.method === "POST") {
+    const p = (await purchasesFor(env, pro.id)).find((x) => x.id === body.purchaseId);
+    if (!p) return fail(404, "That lead is not in your account.");
+    const fields = {};
+    if (body.pipeline !== undefined) { if (!PIPELINE.includes(body.pipeline)) return fail(400, "Choose a status from the list."); fields.Pipeline = body.pipeline; }
+    if (body.notes !== undefined) fields.Notes = String(body.notes).slice(0, 2000);
+    await update(env, HH.purchases, p.id, fields);
+    return json({ ok: true });
+  }
+  if (path === "/api/pro/profile" && request.method === "POST") {
+    const business = String(body.business || "").trim().slice(0, 120), city = String(body.city || "").trim().slice(0, 80), zip = String(body.zip || "").trim(), email = String(body.email || "").trim().toLowerCase().slice(0, 160);
+    if (!business) return fail(400, "Enter your business name.");
+    if (!city) return fail(400, "Enter the city you work in.");
+    if (!/^\d{5}$/.test(zip)) return fail(400, "Enter a 5-digit ZIP code.");
+    if (!TRADE_NAME[body.trade]) return fail(400, "Choose your main trade.");
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(400, "Check your email address.");
+    const extra = [...new Set([].concat(body.extraTrades || []).filter((t) => TRADE_NAME[t] && t !== body.trade))].slice(0, 23);
+    const saved = await update(env, HH.pros, pro.id, { "Business Name": business, City: city, ZIP: zip, Trade: body.trade, "Extra Trades": extra.join(","), ...(email ? { Email: email } : {}) });
+    return json({ pro: proView(saved) });
+  }
+  if (path === "/api/pro/notifications" && request.method === "POST") {
+    const cap = body.dailyCap === "" || body.dailyCap == null ? null : Math.max(1, Math.min(50, Math.round(Number(body.dailyCap) || 0)));
+    const hhmm = (t) => /^([01]\d|2[0-3]):[0-5]\d$/.test(t || "");
+    if ((body.quietStart || body.quietEnd) && !(hhmm(body.quietStart) && hhmm(body.quietEnd))) return fail(400, "Set both a start and an end time for quiet hours, or clear both.");
+    const saved = await update(env, HH.pros, pro.id, { "Text Offers": !!body.textOffers, "Email Offers": !!body.emailOffers, Paused: !!body.paused, "Daily Cap": cap, "Quiet Hours": body.quietStart ? `${body.quietStart}-${body.quietEnd}` : "" });
+    return json({ pro: proView(saved) });
+  }
+  if (path === "/api/pro/wallet") {
+    const mine = await purchasesFor(env, pro.id), rows = [];
+    for (const p of mine.sort((a, b) => String(b.fields["Bought At"]).localeCompare(String(a.fields["Bought At"]))).slice(0, 40)) {
+      const lead = await at(env, HH.base, HH.leads, { id: p.fields.Purchase.split(":")[0] }).catch(() => null);
+      rows.push({ id: p.id, date: p.fields["Bought At"], label: lead ? lead.fields.Lead : "Lead", kind: p.fields.Kind, amount: -(p.fields.Price || 0), review: p.fields["Review Status"] || "None" });
+    }
+    // Card payments run through Square. Until its keys are set, only test accounts can add (test) funds.
+    return json({ balance: pro.fields.Balance || 0, freeLeadsLeft: pro.fields["Free Leads Left"] || 0, rows, cardsReady: !!env.SQUARE_ACCESS_TOKEN, testFunds: !!pro.fields.Test, membership: { fee: 300, waived: true }, pro: proView(pro) });
+  }
+  if (path === "/api/pro/add-funds" && request.method === "POST") {
+    const amount = Number(body.amount);
+    if (![50, 100, 250, 500].includes(amount)) return fail(400, "Choose an amount from the list.");
+    // PLACEHOLDER: charge the card through Square here (SQUARE_ACCESS_TOKEN, SQUARE_LOCATION_ID), then credit the balance.
+    if (!pro.fields.Test) return fail(503, "Card payments are not switched on yet. We will email you when you can add funds.");
+    const saved = await update(env, HH.pros, pro.id, { Balance: Math.round(((pro.fields.Balance || 0) + amount) * 100) / 100 });
+    return json({ pro: proView(saved), test: true });
+  }
+  if (path === "/api/pro/tickets" && request.method === "POST") {
+    const subject = String(body.subject || "").trim().slice(0, 160), message = String(body.message || "").trim().slice(0, 4000);
+    if (!subject || !message) return fail(400, "Add a subject and tell us what is going on.");
+    const t = await create(env, HH.tickets, { Subject: subject, Message: message, Pro: [pro.id], "Pro ID": pro.id, Topic: String(body.topic || "Other").slice(0, 60), "Purchase ID": /^rec[A-Za-z0-9]{14}$/.test(body.purchaseId || "") ? body.purchaseId : "", Status: "Open", "Created At": new Date().toISOString(), Test: !!pro.fields.Test });
+    return json({ ok: true, id: t.id });
+  }
+  if (path === "/api/pro/tickets") {
+    const rows = await list(env, HH.base, HH.tickets, { filterByFormula: `{Pro ID}='${pro.id}'`, "sort[0][field]": "Created At", "sort[0][direction]": "desc", pageSize: 50, maxRecords: 50 });
+    return json({ tickets: rows.map((t) => ({ id: t.id, subject: t.fields.Subject, message: t.fields.Message || "", topic: t.fields.Topic || "", status: selectName(t.fields.Status) || "Open", reply: t.fields.Reply || "", createdAt: t.fields["Created At"] })) });
+  }
+  if (path === "/api/pro/close" && request.method === "POST") {
+    if (body.confirm !== "CLOSE") return fail(400, "Type CLOSE to confirm.");
+    await update(env, HH.pros, pro.id, { "Closed At": new Date().toISOString(), Paused: true });
+    return json({ ok: true }, 200, { "Set-Cookie": "hh_s=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0" });
   }
   return fail(404, "Not found.");
 }
