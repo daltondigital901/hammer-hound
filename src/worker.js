@@ -242,12 +242,42 @@ export function decide(report, facts) {
 }
 
 const SUPPORT = "support@hammerhound.com";
-// Best effort: a failed email never blocks a check.
-async function sendEmail(env, to, subject, lines) {
+const SITE = "https://hammerhound.com";
+const hx = (t) => String(t == null ? "" : t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+// One branded layout for every email: dark header with the hound, hazard stripe, body, button, footer.
+// opts: { cta: [label, url], leads: [{ service, city, when }], leadsTitle, unsub: url, address }
+export function brandEmail(subject, lines, opts = {}) {
+  const para = (l) => `<p style="margin:0 0 16px;font-size:16px;line-height:1.55;color:#1D2125">${hx(l).replace(/(https:\/\/[^\s<]+)/g, '<a href="$1" style="color:#1D2125">$1</a>')}</p>`;
+  const lead = (l) => `<tr><td style="padding:14px 16px;border:2px dashed #1D2125;border-radius:10px;background:#FFF4CC">
+<p style="margin:0;font-size:17px;font-weight:800;color:#1D2125">${hx(l.service)}</p>
+<p style="margin:4px 0 0;font-size:14px;color:#56616B">${hx(l.city || "Your area")}${l.when ? " &middot; received " + hx(l.when) : ""}</p>
+<p style="margin:8px 0 0;font-size:13px;font-weight:700;color:#B5390B">&#128274; Owner name, phone and address locked</p></td></tr><tr><td style="height:10px"></td></tr>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${hx(subject)}</title></head>
+<body style="margin:0;padding:0;background:#F0F1F2;font-family:Arial,Helvetica,sans-serif">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F0F1F2"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#FFFFFF;border-radius:12px;overflow:hidden">
+<tr><td style="background:#1D2125;padding:20px 24px"><table role="presentation" cellpadding="0" cellspacing="0"><tr>
+<td style="padding-right:14px"><img src="${SITE}/assets/img/badge-on-dark.png" width="50" height="60" alt="" style="display:block;border:0"></td>
+<td><p style="margin:0;font-size:24px;font-weight:800;color:#FFFFFF;letter-spacing:-0.5px">hammer hound</p><p style="margin:2px 0 0;font-size:11px;font-weight:700;color:#F15A22;letter-spacing:1px;text-transform:uppercase">Real Jobs. Local Pros. Tracked Down.</p></td>
+</tr></table></td></tr>
+<tr><td style="height:10px;line-height:10px;font-size:0;background:#FFC20E;background-image:repeating-linear-gradient(-45deg,#FFC20E 0 14px,#1D2125 14px 28px)">&nbsp;</td></tr>
+<tr><td style="padding:28px 24px 8px">
+<h1 style="margin:0 0 18px;font-size:24px;line-height:1.2;font-weight:800;color:#1D2125">${hx(opts.heading || subject)}</h1>
+${lines.map(para).join("\n")}
+${opts.leads && opts.leads.length ? `<p style="margin:8px 0 12px;font-size:15px;font-weight:800;color:#1D2125">${hx(opts.leadsTitle || "Jobs open in your market right now")}</p><table role="presentation" width="100%" cellpadding="0" cellspacing="0">${opts.leads.map(lead).join("")}</table>` : ""}
+${opts.cta ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:12px 0 20px"><tr><td style="background:#FFC20E;border-radius:10px"><a href="${hx(opts.cta[1])}" style="display:inline-block;padding:14px 26px;font-size:16px;font-weight:800;color:#1D2125;text-decoration:none">${hx(opts.cta[0])}</a></td></tr></table>` : ""}
+</td></tr>
+<tr><td style="padding:16px 24px 24px;border-top:1px solid #D3D7DB">
+<p style="margin:0 0 6px;font-size:12px;line-height:1.5;color:#56616B">Questions? Reply to this email and it opens a ticket on your account.</p>
+<p style="margin:0;font-size:12px;line-height:1.5;color:#56616B">&copy; ${new Date().getFullYear()} Hammer Hound${opts.address ? " &middot; " + hx(opts.address) : ""}${opts.unsub ? ` &middot; <a href="${hx(opts.unsub)}" style="color:#56616B">Stop these reminders</a>` : ""}</p>
+</td></tr></table></td></tr></table></body></html>`;
+}
+// Best effort: a failed email never blocks anything.
+async function sendEmail(env, to, subject, lines, opts = {}) {
   if (!env.EMAIL || !to) return false;
+  const text = [...lines, ...(opts.leads && opts.leads.length ? [opts.leadsTitle || "Jobs open in your market right now:", ...opts.leads.map((l) => `- ${l.service}, ${l.city || "your area"} (owner details locked)`)] : []), opts.cta ? `${opts.cta[0]}: ${opts.cta[1]}` : "", opts.unsub ? `Stop these reminders: ${opts.unsub}` : ""].filter(Boolean).join("\n\n");
   try {
-    await env.EMAIL.send({ to, from: { email: SUPPORT, name: "Hammer Hound" }, replyTo: SUPPORT, subject, text: lines.join("\n\n"),
-      html: lines.map((l) => `<p>${String(l).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/(https:\/\/[^\s<]+)/g, '<a href="$1">$1</a>')}</p>`).join("") });
+    await env.EMAIL.send({ to, from: { email: SUPPORT, name: "Hammer Hound" }, replyTo: SUPPORT, subject, text, html: brandEmail(subject, lines, { address: env.MAILING_ADDRESS, ...opts }) });
     return true;
   } catch (e) { console.error("email failed:", e && e.code, String(e && e.message || e)); return false; }
 }
@@ -256,10 +286,10 @@ const resultEmail = (env, pro, status, reason) => status === "Declined"
   ? sendEmail(env, pro.fields.Email, "Your Hammer Hound documents need another look", [
     `Hi ${pro.fields["Business Name"]},`, "We checked the documents you sent and could not verify your business yet.", `What we found: ${reason}`,
     `You have three ways forward:`, `1. Send a different or clearer document: ${APP}`, `2. Ask for a person to review it, if you think we got it wrong: ${APP}`, `3. Reply to this email to open a support ticket.`,
-    "Once you are verified you get your Verified Pro badge and 3 free leads.", "Hammer Hound"])
+    "Once you are verified you get your Verified Pro badge and 3 free leads."], { cta: ["Fix my documents", APP] })
   : status === "In review" ? sendEmail(env, pro.fields.Email, "We are taking a closer look at your Hammer Hound documents", [
     `Hi ${pro.fields["Business Name"]},`, "Our automated check could not make a clear call on your documents, so a person is going to look at them. You do not need to do anything.",
-    reason ? `What slowed it down: ${reason}` : "", `You can look at leads in your market while you wait: ${APP}`, "Hammer Hound"].filter(Boolean))
+    reason ? `What slowed it down: ${reason}` : "", "You can look at leads in your market while you wait."].filter(Boolean), { cta: ["See leads in my market", APP] })
   : Promise.resolve(false);
 
 async function submitDocuments(request, env, pro) {
@@ -350,6 +380,80 @@ async function buy(env, pro, { leadId, kind }) {
   return json({ lead: leadView(lead), price, free, balance: free ? balance : Math.round((balance - price) * 100) / 100, freeLeadsLeft: (pro.fields["Free Leads Left"] || 0) - (free ? 1 : 0) });
 }
 
+// ---------- insurance reminders and nudges ----------
+// Before expiry: keep the badge. After a lapse or a failed check: nudges with sample leads, details locked.
+const daysBetween = (a, b) => Math.round((Date.parse(a + "T00:00:00Z") - Date.parse(b + "T00:00:00Z")) / 864e5);
+const niceDate = (d) => new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+// Returns the reminder this pro is due, or null. Stages only move forward, so a missed day still sends the right one.
+export function reminderFor(f, now = today()) {
+  if (!f.Email) return null;
+  if (f.Verification === "Verified" && f["Insurance Expires"]) {
+    const left = daysBetween(f["Insurance Expires"], now);
+    if (left > 30 || left < -45) return null;
+    const stage = left > 14 ? "pre30" : left > 7 ? "pre14" : left > 3 ? "pre7" : left > 1 ? "pre3" : left > 0 ? "pre1" : left > -3 ? "exp0" : left > -7 ? "post3" : left > -14 ? "post7" : left > -30 ? "post14" : "post30";
+    return { key: `${f["Insurance Expires"]}|${stage}`, stage, left, nudge: left <= 0 };
+  }
+  if (f.Verification === "Declined" && f["Checks Day"]) {
+    const since = daysBetween(now, f["Checks Day"]);
+    if (since < 2 || since > 20) return null;
+    const stage = since < 6 ? "fail2" : since < 12 ? "fail6" : "fail12";
+    return { key: `${f["Checks Day"]}|${stage}`, stage, since, nudge: true };
+  }
+  return null;
+}
+function reminderCopy(f, r) {
+  const name = f["Business Name"], exp = f["Insurance Expires"] ? niceDate(f["Insurance Expires"]) : "", d = r.left;
+  const days = d === 1 ? "tomorrow" : `in ${d} days`;
+  if (r.stage.startsWith("pre")) return {
+    subject: d <= 3 ? `Your Verified Pro badge ends ${days}` : `Your insurance on file expires ${days}`,
+    heading: d <= 3 ? `Your badge ends ${days}.` : `Keep your badge. Your insurance expires ${days}.`,
+    lines: [`Hi ${name},`, `The insurance certificate we have on file for you expires on ${exp}. Your Verified Pro badge runs until that date.`,
+      d <= 7 ? "After that date you stop getting leads until we have a current certificate. It takes about two minutes to upload." : "Upload your renewed certificate any time before then and nothing changes: same badge, same leads, no gap.",
+      "Already renewed? Send us the new certificate now and you are done."],
+    cta: ["Upload my new certificate", APP] };
+  if (r.stage === "exp0") return {
+    subject: "Your Verified Pro badge is paused", heading: "Your badge is paused.",
+    lines: [`Hi ${name},`, `Your insurance on file expired on ${exp}, so your Verified Pro badge is paused and you cannot claim or buy leads right now.`, "Upload a current certificate and you are back on in minutes. Your account, balance and free leads are untouched."],
+    cta: ["Get my badge back", APP], leadsTitle: "Jobs open in your market that you cannot claim right now" };
+  if (r.stage.startsWith("post")) return {
+    subject: "Jobs are open in your market. Your badge is still paused.", heading: "Jobs are open in your market. Your badge is paused.",
+    lines: [`Hi ${name},`, `Your badge has been paused since your insurance expired on ${exp}. Property owners in your market are still asking for quotes.`, "Upload a current certificate to get your badge back and start claiming again."],
+    cta: ["Get my badge back", APP], leadsTitle: "Open in your market right now" };
+  return {
+    subject: r.stage === "fail2" ? "You are one upload away from 3 free leads" : "Jobs are open in your market. Finish verifying to claim them.",
+    heading: r.stage === "fail2" ? "One upload away from 3 free leads." : "Finish verifying and claim these.",
+    lines: [`Hi ${name},`, "Your documents did not pass last time, so your Verified Pro badge and 3 free leads are still locked.", f["Verification Reason"] ? `What we found: ${f["Verification Reason"]}` : "", "Send a clearer or different document, or ask for a person to review it."].filter(Boolean),
+    cta: ["Finish verifying", APP], leadsTitle: "Open in your market right now" };
+}
+// Sample leads for a nudge: job and city only. Owner details are never included.
+async function teaserLeads(env, f) {
+  const open = await list(env, HH.base, HH.leads, { filterByFormula: "AND({Status}='Offered',IS_AFTER({Offer Ends At},NOW()))", "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 30, maxRecords: 30, "fields[]": ["Service", "City", "Received At"] });
+  const trade = String(f.Trade || "").toLowerCase().replace(/[^a-z]/g, "").slice(0, 5);
+  const mine = trade ? open.filter((l) => String(l.fields.Service || "").toLowerCase().replace(/[^a-z]/g, "").includes(trade)) : [];
+  return [...mine, ...open.filter((l) => !mine.includes(l))].slice(0, 3).map((l) => ({ service: l.fields.Service || "Job", city: l.fields.City || "", when: l.fields["Received At"] ? new Date(l.fields["Received At"]).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Chicago" }) : "" }));
+}
+const unsubLink = async (env, id) => `${SITE}/api/unsubscribe?p=${id}&s=${(await hmac(env.SESSION_SECRET, "unsub:" + id)).slice(0, 32)}`;
+export async function sendReminders(env, { dry = false, now = today() } = {}) {
+  const pros = await list(env, HH.base, HH.pros, { filterByFormula: "AND(NOT({Email}=''),OR({Verification}='Verified',{Verification}='Declined'))", pageSize: 100, maxRecords: 300 });
+  const out = { due: 0, sent: 0, held: 0, list: [] };
+  const byTrade = {};   // sample leads are looked up once per trade
+  for (const p of pros) {
+    const f = p.fields, r = reminderFor(f, now);
+    if (!r || f["Reminder Stage"] === r.key) continue;
+    if (r.nudge && f["Nudges Off"]) continue;
+    // Nudges carry sample leads, so outside test accounts they wait until a mailing address is set for the footer.
+    if (r.nudge && !f.Test && !env.MAILING_ADDRESS) { out.held++; continue; }
+    out.due++;
+    const copy = reminderCopy(f, r);
+    const leads = r.nudge ? (byTrade[f.Trade || ""] ||= await teaserLeads(env, f)) : null;
+    out.list.push({ pro: f["Business Name"], stage: r.stage, subject: copy.subject });
+    if (dry || out.sent >= 40) continue;
+    const ok = await sendEmail(env, f.Email, copy.subject, copy.lines, { heading: copy.heading, cta: copy.cta, leads, leadsTitle: copy.leadsTitle, unsub: r.nudge ? await unsubLink(env, p.id) : "" });
+    if (ok) { await update(env, HH.pros, p.id, { "Reminder Stage": r.key }); out.sent++; }
+  }
+  return out;
+}
+
 // ---------- API ----------
 async function api(request, env, path) {
   if (!env.AIRTABLE_TOKEN || !env.SESSION_SECRET) return fail(503, NOT_OPEN);
@@ -362,6 +466,17 @@ async function api(request, env, path) {
     try { return json(await ingest(env)); } catch (e) { return json({ error: String(e && e.message || e) }, 500); }
   }
 
+  if (path === "/api/admin/reminders" && request.method === "POST") {
+    if (!env.ADMIN_KEY || request.headers.get("X-Admin-Key") !== env.ADMIN_KEY) return fail(401, "Not allowed.");
+    try { return json(await sendReminders(env, { dry: !!body.dry })); } catch (e) { return json({ error: String(e && e.message || e) }, 500); }
+  }
+  if (path === "/api/unsubscribe") {
+    const q = new URL(request.url).searchParams, id = q.get("p") || "";
+    const page = (t) => new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Hammer Hound</title><body style="font-family:Arial,sans-serif;max-width:480px;margin:60px auto;padding:0 20px;color:#1D2125"><h1>${t}</h1><p><a href="/pros/app/" style="color:#1D2125">Go to my account</a></p>`, { headers: { "Content-Type": "text/html;charset=utf-8", "Cache-Control": "no-store" } });
+    if (!/^rec[A-Za-z0-9]{14}$/.test(id) || q.get("s") !== (await hmac(env.SESSION_SECRET, "unsub:" + id)).slice(0, 32)) return page("That link is not valid.");
+    await update(env, HH.pros, id, { "Nudges Off": true });
+    return page("Done. We will not send you these reminders again.");
+  }
   if (path === "/api/pro/join" && request.method === "POST") {
     const phone = digits(body.phone), business = String(body.business || "").trim().slice(0, 120);
     if (phone.length !== 10 || !business) return fail(400, "Enter your business name and a 10-digit mobile number.");
@@ -395,7 +510,7 @@ async function api(request, env, path) {
   if (path === "/api/pro/review" && request.method === "POST") {
     if (pro.fields.Verification !== "Declined") return fail(409, "There is no failed check to review on this account.");
     const saved = await update(env, HH.pros, pro.id, { Verification: "In review", "Verification Reason": "You asked for a person to review your documents. " + (pro.fields["Verification Reason"] || "") });
-    await sendEmail(env, saved.fields.Email, "A person is reviewing your Hammer Hound documents", [`Hi ${saved.fields["Business Name"]},`, "You asked for a person to review your documents. We have them and will email you the result.", `You can look at leads in your market while you wait: ${APP}`, "Hammer Hound"]);
+    await sendEmail(env, saved.fields.Email, "A person is reviewing your Hammer Hound documents", [`Hi ${saved.fields["Business Name"]},`, "You asked for a person to review your documents. We have them and will email you the result.", "You can look at leads in your market while you wait."], { cta: ["See leads in my market", APP] });
     return json({ pro: proView(saved) });
   }
   if (path === "/api/pro/offers") {
@@ -441,8 +556,14 @@ export default {
     return env.ASSETS.fetch(request);
   },
   async scheduled(event, env, ctx) {
+    if (!env.AIRTABLE_TOKEN) { console.error("scheduled skipped: AIRTABLE_TOKEN is not set"); return; }
+    // Reminders: once an hour, 8am to 6pm Central, so nobody gets one at night.
+    if (event.cron === "7 * * * *") {
+      const hour = Number(new Date().toLocaleString("en-US", { hour: "numeric", hour12: false, timeZone: "America/Chicago" }));
+      if (hour >= 8 && hour < 18) ctx.waitUntil(sendReminders(env).then((r) => console.log("reminders", JSON.stringify({ due: r.due, sent: r.sent, held: r.held })), (e) => console.error("reminders failed:", String(e && e.message || e))));
+      return;
+    }
     if (env.SHADOW_MODE !== "true") return;
-    if (!env.AIRTABLE_TOKEN) { console.error("ingest skipped: AIRTABLE_TOKEN is not set"); return; }
     ctx.waitUntil(ingest(env).then((r) => console.log("ingest", JSON.stringify(r)), (e) => console.error("ingest failed:", String(e && e.message || e))));
   },
 };

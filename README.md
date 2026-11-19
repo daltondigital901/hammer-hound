@@ -98,4 +98,10 @@ the pricing engine, the owner request form's endpoint, and bad-lead scoring.
 - **Limits.** PDF, JPG, PNG or WebP, 5 MB each, 3 checks a day per account.
 - **Emails.** `Declined` and `In review` send an email from `support@hammerhound.com` through the `EMAIL` binding (Cloudflare Email Sending). A failed email is logged and never blocks the check.
 - **Review queue.** In the Pros table, filter `Verification` = `In review`. `Verification Detail` holds what the AI read. Set `Verification` to `Verified` (and `Verified At`) or `Declined` by hand.
-- **Not built yet:** the public "what Verified means" page, the downloadable badge, expiry reminder emails.
+- **Reminders and nudges.** `sendReminders()` runs hourly at :07 and sends only 8am to 6pm Central. `Reminder Stage` on the pro stops repeats.
+  - Before expiry (30, 14, 7, 3 and 1 days out): renewal reminders. No sample leads, no unsubscribe link.
+  - Expiry day, then 3, 7, 14 and 30 days after: nudges with up to 3 open leads (job and city only, owner details never included).
+  - Failed check (2, 6 and 12 days after): nudges to finish verifying, with the same sample leads.
+  - Nudges carry a "Stop these reminders" link (`Nudges Off`). Outside test accounts they are held until `MAILING_ADDRESS` is set in `wrangler.jsonc`.
+  - `POST /api/admin/reminders` with `X-Admin-Key` runs it now; send `{"dry":true}` to list what would go without sending.
+- **Not built yet:** the public "what Verified means" page, the downloadable badge.

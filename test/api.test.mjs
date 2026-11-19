@@ -1,7 +1,7 @@
 // Rule checks for the pro API. Run: node test/api.test.mjs
 import assert from "node:assert/strict";
 import { worker, env, db, seedForm, ingest, SITE_GBP, SITE_CLIENT, ai, stored, sent } from "./dev-server.mjs";
-import { decide } from "../src/worker.js";
+import { decide, reminderFor, sendReminders, brandEmail } from "../src/worker.js";
 import { parseForm } from "../src/worker.js";
 
 const call = async (path, body, cookie) => {
@@ -133,6 +133,31 @@ const mine = (await call("/api/pro/leads", null, a)).leads; assert.equal(mine.le
 assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "wrong number" }, a)).status, 200);
 assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "again" }, a)).status, 409);
 assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId }, b)).status, 404, "cannot report another pro's lead");
+// ---- insurance reminders and nudges ----
+const R = (f, now) => (reminderFor({ Email: "a@b.co", Verification: "Verified", ...f }, now) || {}).stage;
+assert.equal(R({ "Insurance Expires": "2027-03-31" }, "2027-02-01"), undefined, "nothing more than 30 days out");
+assert.deepEqual(["2027-03-01", "2027-03-17", "2027-03-24", "2027-03-28", "2027-03-30", "2027-03-31", "2027-04-03", "2027-04-07", "2027-04-14", "2027-04-30"].map((n) => R({ "Insurance Expires": "2027-03-31" }, n)),
+  ["pre30", "pre14", "pre7", "pre3", "pre1", "exp0", "post3", "post7", "post14", "post30"]);
+assert.equal(R({ "Insurance Expires": "2027-03-31" }, "2027-06-01"), undefined, "nudges stop after 45 days");
+assert.equal(R({ Verification: "Declined", "Checks Day": "2027-03-01" }, "2027-03-02"), undefined); assert.equal(R({ Verification: "Declined", "Checks Day": "2027-03-01" }, "2027-03-04"), "fail2");
+assert.equal(reminderFor({ Verification: "Verified", "Insurance Expires": "2027-03-31" }, "2027-03-30"), null, "no email address, no reminder");
+const P = db.tbl9bEGuy8DPkkee7, soon = (n) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+for (const p of P) p.fields.Email = "";   // quiet everyone, then set up three cases
+const [pa, pb, pc] = P; Object.assign(pa.fields, { Email: "renew@example.com", Verification: "Verified", "Insurance Expires": soon(10) });
+Object.assign(pb.fields, { Email: "lapsed@example.com", Verification: "Verified", "Insurance Expires": soon(-4) });
+Object.assign(pc.fields, { Email: "real@example.com", Verification: "Verified", "Insurance Expires": soon(-4), Test: false });
+assert.equal((await sendReminders(env, { dry: true })).due, 2); const mark = sent.length;
+const run = await sendReminders(env); assert.equal(run.sent, 2); assert.equal(run.held, 1, "a nudge to a real pro waits for a mailing address");
+const renew = sent.slice(mark).find((e) => e.to === "renew@example.com"), lapsedMail = sent.slice(mark).find((e) => e.to === "lapsed@example.com");
+assert.match(renew.subject, /expires in 10 days/); assert.ok(!renew.html.includes("locked"), "a renewal reminder carries no sample leads"); assert.ok(!renew.html.includes("unsubscribe?"));
+assert.match(lapsedMail.subject, /badge is still paused/); assert.match(lapsedMail.html, /Owner name, phone and address locked/); assert.match(lapsedMail.html, /api\/unsubscribe\?p=rec/);
+assert.ok(!lapsedMail.html.match(/owner\d+@example\.com|90155501\d\d|Sample Owner/), "sample leads carry no owner details"); assert.ok(lapsedMail.html.includes("hammer hound") && lapsedMail.html.includes("Tracked Down"));
+assert.equal((await sendReminders(env)).sent, 0, "the same reminder is not sent twice");
+const link = new URL(lapsedMail.html.match(/https:\/\/hammerhound\.com\/api\/unsubscribe[^"]+/)[0].replace(/&amp;/g, "&"));
+assert.match(await (await worker.fetch(new Request("http://x" + link.pathname + "?p=" + link.searchParams.get("p") + "&s=bad"), env)).text(), /not valid/);
+assert.match(await (await worker.fetch(new Request("http://x" + link.pathname + link.search), env)).text(), /will not send/); assert.equal(pb.fields["Nudges Off"], true);
+pb.fields["Insurance Expires"] = soon(-8); assert.equal((await sendReminders(env)).sent, 0, "unsubscribed pros get no more nudges");
+assert.equal((await call("/api/admin/reminders", { dry: true }, null)).status, 401);
 assert.equal((await call("/api/admin/ingest", {}, null)).status, 401);
 const noSecrets = await worker.fetch(new Request("http://x/api/pro/me"), { ASSETS: env.ASSETS }); assert.equal(noSecrets.status, 503);
 console.log("All API checks passed.");
