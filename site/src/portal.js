@@ -47,7 +47,7 @@
   }
 
   // ---------- navigation ----------
-  var NAV = [["home", "Home", "M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"], ["offers", "Leads", "M4 5h16M4 12h16M4 19h10"], ["leads", "My leads", "M5 4h14v17l-7-4-7 4z"], ["wallet", "Wallet", "M3 7h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm0 0l12-4v4m2 6h.01"],
+  var NAV = [["home", "Home", "M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"], ["offers", "Open leads", "M4 5h16M4 12h16M4 19h10"], ["leads", "My leads", "M5 4h14v17l-7-4-7 4z"], ["wallet", "Wallet", "M3 7h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm0 0l12-4v4m2 6h.01"],
     ["verify", "Verification", "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zm-3 9l2 2 4-4"], ["profile", "Business profile", "M4 21V8l8-5 8 5v13M9 21v-6h6v6"], ["notifications", "Notifications", "M6 17V11a6 6 0 0 1 12 0v6l2 2H4zm4 4h4"],
     ["support", "Support", "M4 5h16v11H9l-5 4z"], ["account", "Account", "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-8 9a8 8 0 0 1 16 0"]];
   var PRIMARY = ["home", "offers", "leads", "wallet"];
@@ -229,6 +229,14 @@
     ]);
   }
 
+  // Every lead is drawn the same way: job, place, the same three facts in the same order, then the summary.
+  function jobBlock(o) {
+    var fact = function (k, v) { return h("div", {}, [h("dt", { text: k }), h("dd", { class: v === "Not stated" ? "is-unknown" : "", text: v })]); };
+    return [h("h3", { text: o.job }), h("p", { class: "lead-place", text: o.place }),
+      h("dl", { class: "lead-facts" }, [fact("Timing", o.timing), fact("Property", o.propertyType), fact("Job size", o.jobSize)]),
+      o.summary ? h("p", { class: "lead-summary", text: o.summary }) : null];
+  }
+
   // ---------- home ----------
   function homeView() {
     shell([h("p", { class: "meta", text: "Loading your account." })]);
@@ -284,8 +292,7 @@
         }; };
         var freeNow = pro.freeLeadsLeft > 0;
         return h("div", { class: "card offer" }, [
-          h("div", { class: "offer-top" }, [h("span", { class: "chip", text: o.service || "Job" }), h("span", { class: "chip chip--yellow", text: "Ends " + when(o.endsAt) })]),
-          h("h3", { text: o.title }),
+          h("div", { class: "offer-top" }, [h("span", { class: "chip", text: o.tradeName }), h("span", { class: "chip chip--yellow", text: "Ends " + when(o.endsAt) })])].concat(jobBlock(o), [
           h("p", { class: "meta", text: "Received " + when(o.receivedAt) + " · " + o.spotsTaken + " of " + o.maxPros + " spots taken" }),
           h("p", { class: "offer-price", text: freeNow && !locked ? "Free" : money(o.sharedPrice) }),
           h("p", { class: "meta", text: locked ? (pro.freeLeadsLeft > 0 ? "Shared lead. Your first " + pro.freeLeadsLeft + " are free once you are verified." : "Shared lead. Verify to claim it.") : freeNow ? "Uses 1 of your " + pro.freeLeadsLeft + " free leads. Normally " + money(o.sharedPrice) + " shared." : "Shared lead" }),
@@ -295,11 +302,11 @@
             o.exclusiveAvailable ? h("button", { class: "btn btn--outline", type: "button", text: "Exclusive " + money(o.exclusivePrice), on: { click: act("exclusive") } }) : null,
           ]),
           status,
-        ]);
+        ]));
       });
       var empty = card([h("h2", { text: "No open leads for this market and trade" }), h("p", { class: "sub", text: f.total ? f.total + " lead" + (f.total === 1 ? " is" : "s are") + " open in other markets or trades." : "New leads show up here as they come in." }),
         f.total ? h("button", { class: "btn btn--black btn--block", type: "button", text: "Show all markets and trades", on: { click: function () { pick = { market: "all", trade: "all" }; offersView(); } } }) : null]);
-      shell([head(r.canBuy ? "Open leads" : "Leads in your market", r.offers.length + " showing of " + f.total + " open"), filters, items.length ? h("div", { class: "grid grid--3 pp-grid" }, items) : empty]);
+      shell([head(r.canBuy ? "Open leads" : "Open leads in your market", r.offers.length + " showing of " + f.total + " open"), filters, items.length ? h("div", { class: "grid grid--3 pp-grid" }, items) : empty]);
     });
   }
 
@@ -328,12 +335,11 @@
           status.innerHTML = ""; status.appendChild(reason); status.appendChild(sendBtn); report.hidden = true;
         } } }) : h("span", { class: "chip", text: "Bad-lead report: " + l.review });
         return h("div", { class: "card offer" }, [
-          h("div", { class: "offer-top" }, [h("span", { class: "chip", text: l.kind + " · " + (l.price ? money(l.price) : "Free") }), h("span", { class: "meta", text: "Bought " + when(l.boughtAt) })]),
-          h("h3", { text: l.title }),
-          h("div", { class: "lead-contact" }, [h("strong", { text: l.ownerName || "Name not given" }), l.ownerPhone ? h("a", { href: "tel:+1" + l.ownerPhone, text: phoneFmt(l.ownerPhone) }) : h("span", { class: "meta", text: "No phone number given" }), l.ownerEmail ? h("a", { href: "mailto:" + l.ownerEmail, text: l.ownerEmail }) : null]),
-          l.message ? h("p", { text: l.message }) : null,
+          h("div", { class: "offer-top" }, [h("span", { class: "chip", text: l.tradeName }), h("span", { class: "chip", text: l.kind === "Free" ? "Free lead" : l.kind + " · " + money(l.price) }), h("span", { class: "meta", text: "Bought " + when(l.boughtAt) })])].concat(jobBlock(l), [
+          h("div", { class: "lead-contact" }, [h("span", { class: "lead-contact-label", text: "Owner" }), h("strong", { text: l.ownerName || "Name not given" }), l.ownerPhone ? h("a", { href: "tel:+1" + l.ownerPhone, text: phoneFmt(l.ownerPhone) }) : h("span", { class: "meta", text: "No phone number given" }), l.ownerEmail ? h("a", { href: "mailto:" + l.ownerEmail, text: l.ownerEmail }) : null, l.address ? h("span", { text: l.address }) : null]),
+          l.message ? h("details", { class: "lead-words" }, [h("summary", { text: "The owner's own words" }), h("p", { text: l.message })]) : null,
           field("st-" + l.purchaseId, "Where it stands", stage), field("nt-" + l.purchaseId, "Notes", notes), saveNotes, report, status,
-        ]);
+        ]));
       });
       shell([head("My leads", r.leads.length + " bought or claimed"), chips,
         items.length ? h("div", { class: "grid grid--3 pp-grid" }, items) : card([h("h2", { text: r.leads.length ? "Nothing in this stage" : "No leads yet" }), h("p", { class: "sub", text: "Leads you buy or claim show up here with the owner's details." }), h("button", { class: "btn btn--black btn--block", type: "button", text: "See open leads", on: { click: function () { go("offers"); } } })])]);

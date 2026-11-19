@@ -286,14 +286,25 @@ legend + .option-grid { margin-top: 0; }
 .portal-wrap { padding-top: 24px; padding-bottom: 56px; max-width: 980px; }
 .tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
 .portal-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
-.offer { padding: 20px; display: grid; gap: 10px; }
+/* minmax(0, 1fr) keeps long words (an email address, a long job name) inside the card */
+.offer { padding: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; overflow-wrap: anywhere; }
+.lead-place { font-weight: 600; color: var(--steel); margin-top: -6px; }
+.lead-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 2px 0; overflow-wrap: normal; }
+.lead-facts div { padding: 8px 10px; border-radius: 8px; background: var(--concrete); }
+.lead-facts dt { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--steel); }
+.lead-facts dd { margin: 2px 0 0; font-size: 14px; font-weight: 700; }
+.lead-facts dd.is-unknown { font-weight: 400; color: var(--steel-2); }
+.lead-summary { font-size: 15px; }
+.lead-contact-label { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--steel); }
+.lead-words summary { cursor: pointer; font-weight: 600; font-size: 14px; color: var(--steel); }
+.lead-words p { margin-top: 8px; font-size: 14px; white-space: pre-line; }
 .offer-top { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
 .offer h3 { font-size: 19px; }
 .offer-price { font-weight: 800; font-size: 26px; }
 .offer-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .offer-actions .btn { flex: 1 1 160px; }
 .lead-contact { display: grid; gap: 4px; padding: 14px; border-radius: 10px; background: var(--concrete); }
-.lead-contact a { font-weight: 700; font-size: 18px; }
+.lead-contact a { font-weight: 700; font-size: 17px; }
 .test-banner { padding: 10px 14px; border-radius: 10px; background: var(--orange-tint); color: var(--orange-text); font-weight: 600; font-size: 14px; margin-bottom: 16px; }
 .portal .card.form { max-width: 560px; }
 /* portal layout: bottom bar on phones, sidebar from 960px */
@@ -324,7 +335,8 @@ legend + .option-grid { margin-top: 0; }
 .pp-stack { display: grid; gap: 12px; }
 .pp-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; align-items: end; padding: 14px 16px; margin-bottom: 16px; border-radius: var(--r); background: var(--white); box-shadow: var(--shadow); }
 .pp-filters .hint, .pp-filters .btn--text { grid-column: 1 / -1; justify-self: start; padding: 0; }
-.pp-grid { align-items: start; }
+/* Cards never get narrower than 300px, whatever the window or sidebar width */
+.pp-main .pp-grid { align-items: start; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); }
 .pp-toggle, .pp-check { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; }
 .pp-toggle input, .pp-check input { flex: none; width: 22px; height: 22px; margin-top: 2px; accent-color: var(--asphalt); }
 .pp-toggle strong { display: block; } .pp-toggle small { display: block; font-size: 13px; color: var(--steel); }
