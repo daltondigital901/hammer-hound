@@ -77,7 +77,7 @@ const flowHeader = (rightLabel, rightHref) => `<header class="site-header">
 </header>`;
 
 const hazard = '<div class="hazard" aria-hidden="true"></div>';
-const copyright = `&copy; <span data-year>${YEAR}</span> ${esc(site.legalName)}, DBA ${esc(site.name)}. All rights reserved.`;
+const copyright = `&copy; <span data-year>${YEAR}</span> ${esc(site.name)}. All rights reserved.`;
 const legalLinks = `<a href="/terms/">Terms of Use</a><span aria-hidden="true">&middot;</span><a href="/privacy/">Privacy Policy</a><span aria-hidden="true">&middot;</span><a href="/sms-policy/">SMS Policy</a><span aria-hidden="true">&middot;</span><a href="/contact/">Contact</a>`;
 
 const footerFull = () => `${hazard}<footer class="site-footer">
@@ -122,7 +122,7 @@ const stepList = (steps) => `<ol class="steps">${steps.map(([t, d], i) => `<li><
 
 // ---------- page shell ----------
 const pages = [];
-function page({ path, title, desc, body, current, noindex, chrome = "site", footer = "slim", jsonld, bodyClass = "" }) {
+function page({ path, title, desc, body, current, noindex, chrome = "site", footer = "slim", jsonld, bodyClass = "", script = "" }) {
   const canonical = site.url + path;
   const robots = !site.launched || noindex ? '<meta name="robots" content="noindex, nofollow">' : "";
   const head = `<!doctype html>
@@ -161,7 +161,7 @@ ${body}
 </main>
 ${footer === "full" ? footerFull() : footer === "slim" ? footerSlim() : `<p class="mini-legal">${copyright}</p>`}
 <script>window.HH=${JSON.stringify({ endpoints: site.endpoints })};</script>
-<script src="/assets/app.js?v=${V.js}" defer></script>
+<script src="/assets/app.js?v=${V.js}" defer></script>${script ? `\n<script src="/assets/${script}?v=${hash(script)}" defer></script>` : ""}
 </body>
 </html>
 `;
@@ -632,6 +632,11 @@ ${hazard}
 
 
 // ---------- pro ads landing page ----------
+const feeOffer = (dark) => `<div class="fee-offer${dark ? " fee-offer--dark" : ""}">
+  <span class="chip chip--yellow">Limited-time offer</span>
+  <p class="fee-line"><span class="fee-was"><span class="sr-only">Was </span>$300</span><span class="fee-now"><span class="sr-only">now </span>$0</span></p>
+  <p class="fee-text">Annual membership fee waived</p>
+</div>`;
 const landingHeader = `<header class="site-header">
   <div class="wrap header-row">
     ${logo(false, true)}
@@ -652,6 +657,7 @@ const proFaqs = [
   ["Are the leads exclusive?", "They are shared with up to 5 pros, because the owner chooses how many can call. If no one has bought a lead yet, you can buy it exclusive at the exclusive price shown."],
   ["What counts as a bad lead?", "A wrong or disconnected number, a duplicate of a lead you already bought from us, a request that was not real, or a job outside your trades or service area. Report it within the window in the Terms and choose a credit or a refund. An owner who does not pick up, hires someone else or changes their mind is not a bad lead."],
   ["What do I need to get my 3 free leads?", "Create an account, then upload proof of your business and proof of insurance. Your free leads unlock when both pass."],
+  ["Is there a membership fee?", "The annual membership fee is $300. It is waived for pros who join during this limited-time offer."],
   ["Is there a contract?", "No. You pay per lead from a balance you control, and you can stop at any time."],
 ];
 page({
@@ -668,6 +674,7 @@ page({
       <p class="eyebrow eyebrow--yellow">For contractors</p>
       <h1>Real jobs, confirmed by phone. Buy as many as you want.</h1>
       <p class="lead">Done paying for wrong numbers and tire-kickers? We call every property owner before you ever see the lead. You see the job, then decide.</p>
+      ${feeOffer(true)}
       <form class="lp-form" action="/pros/join/" method="get" data-hero-cta>
         <label><span class="sr-only">Your trade</span><select class="input" name="trade" required><option value="">Your trade</option>${trades.map((t) => `<option value="${t.slug}">${esc(t.name)}</option>`).join("")}</select></label>
         <label><span class="sr-only">Business ZIP code</span><input class="input" type="text" name="zip" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" placeholder="Business ZIP code" autocomplete="postal-code"></label>
@@ -734,7 +741,7 @@ ${hazard}
   </div>
 </section>
 <section class="pro-band pro-band--yellow" data-final-cta>
-  <div class="wrap pro-band-row"><div><h2>Your first 3 leads are free.</h2><p>See the quality for yourself before you load a dollar.</p></div><a class="btn btn--black btn--lg" href="/pros/join/">Create my pro account</a></div>
+  <div class="wrap pro-band-row"><div><h2>Your first 3 leads are free.</h2><p>See the quality for yourself before you load a dollar.</p>${feeOffer(false)}</div><a class="btn btn--black btn--lg" href="/pros/join/">Create my pro account</a></div>
 </section>
 <div class="sticky-cta" data-sticky-cta hidden><a class="btn btn--yellow btn--block" href="/pros/join/">Get my 3 free leads</a></div>`,
 });
@@ -746,7 +753,7 @@ page({
   desc: D("Create your pro account, verify your business and get your first 3 leads free."),
   chrome: "", footer: "none", bodyClass: "bare",
   body: splitShell(
-    `<h1>Your first 3 leads are free.</h1>${checks(proBullets, "checks--yellow")}`,
+    `<h1>Your first 3 leads are free.</h1>${feeOffer(true)}${checks(proBullets, "checks--yellow")}`,
     `<form class="form" data-form="proJoin" novalidate>
       <h2>Create your pro account</h2>
       <p class="sub">Create your account, then upload proof of business and insurance. Your free leads unlock when both pass.</p>
@@ -780,6 +787,16 @@ page({
       <p class="meta">New here? <a href="/pros/join/"><strong>Join as a pro</strong></a></p>
     </form>`
   ),
+});
+
+// ---------- pro portal (app shell; everything inside is drawn by portal.js from the API) ----------
+page({
+  path: "/pros/app/",
+  title: `Pro Portal | ${site.name}`,
+  noindex: true,
+  chrome: `<header class="site-header site-header--dark"><div class="wrap header-row">${logo(true, true)}<div class="header-actions"><span class="chip chip--black" data-balance hidden></span><button class="btn btn--ghost btn--sm" type="button" data-signout hidden>Sign out</button></div></div></header>${hazard}`,
+  footer: "none", bodyClass: "flow portal", script: "portal.js",
+  body: `<div class="wrap portal-wrap" data-portal><p class="meta">Loading your account.</p></div>`,
 });
 
 // ---------- 404 ----------
@@ -819,7 +836,7 @@ for (const p of pages) {
   writeFileSync(file, p.html);
 }
 mkdirSync(join(OUT, "assets"), { recursive: true });
-for (const f of ["styles.css", "app.js"]) cpSync(join(SRC, f), join(OUT, "assets", f));
+for (const f of ["styles.css", "app.js", "portal.js"]) cpSync(join(SRC, f), join(OUT, "assets", f));
 cpSync(join(SRC, "img"), join(OUT, "assets", "img"), { recursive: true });
 cpSync(join(SRC, "fonts"), join(OUT, "assets", "fonts"), { recursive: true });
 for (const f of readdirSync(join(SRC, "static"))) cpSync(join(SRC, "static", f), join(OUT, f));

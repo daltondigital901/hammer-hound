@@ -59,7 +59,7 @@ Copy the contents of `favicon/` to the site root, and `social/og-image-1200x630.
 
 ## Footer
 
-`© {current year} Dalton Enterprises LLC, DBA Hammer Hound. All rights reserved.` The year comes from the current date, never typed in.
+`© {current year} Hammer Hound. All rights reserved.` The year comes from the current date, never typed in. The legal entity is named in the Terms of Use, not in the footer.
 
 ## Source
 

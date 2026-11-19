@@ -14,7 +14,9 @@ Hammer Hound is a trade name (DBA) of Dalton Enterprises LLC. This repository is
 | --- | --- |
 | `brand/` | Logo, wordmark, lockups, favicon set, share image and usage rules. See `brand/README.md` |
 | `site/` | The public website: source in `site/src`, generator in `site/build.mjs` |
-| `wrangler.jsonc` | Cloudflare Worker config that serves `site/dist` |
+| `src/worker.js` | The engine: pro API (join, sign-in, verify, offers, buy, my leads, report) and the shadow copy of Dalton Digital form leads |
+| `test/` | Local test rig with a stand-in database, and the API rule checks |
+| `wrangler.jsonc` | Cloudflare Worker config: serves `site/dist`, runs `src/worker.js`, cron every minute |
 
 ## The site
 
@@ -56,3 +58,29 @@ does not end with the tagline or runs past 155 characters, or has a copyright ye
 2. Fill `site.endpoints` once the lead engine accepts requests.
 3. Fill the bracketed items in the policies (mailing address, day counts, retention periods).
 4. Replace the stand-in photos in `site/src/img` (AI-generated; some show real equipment brand marks).
+
+## Shadow test (internal only)
+
+The Worker copies valid form leads from the Dalton Digital Call Tracker into the Hammer Hound base
+(`app0PSwGlQyC6q7FW`) and offers them in the pro portal at `/pros/app/`. Nothing is sent to owners,
+no pro outside the team can join, no card is charged, and Retell is not used.
+
+| What | How it works in shadow mode |
+| --- | --- |
+| Source | Call Tracker rows where Form/Call is Form and Valid/Spam is Valid. First run copies the last 30 days, then every minute copies anything newer |
+| Who can join | Test numbers in the form (xxx) 555-01xx, plus any real numbers listed in `INTERNAL_PHONES` |
+| Sign-in code | Test numbers use the `TEST_CODE` secret. Real numbers need the Twilio secrets |
+| Verification | Test accounts pass as soon as two documents are chosen. Files are not stored and the AI check is not built |
+| Prices | Flat test prices from `wrangler.jsonc`: $75 shared, $225 exclusive. Not real pricing |
+| Balance | Test accounts start with a $240 test balance and 3 free leads |
+| Offer window | 24 hours instead of 10 minutes, so there is time to test |
+
+Secrets to set before it runs: `AIRTABLE_TOKEN`, `SESSION_SECRET`, `TEST_CODE`, `ADMIN_KEY`. See `wrangler.jsonc`.
+
+```
+node test/api.test.mjs        # rule checks against the stand-in database
+node test/dev-server.mjs      # full site and portal on http://localhost:8790, test code 424242
+```
+
+Not built yet: document storage and the AI document check, text offers and YES replies, card payments,
+the pricing engine, the owner request form's endpoint, and bad-lead scoring.

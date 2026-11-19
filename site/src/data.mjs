@@ -15,8 +15,9 @@ export const site = {
   endpoints: {
     request: "",
     contact: "",
-    proJoin: "",
-    proSignIn: "",
+    proJoin: "/api/pro/join",
+    proSignIn: "/api/pro/sign-in",
+    proCode: "/api/pro/verify-code",
   },
 
   // Shown on the request form. Filled in when the confirmation-call number exists.

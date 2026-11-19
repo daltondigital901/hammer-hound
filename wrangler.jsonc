@@ -1,10 +1,31 @@
 {
-  // Cloudflare Worker that serves the static site in site/dist.
+  // Cloudflare Worker: serves the static site in site/dist and the pro API in src/worker.js.
   "name": "hammer-hound",
+  "main": "src/worker.js",
   "compatibility_date": "2026-11-01",
   "assets": {
     "directory": "./site/dist",
+    "binding": "ASSETS",
+    "run_worker_first": true,
     "html_handling": "auto-trailing-slash",
     "not_found_handling": "404-page"
+  },
+  // Every minute: copy new Dalton Digital form leads into the Hammer Hound base (shadow mode only).
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": {
+    "SHADOW_MODE": "true",
+    "BACKFILL_DAYS": "30",
+    "SHADOW_SHARED_PRICE": "75",
+    "SHADOW_EXCLUSIVE_PRICE": "225",
+    "SHADOW_MAX_PROS": "5",
+    "SHADOW_OFFER_HOURS": "24",
+    "TEST_BALANCE": "240"
   }
+  // Secrets (set with `npx wrangler secret put NAME`, never committed):
+  //   AIRTABLE_TOKEN   Airtable token: read on Dalton Digital base, read/write on Hammer Hound base
+  //   SESSION_SECRET   long random string that signs sign-in sessions
+  //   TEST_CODE        6-digit sign-in code for test accounts (555-01xx numbers)
+  //   ADMIN_KEY        key for POST /api/admin/ingest
+  //   INTERNAL_PHONES  optional: comma-separated real mobile numbers allowed to join in shadow mode
+  //   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM   optional: only needed to text codes to real numbers
 }

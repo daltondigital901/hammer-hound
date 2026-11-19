@@ -52,13 +52,28 @@
     var url = HH.endpoints[key];
     if (!url) { status(statusEl, NOT_OPEN); return Promise.resolve(false); }
     if (button) button.disabled = true;
-    return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) })
-      .then(function (r) { if (!r.ok) throw new Error(String(r.status)); status(statusEl, okText, "good"); return true; })
-      .catch(function () { status(statusEl, "That did not go through. Check your connection and try again.", "bad"); if (button) button.disabled = false; return false; });
+    return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify(data) })
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) { var e = new Error(j.error || ""); e.shown = !!j.error; throw e; } return j; }); })
+      .then(function (j) { if (okText) status(statusEl, okText, "good"); return j || true; })
+      .catch(function (e) { status(statusEl, e.shown ? e.message : "That did not go through. Check your connection and try again.", e.shown ? "" : "bad"); if (button) button.disabled = false; return false; });
+  }
+
+  // Pro join and sign-in: after the number is accepted, ask for the 6-digit code.
+  function codeStep(form, phone, sent) {
+    form.innerHTML = '<h2 class="h1">Enter your code</h2><p class="sub"></p>' +
+      '<label class="label" for="code-input">6-digit code</label><input class="input" id="code-input" name="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required>' +
+      '<p class="form-status" data-status role="status" hidden></p><button class="btn btn--yellow btn--block" type="submit">Continue</button>';
+    $(".sub", form).textContent = sent === "test" ? "This is a test account, so no text was sent. Enter the test code." : "We texted a 6-digit code to the number you entered. It expires in 10 minutes.";
+    form.setAttribute("data-form", "proCode");
+    form.onsubmit = function (e) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      send("proCode", { phone: phone, code: form.elements.code.value.trim() }, $("[data-status]", form), $("button", form)).then(function (ok) { if (ok) location.href = "/pros/app/"; });
+    };
+    form.elements.code.focus();
   }
 
   // Simple forms: contact, pro join, pro sign in
-  var OK = { contact: "Message sent. We reply by email within 1 business day.", proJoin: "Account created. Check your texts for the next step.", proSignIn: "Code sent. Check your texts." };
+  var OK = { contact: "Message sent. We reply by email within 1 business day." };
   $$("form[data-form]").forEach(function (form) {
     form.addEventListener("submit", function (e) {
       e.preventDefault();
@@ -68,7 +83,11 @@
       var data = {};
       new FormData(form).forEach(function (v, k) { data[k] = v; });
       data.page = LOC.pathname;
-      send(form.getAttribute("data-form"), data, st, $("button[type=submit]", form), OK[form.getAttribute("data-form")]);
+      var key = form.getAttribute("data-form");
+      if (key === "proCode") return;
+      send(key, data, st, $("button[type=submit]", form), key === "contact" ? OK.contact : "").then(function (res) {
+        if (res && res.next === "code") codeStep(form, res.phone, res.sent);
+      });
     });
   });
   // Pro join: carry over the trade and ZIP picked on the landing page.

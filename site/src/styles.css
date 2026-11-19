@@ -280,6 +280,32 @@ legend + .option-grid { margin-top: 0; }
 .footer-links { display: flex; flex-wrap: wrap; gap: 6px 10px; }
 .footer-links a { text-decoration: none; }
 
+/* pro portal */
+.site-header--dark { background: var(--asphalt); border-bottom: 0; color: var(--white); }
+.site-header--dark .tagline { color: var(--orange); }
+.portal-wrap { padding-top: 24px; padding-bottom: 56px; max-width: 980px; }
+.tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+.portal-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 16px; margin-bottom: 16px; }
+.offer { padding: 20px; display: grid; gap: 10px; }
+.offer-top { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.offer h3 { font-size: 19px; }
+.offer-price { font-weight: 800; font-size: 26px; }
+.offer-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.offer-actions .btn { flex: 1 1 160px; }
+.lead-contact { display: grid; gap: 4px; padding: 14px; border-radius: 10px; background: var(--concrete); }
+.lead-contact a { font-weight: 700; font-size: 18px; }
+.test-banner { padding: 10px 14px; border-radius: 10px; background: var(--orange-tint); color: var(--orange-text); font-weight: 600; font-size: 14px; margin-bottom: 16px; }
+.portal .card.form { max-width: 560px; }
+
+/* limited-time membership offer */
+.fee-offer { display: grid; justify-items: start; gap: 4px; margin-top: 24px; padding: 16px 20px; border-radius: var(--r); border: 2px dashed var(--asphalt); max-width: 420px; }
+.fee-offer--dark { border-color: var(--yellow); }
+.fee-line { display: flex; align-items: baseline; gap: 16px; font-weight: 800; line-height: 1; margin-top: 8px; }
+.fee-was { font-size: 44px; text-decoration: line-through; text-decoration-thickness: 4px; text-decoration-color: var(--orange); opacity: .75; }
+.fee-now { font-size: 64px; }
+.fee-offer--dark .fee-now { color: var(--yellow); }
+.fee-text { font-weight: 700; font-size: 18px; }
+
 /* pro ads landing page */
 .header-actions { display: flex; align-items: center; gap: 16px; }
 .header-actions .link-quiet { display: none; }
@@ -395,6 +421,8 @@ legend + .option-grid { margin-top: 0; }
   .lp-hero h1 { font-size: 56px; }
   .sms { justify-self: end; }
   .sticky-cta { display: none !important; }
+  .fee-was { font-size: 56px; }
+  .fee-now { font-size: 84px; }
   .lp-form { grid-template-columns: 1fr 1fr; }
   .lp-form .btn { grid-column: 1 / -1; justify-self: start; }
   .trust-grid { grid-template-columns: minmax(0, 1.400fr) minmax(0, 1fr); gap: 64px; align-items: center; }
