@@ -107,7 +107,7 @@
         return h("div", { class: "card offer" }, [
           h("div", { class: "offer-top" }, [h("span", { class: "chip", text: l.kind + " · " + (l.price ? money(l.price) : "Free") }), h("span", { class: "meta", text: "Bought " + when(l.boughtAt) })]),
           h("h3", { text: l.title }),
-          h("div", { class: "lead-contact" }, [h("strong", { text: l.ownerName || "Name not given" }), h("a", { href: "tel:+1" + l.ownerPhone, text: phoneFmt(l.ownerPhone) }), l.ownerEmail ? h("span", { text: l.ownerEmail }) : null]),
+          h("div", { class: "lead-contact" }, [h("strong", { text: l.ownerName || "Name not given" }), l.ownerPhone ? h("a", { href: "tel:+1" + l.ownerPhone, text: phoneFmt(l.ownerPhone) }) : h("span", { class: "meta", text: "No phone number given" }), l.ownerEmail ? h("a", { href: "mailto:" + l.ownerEmail, text: l.ownerEmail }) : null]),
           l.message ? h("p", { text: l.message }) : null,
           report, status,
         ]);

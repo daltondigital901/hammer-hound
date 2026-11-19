@@ -11,19 +11,32 @@ const DIST = join(ROOT, "site", "dist");
 const TYPES = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".ico": "image/x-icon", ".json": "application/json", ".webmanifest": "application/manifest+json", ".xml": "application/xml", ".txt": "text/plain" };
 
 // ---- in-memory Airtable ----
-export const db = { tblW1A0iKDAd111iI: [], tblfA6ivDIlWVp4us: [], tbl9bEGuy8DPkkee7: [], tblJnYLq2aCiCVU1C: [] };
+export const db = { tblW1A0iKDAd111iI: [], tblfA6ivDIlWVp4us: [], tbl9bEGuy8DPkkee7: [], tblJnYLq2aCiCVU1C: [], tbl9olHmI5p746DOe: [] };
 let seq = 0;
 const rid = () => "rec" + String(++seq).padStart(14, "0");
 const NUM = "fldfJJYK166eGNfxw";
+// Two stand-in sites: one free to offer, one with a GBP.
+export const SITE_FREE = "recSITEFREE0000000".slice(0, 17), SITE_GBP = "recSITEGBP00000000".slice(0, 17), SITE_CLIENT = "recSITECLIENT00000".slice(0, 17);
+db.tbl9olHmI5p746DOe.push({ id: SITE_FREE, fields: { fldxjMNAdLglWFBLl: "Yes - Not Requested Yet", fldVIdJR2dkmKXRf0: 0 } }, { id: SITE_GBP, fields: { fldxjMNAdLglWFBLl: "Has One!", fldVIdJR2dkmKXRf0: 0 } }, { id: SITE_CLIENT, fields: { fldxjMNAdLglWFBLl: "Inactive", fldVIdJR2dkmKXRf0: 1 } });
 export function seedForm(n, o = {}) {
-  db.tblW1A0iKDAd111iI.push({ id: rid(), fields: { [NUM]: String(n), fldqadMmvag7tK3U7: o.site || "Sample Roofing Site", fldZ3OCAkOMlzbwec: new Date().toISOString(), fldw8MWCtjotaU9Tw: { name: "Organic" }, _valid: o.valid !== false,
-    fldDI13VDK04kQnYK: `New website lead:\nName: ${o.name || "Sample Owner " + n}\nPhone: 90155501${String(n % 100).padStart(2, "0")}\nEmail: owner${n}@example.com\nCity: ${o.city || "Memphis"}\nService: ${o.service || "Roof Repair"}\nMessage: ${o.message || "Leak over the kitchen.\nNeed someone this week."}` } });
+  const email = o.kind === "Email";
+  const details = email
+    ? `New email lead:\nName: ${o.name || "Sample Owner " + n}\nEmail: owner${n}@example.com\nTo: hello@sample.example\nSubject: ${o.subject || "Quote for a retaining wall"}\nMessage: ${o.message || "Please send a quote."}`
+    : `New website lead:\nName: ${o.name || "Sample Owner " + n}\nPhone: 90155501${String(n % 100).padStart(2, "0")}\nEmail: owner${n}@example.com\nCity: ${o.city || "Memphis"}\nService: ${o.service || "Roof Repair"}\nMessage: ${o.message || "Leak over the kitchen.\nNeed someone this week."}`;
+  db.tblW1A0iKDAd111iI.push({ id: rid(), fields: { [NUM]: n, fldJmHzvV9WlWbPUH: email ? "Email" : "Form", fldqadMmvag7tK3U7: o.siteName || "Sample Roofing Site", fldiLbdgf1efaCUOf: o.site === null ? undefined : [o.site || SITE_FREE], fldZ3OCAkOMlzbwec: new Date().toISOString(), fldw8MWCtjotaU9Tw: "Organic",
+    _valid: o.valid !== false, _client: !!o.client, _kind: o.kind || "Form", fldDI13VDK04kQnYK: details } });
 }
 function matches(table, rec, formula) {
   if (!formula) return true;
   const f = rec.fields; let m;
-  if (table === "tblW1A0iKDAd111iI") { if (!f._valid) return false; m = formula.match(/\{Call Number\}>(\d+)/); return m ? Number(f[NUM]) > Number(m[1]) : true; }
-  if (formula === "{DD1 Call Number}>0") return f["DD1 Call Number"] > 0;
+  if (table === "tblW1A0iKDAd111iI") {
+    if (!formula.includes("{Form/Call}='Form'") || !formula.includes("{Form/Call}='Email'") || !formula.includes("{Client Portfolio}=BLANK()") || !formula.includes("{Valid/Spam}='✅ Valid'")) throw new Error("mock: Call Tracker filter is missing a required condition");
+    if (!f._valid || f._client || !["Form", "Email"].includes(f._kind)) return false;
+    m = formula.match(/\{Call Number\}>(\d+)/); return m ? Number(f[NUM]) > Number(m[1]) : true;
+  }
+  if (table === "tbl9olHmI5p746DOe") return formula.includes(`RECORD_ID()='${rec.id}'`);
+  if ((m = formula.match(/^AND\(\{DD1 Call Number\}>0,\{Rule\}='(.*)'\)$/))) return f["DD1 Call Number"] > 0 && f.Rule === m[1];
+  if ((m = formula.match(/^AND\(\{Source\}='DD1 form \(shadow\)',NOT\(\{Rule\}='(.*)'\)\)$/))) return f.Source === "DD1 form (shadow)" && f.Rule !== m[1];
   if ((m = formula.match(/^\{Mobile\}='(.*)'$/))) return f.Mobile === m[1];
   if ((m = formula.match(/^FIND\('(.*)',\{Purchase\}\)>0$/))) return String(f.Purchase).includes(m[1]);
   if (formula.startsWith("AND({Status}='Offered'")) return f.Status === "Offered" && new Date(f["Offer Ends At"]) > new Date();
@@ -34,7 +47,7 @@ globalThis.fetch = async (input, init = {}) => {
   const url = new URL(typeof input === "string" ? input : input.url || input);
   if (url.hostname !== "api.airtable.com") return realFetch(input, init);
   const [, , , table, id] = url.pathname.split("/");
-  const rows = db[table]; const method = init.method || "GET"; const body = init.body ? JSON.parse(init.body) : null;
+  let rows = db[table]; const method = init.method || "GET"; const body = init.body ? JSON.parse(init.body) : null;
   const clean = (r) => ({ id: r.id, fields: Object.fromEntries(Object.entries(r.fields).filter(([k]) => !k.startsWith("_"))) });
   const ok = (d) => new Response(JSON.stringify(d), { status: 200 });
   if (method === "GET" && id) { const r = rows.find((x) => x.id === id); return r ? ok(clean(r)) : new Response("{}", { status: 404 }); }
@@ -47,6 +60,7 @@ globalThis.fetch = async (input, init = {}) => {
   }
   if (method === "POST") { const made = body.records.map((r) => ({ id: rid(), fields: { ...r.fields } })); rows.push(...made); return ok({ records: made.map(clean) }); }
   if (method === "PATCH") { const r = rows.find((x) => x.id === id); Object.assign(r.fields, body.fields); return ok(clean(r)); }
+  if (method === "DELETE") { const ids = url.searchParams.getAll("records[]"); db[table] = rows.filter((r) => !ids.includes(r.id)); return ok({ records: ids.map((i) => ({ id: i, deleted: true })) }); }
   return new Response("{}", { status: 405 });
 };
 
@@ -64,7 +78,7 @@ export { worker, ingest };
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   for (let n = 1; n <= 8; n++) seedForm(n, { service: ["Roof Repair", "Driveway Replacement", "Fence Install", "Water Heater"][n % 4], city: ["Memphis", "Germantown", "Bartlett"][n % 3] });
-  seedForm(9, { valid: false });
+  seedForm(9, { valid: false }); seedForm(10, { site: SITE_GBP }); seedForm(11, { kind: "Email" });
   console.log("ingest:", await ingest(env));
   const port = Number(process.argv[2] || 8790);
   http.createServer(async (req, res) => {
