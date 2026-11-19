@@ -429,14 +429,18 @@ const purchasesFor = (env, key) => list(env, HH.base, HH.purchases, { filterByFo
 export const HOT_HOURS = 72, LEAD_DAYS = 7;
 const ageHours = (l) => (Date.now() - Date.parse(l.fields["Received At"] || 0)) / 3600e3;
 const isHot = (l) => ageHours(l) < HOT_HOURS, isOpenAge = (l) => ageHours(l) < LEAD_DAYS * 24;
+// Older leads are priced down by age. Percent of the hot price for each day past the hot window:
+// day 3, day 4, day 5, day 6. Rounded to the nearest $5, never under $10. Hot leads are always full price.
+const agedPercent = (env, l) => { if (isHot(l)) return 100; const steps = String((env && env.AGED_PRICING) || "50,40,30,20").split(",").map(Number).filter((n) => n > 0 && n <= 100); return steps[Math.min(steps.length - 1, Math.max(0, Math.floor((ageHours(l) - HOT_HOURS) / 24)))] || 100; };
+export const priceOf = (env, l, kind) => { const full = l.fields[kind === "exclusive" ? "Exclusive Price" : "Shared Price"] || 0, pct = agedPercent(env, l); return pct >= 100 ? full : Math.max(10, Math.round(full * pct / 100 / 5) * 5); };
 const jobView = (l) => ({
   id: l.id, title: l.fields.Lead, job: l.fields.Job || l.fields.Service || "Job", trade: l.fields.Trade || tradeOf(l.fields.Service), tradeName: TRADE_NAME[l.fields.Trade || tradeOf(l.fields.Service)] || "Other",
   city: l.fields.City || "", state: l.fields.State || "", place: placeOf(l.fields) || "Area not stated", summary: noFiller(l.fields.Summary),
   timing: l.fields.Timing || "Not stated", propertyType: l.fields["Property Type"] || "Not stated", jobSize: l.fields["Job Size"] || "Not stated", receivedAt: l.fields["Received At"], bid: /Bid Invitation$/.test(l.fields.Job || ""),
 });
-const offerView = (l, taken, exclusiveTaken) => ({
+const offerView = (env, l, taken, exclusiveTaken) => ({
   ...jobView(l), hot: isHot(l), hotUntil: new Date(Date.parse(l.fields["Received At"]) + HOT_HOURS * 3600e3).toISOString(), endsAt: new Date(Date.parse(l.fields["Received At"]) + LEAD_DAYS * 864e5).toISOString(),
-  sharedPrice: l.fields["Shared Price"], exclusivePrice: l.fields["Exclusive Price"], maxPros: l.fields["Max Pros"], spotsTaken: taken, exclusiveAvailable: taken === 0 && !exclusiveTaken,
+  sharedPrice: priceOf(env, l, "shared"), exclusivePrice: priceOf(env, l, "exclusive"), fullPrice: l.fields["Shared Price"], percentOff: 100 - agedPercent(env, l), maxPros: l.fields["Max Pros"], spotsTaken: taken, exclusiveAvailable: taken === 0 && !exclusiveTaken,
 });
 // A bought lead: the uniform part, then the owner's details and their own words.
 const leadView = (l) => ({ ...jobView(l), ownerName: l.fields["Owner Name"] || "", ownerPhone: l.fields["Owner Phone"] || "", ownerEmail: l.fields["Owner Email"] || "", address: l.fields["Job Address"] || "", message: l.fields.Message || "" });
@@ -503,7 +507,7 @@ async function purchase(env, pro, { leadId, kind, reload = false, via = "Portal"
   if (bought.length >= lead.fields["Max Pros"]) return no(410, "All spots on this lead are taken.");
 
   // Every lead comes out of the wallet. Free welcome credit is spent before paid funds.
-  const price = kind === "exclusive" ? lead.fields["Exclusive Price"] : lead.fields["Shared Price"];
+  const price = priceOf(env, lead, kind);
   let balance = pro.fields.Balance || 0, reloaded = 0;
   if (price > balance) {
     const unit = reloadUnit(pro.fields), need = Math.ceil((price - balance) / unit) * unit, card = pro.fields.Card || "";
@@ -956,7 +960,7 @@ async function api(request, env, path) {
     const mineIds = new Set(mine.map((p) => p.fields.Purchase.split(":")[0]));
     const count = {}, excl = {};
     for (const p of all) { const id = p.fields.Purchase.split(":")[0]; count[id] = (count[id] || 0) + 1; if (p.fields.Kind === "Exclusive") excl[id] = true; }
-    const open = leads.filter((l) => !mineIds.has(l.id)).map((l) => offerView(l, count[l.id] || 0, !!excl[l.id]));
+    const open = leads.filter((l) => !mineIds.has(l.id)).map((l) => offerView(env, l, count[l.id] || 0, !!excl[l.id]));
     // Filters default to the pro's own market and trade. "all" widens either one.
     const q = new URL(request.url).searchParams, home = { market: pro.fields.City || "", trade: pro.fields.Trade || "" };
     const market = q.has("market") ? q.get("market") : home.market || "all", trade = q.has("trade") ? q.get("trade") : home.trade || "all";

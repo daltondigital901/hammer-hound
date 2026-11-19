@@ -70,7 +70,7 @@ The person who accepts this Agreement confirms that they are at least 18 and hav
 
 ### 5. Fees and payment
 
-**5.1 Lead prices.** The price of each lead is shown in the offer before you buy. Prices vary by trade, job and market and may change at any time for leads you have not yet bought.
+**5.1 Lead prices.** The price of each lead is shown in the offer before you buy. Prices vary by trade, job, market and the age of the lead, and may change at any time for leads you have not yet bought.
 
 **5.2 Wallet and card on file.** Leads are paid from your wallet. You add to your wallet with a card, and you may save that card on file. A wallet balance is not a bank deposit and earns no interest.
 

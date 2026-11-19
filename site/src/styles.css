@@ -616,3 +616,5 @@ legend + .option-grid { margin-top: 0; }
 .pp-age.is-on { background: var(--yellow); box-shadow: 3px 3px 0 var(--black); }
 .chip--hot { background: var(--orange-text); color: #fff; border-color: var(--orange-text); }
 .chip--old { background: #fff; }
+.offer-was { font-size: .6em; font-weight: 600; opacity: .55; }
+.offer-price .chip { font-size: 13px; vertical-align: middle; }
