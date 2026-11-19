@@ -12,6 +12,8 @@
   },
   // Every minute: copy new Dalton Digital form leads into the Hammer Hound base (shadow mode only).
   "triggers": { "crons": ["* * * * *"] },
+  // Keep Worker logs so a failed copy can be read in the Cloudflare dashboard.
+  "observability": { "enabled": true },
   "vars": {
     "SHADOW_MODE": "true",
     "BACKFILL_DAYS": "30",

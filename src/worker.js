@@ -145,7 +145,8 @@ async function api(request, env, path) {
 
   if (path === "/api/admin/ingest" && request.method === "POST") {
     if (!env.ADMIN_KEY || request.headers.get("X-Admin-Key") !== env.ADMIN_KEY) return fail(401, "Not allowed.");
-    return json(await ingest(env));
+    // The key holder is the operator, so a failure is returned in full instead of a generic message.
+    try { return json(await ingest(env)); } catch (e) { return json({ error: String(e && e.message || e) }, 500); }
   }
 
   if (path === "/api/pro/join" && request.method === "POST") {
@@ -228,6 +229,8 @@ export default {
     return env.ASSETS.fetch(request);
   },
   async scheduled(event, env, ctx) {
-    if (env.SHADOW_MODE === "true" && env.AIRTABLE_TOKEN) ctx.waitUntil(ingest(env).then((r) => console.log("ingest", JSON.stringify(r))));
+    if (env.SHADOW_MODE !== "true") return;
+    if (!env.AIRTABLE_TOKEN) { console.error("ingest skipped: AIRTABLE_TOKEN is not set"); return; }
+    ctx.waitUntil(ingest(env).then((r) => console.log("ingest", JSON.stringify(r)), (e) => console.error("ingest failed:", String(e && e.message || e))));
   },
 };
