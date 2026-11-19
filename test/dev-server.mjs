@@ -47,9 +47,9 @@ function matches(table, rec, formula) {
   if (formula === "AND({Review Status}='Approved',NOT({Credited}))") return f["Review Status"] === "Approved" && !f.Credited;
   if (formula === "AND({Verification}='Verified',NOT({Paused}))") return f.Verification === "Verified" && !f.Paused;
   if (formula === "NOT({Email}='')") return !!f.Email;
-  if (formula.includes("{Alerted}=''")) return f.Status === "Offered" && f.Style === "v1" && new Date(f["Offer Ends At"]) > new Date() && !f.Alerted;
-  if (formula.startsWith("AND({Status}='Offered',{Style}='v1'")) return f.Status === "Offered" && f.Style === "v1" && new Date(f["Offer Ends At"]) > new Date();
-  if (formula.startsWith("AND(NOT({Style}='v1')")) return f.Style !== "v1" && f.Style !== "failed 3" && f.Status !== "Rejected";
+  if (formula.includes("{Alerted}=''")) return f.Status === "Offered" && f.Style === "v2" && Date.now() - Date.parse(f["Received At"]) < 72 * 3600e3 && !f.Alerted;
+  if (formula.startsWith("AND({Status}='Offered',{Style}='v2'")) return f.Status === "Offered" && f.Style === "v2" && Date.now() - Date.parse(f["Received At"]) < 7 * 864e5;
+  if (formula.startsWith("AND(NOT({Style}='v2')")) return f.Style !== "v2" && f.Style !== "failed 3" && (f.Status !== "Rejected" || String(f.Qualified || "").startsWith("No:")) && Date.now() - Date.parse(f["Received At"]) < 7 * 864e5;
   throw new Error("mock: unknown formula " + formula);
 }
 // ---- stand-in AI: decides from words inside the uploaded test files ----
@@ -64,7 +64,7 @@ function aiMock(body, headers) {
   if (!body.messages[0].content.some((c) => c.source)) {
     const text = body.messages[0].content[0].text, get = (k) => (text.match(new RegExp(k + ": (.*)")) || [])[1] || "", service = get("Service or subject field"), msg = text.split("Message:\n")[1] || "";
     const lead = /SPAM|we offer seo/i.test(msg) ? { is_job_request: false, not_a_job_reason: "vendor pitch" }
-      : { is_job_request: true, not_a_job_reason: "", job: service.replace(/^(fwd?|re):\s*/i, "").replace(/\b\w/g, (ch) => ch.toUpperCase()).slice(0, 40), trade: /roof/i.test(service) ? "roofing" : /fenc/i.test(service) ? "fencing" : /wall|brick/i.test(service) ? "masonry" : /driveway/i.test(service) ? "concrete" : /water heater/i.test(service) ? "water-heaters" : "other",
+      : { is_job_request: true, not_a_job_reason: "", request_type: /invitation to bid|ITB/i.test(msg + service) ? "bid" : "owner", job: service.replace(/^(fwd?|re):\s*/i, "").replace(/\b\w/g, (ch) => ch.toUpperCase()).slice(0, 40), trade: /roof/i.test(service) ? "roofing" : /fenc/i.test(service) ? "fencing" : /wall|brick/i.test(service) ? "masonry" : /driveway/i.test(service) ? "concrete" : /water heater/i.test(service) ? "water-heaters" : "other",
         city: get("City field") || "Baltimore", state: get("City field") ? "TN" : "MD", address: "", property_type: "Home", timing: /this week/i.test(msg) ? "Within a week" : "Not stated", job_size: "Small", summary: "The owner wants " + service.toLowerCase() + ". Call 901-555-0100 or owner1@example.com." };
     return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify(lead) }] }), { status: 200 });
   }
@@ -101,7 +101,7 @@ globalThis.fetch = async (input, init = {}) => {
 
 export const env = {
   AIRTABLE_TOKEN: "test", SESSION_SECRET: "local-test-secret", TEST_CODE: "424242", ADMIN_KEY: "admin", SHADOW_MODE: "true",
-  SHADOW_SHARED_PRICE: "75", SHADOW_EXCLUSIVE_PRICE: "225", SHADOW_MAX_PROS: "5", SHADOW_OFFER_HOURS: "24", TEST_BALANCE: "240",
+  SHADOW_SHARED_PRICE: "75", SHADOW_EXCLUSIVE_PRICE: "225", SHADOW_MAX_PROS: "5", TEST_BALANCE: "240",
   ANTHROPIC_API_KEY: "test-key", ANTHROPIC_API: "https://ai.test/v1/messages", STYLE_BATCH: "50",
   DOCS: { put: async (k, v, o) => { stored.set(k, { size: v.byteLength, ...o }); } },
   EMAIL: { send: async (msg) => { sent.push(msg); return { messageId: "m" + sent.length }; } },

@@ -379,6 +379,28 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   assert.equal((await call("/api/pro/market-request", { market: "Tupelo", trade: "roofing" }, null)).status, 401);
 }
 
+// ---- hot leads, older leads, and bid invitations ----
+{
+  const LD = db.tblfA6ivDIlWVp4us, c = await signUp(85), hrs = (h) => new Date(Date.now() - h * 3600e3).toISOString();
+  const mk = (id, h, extra = {}) => { LD.push({ id, fields: { Lead: "Age Test · Memphis, TN", Job: "Age Test", Trade: "roofing", City: "Memphis", State: "TN", Status: "Offered", Style: "v2", Qualified: "Yes", "Received At": hrs(h), "Shared Price": 75, "Exclusive Price": 225, "Max Pros": 5, Alerted: "x", ...extra } }); return id; };
+  const hot = mk("recAGEHOT00000001", 71), old = mk("recAGEOLD00000001", 73), week = mk("recAGEWEEK0000001", 7 * 24 - 1), gone = mk("recAGEGONE0000001", 7 * 24 + 1);
+  const r = await call(ALL, null, c), by = (id) => r.offers.find((o) => o.id === id);
+  assert.equal(by(hot).hot, true, "under 72 hours is hot"); assert.equal(by(old).hot, false, "past 72 hours is an older lead"); assert.equal(by(week).hot, false); assert.equal(by(gone), undefined, "a week old is closed");
+  assert.equal(r.hot + r.older, r.offers.length); assert.equal(r.hotHours, 72); assert.equal(r.leadDays, 7);
+  assert.equal((await call("/api/pro/buy", { leadId: gone, kind: "shared" }, c)).status, 410); assert.equal((await call("/api/pro/buy", { leadId: old, kind: "shared" }, c)).status, 200, "older leads can still be claimed");
+  // text and email alerts only go out for hot leads
+  const { alertPros, styleLeads } = await import("../src/worker.js");
+  for (const l of LD) l.fields.Alerted = "x"; LD.find((l) => l.id === week).fields.Alerted = ""; assert.equal((await alertPros(env)).leads, 0);
+  // a bid invitation is accepted and always titled "<Scope> Bid Invitation"
+  seedForm(72, { kind: "Email", subject: "Fwd: ITB - Demolition Sub Bid Request", message: "Invitation to bid on the demolition package. Bids due Friday." }); await ingest(env);
+  const bid = LD.at(-1).fields; assert.equal(bid.Status, "Offered"); assert.match(bid.Job, /^Demolition Bid Invitation$/); assert.doesNotMatch(bid.Job, /Request|Subcontractor|Fwd|ITB/); assert.equal(bid["Property Type"], "Business");
+  assert.equal((await call(ALL, null, c)).offers.find((o) => o.job === bid.Job).bid, true);
+  // leads the writer rejected under the old rules are looked at again; ones a person rejected are not
+  LD.push({ id: "recREJWRITER00001", fields: { Lead: "x", Service: "Fwd: ITB Park Restroom Bid", Message: "Invitation to bid.", Status: "Rejected", Style: "v1", Qualified: "No: Bid invitation from general contractor", "Received At": hrs(5) } }, { id: "recREJPERSON00001", fields: { Lead: "x", Service: "ITB", Message: "Invitation to bid.", Status: "Rejected", Style: "v1", "Received At": hrs(5) } });
+  await styleLeads(env);
+  assert.equal(LD.find((l) => l.id === "recREJWRITER00001").fields.Status, "Offered"); assert.match(LD.find((l) => l.id === "recREJWRITER00001").fields.Job, /Park Restroom Bid Invitation$/); assert.equal(LD.find((l) => l.id === "recREJPERSON00001").fields.Status, "Rejected");
+}
+
 // ---- insurance reminders and nudges ----
 const R = (f, now) => (reminderFor({ Email: "a@b.co", Verification: "Verified", ...f }, now) || {}).stage;
 assert.equal(R({ "Insurance Expires": "2027-03-31" }, "2027-02-01"), undefined, "nothing more than 30 days out");

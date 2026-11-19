@@ -292,6 +292,8 @@
 
   // ---------- leads: browse by market and trade ----------
   var pick = { market: null, trade: null };   // null = the pro's own market and trade
+  var age = "hot";
+  function ago(t) { var h = Math.max(0, (Date.now() - Date.parse(t)) / 36e5); return h < 1 ? "under an hour ago" : h < 24 ? Math.floor(h) + (Math.floor(h) === 1 ? " hour ago" : " hours ago") : Math.floor(h / 24) + (Math.floor(h / 24) === 1 ? " day ago" : " days ago"); }
   function offersView() {
     shell([h("p", { class: "meta", text: "Loading leads." })]);
     var qs = []; if (pick.market !== null) qs.push("market=" + encodeURIComponent(pick.market)); if (pick.trade !== null) qs.push("trade=" + encodeURIComponent(pick.trade));
@@ -308,7 +310,11 @@
       var mine = (f.home.market || "all").toLowerCase() === f.market.toLowerCase() && (f.home.trade || "all") === f.trade;
       var filters = h("div", { class: "pp-filters" }, [field("f-market", "Market", mSel), field("f-trade", "Trade", tSel),
         mine ? h("p", { class: "hint", text: "Showing your market and trade." }) : h("button", { class: "btn btn--text", type: "button", text: "Back to my market and trade", on: { click: function () { pick = { market: null, trade: null }; offersView(); } } })]);
-      var items = r.offers.map(function (o) {
+      if (age === "older" && !r.older && r.hot) age = "hot"; if (age === "hot" && !r.hot && r.older) age = "older";
+      var ageTabs = h("div", { class: "pp-ages", role: "tablist" }, [["hot", "Hot leads", r.hot, "Sent in the last " + r.hotHours + " hours"], ["older", "Older leads", r.older, "3 to " + r.leadDays + " days old"]].map(function (a) {
+        return h("button", { class: "pp-age" + (age === a[0] ? " is-on" : ""), type: "button", role: "tab", "aria-selected": String(age === a[0]), on: { click: function () { age = a[0]; offersView(); } } }, [h("strong", { text: a[1] + " (" + a[2] + ")" }), h("span", { text: a[3] })]);
+      }));
+      var items = r.offers.filter(function (o) { return age === "hot" ? o.hot : !o.hot; }).map(function (o) {
         var status = h("div");
         var act = function (kind, reload) { return function () {
           call("/api/pro/buy", { leadId: o.id, kind: kind, reload: !!reload }).then(function (res) {
@@ -322,9 +328,9 @@
         var label = function (kind, price) { var base = (kind === "exclusive" ? "Exclusive " : "Claim lead · ") + money0(price); return pro.balance >= price ? base : pro.card ? base + " · reloads " + money0(need(price)) : base; };
         var press = function (kind, price) { return function () { if (pro.balance < price && !pro.card) { status.innerHTML = ""; status.appendChild(note("Your wallet has " + money(pro.balance) + ". Add a card and this lead is one tap away.")); status.appendChild(h("button", { class: "btn btn--black btn--sm", type: "button", text: "Add a card", on: { click: function () { go("wallet"); } } })); return; } act(kind, pro.balance < price)(); }; };
         return h("div", { class: "card offer" }, [
-          h("div", { class: "offer-top" }, [h("span", { class: "chip", text: o.tradeName }), h("span", { class: "chip chip--yellow", text: "Ends " + when(o.endsAt) })])].concat(jobBlock(o), [
+          h("div", { class: "offer-top" }, [h("span", { class: "chip", text: o.tradeName }), o.bid ? h("span", { class: "chip", text: "Bid invitation" }) : null, o.hot ? h("span", { class: "chip chip--hot", text: "Hot · " + ago(o.receivedAt) }) : h("span", { class: "chip chip--old", text: ago(o.receivedAt) })])].concat(jobBlock(o), [
           h("div", { class: "offer-foot" }, [
-            h("p", { class: "meta", text: "Received " + when(o.receivedAt) + " · " + o.spotsTaken + " of " + o.maxPros + " spots taken" }),
+            h("p", { class: "meta", text: "Received " + when(o.receivedAt) + " · closes " + when(o.endsAt) + " · " + o.spotsTaken + " of " + o.maxPros + " spots taken" }),
             h("p", { class: "offer-price", text: money(o.sharedPrice) }),
             h("p", { class: "meta", text: locked ? (pro.credit > 0 ? "Shared lead. Your " + money0(pro.credit) + " in free credit unlocks when you are verified." : "Shared lead. Verify to claim it.") : covered ? "Shared lead. Covered by your free credit." : short ? (pro.card ? "Shared lead. Your wallet has " + money(pro.balance) + "; " + pro.card + " covers the rest." : "Shared lead. Your wallet has " + money(pro.balance) + ".") : "Shared lead. Paid from your wallet." }),
             locked ? h("div", { class: "offer-actions" }, [h("button", { class: "btn btn--outline btn--locked", type: "button", text: "Verify to claim this lead", on: { click: function () { go("verify"); } } })])
@@ -346,7 +352,7 @@
         h("p", { class: "sub", text: askable ? "Tell us you want them. We advertise where pros ask for leads." : "New leads show up here as they come in." }),
         askable ? want : null, wantStatus,
         f.total ? h("button", { class: "btn btn--outline btn--block", type: "button", text: "See the " + f.total + " open in other markets and trades", on: { click: function () { pick = { market: "all", trade: "all" }; offersView(); } } }) : null]);
-      shell([head(r.canBuy ? "Open leads" : "Open leads in your market", r.offers.length + " showing of " + f.total + " open"), filters, items.length ? h("div", { class: "grid grid--3 pp-grid" }, items) : empty]);
+      shell([head(r.canBuy ? "Open leads" : "Open leads in your market", r.offers.length + " showing of " + f.total + " open"), filters, r.offers.length ? ageTabs : null, items.length ? h("div", { class: "grid grid--3 pp-grid" }, items) : empty]);
     });
   }
 

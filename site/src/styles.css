@@ -610,3 +610,9 @@ legend + .option-grid { margin-top: 0; }
   .pp-grid .lead-facts dd { min-height: 2.9em; }
 }
 .unlock--alert { background: var(--orange-tint); border-color: var(--orange-text); box-shadow: 4px 4px 0 var(--orange-text); }
+.pp-ages { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 18px; }
+.pp-age { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 12px 14px; background: #fff; border: 2px solid var(--black); border-radius: 10px; cursor: pointer; font: inherit; color: inherit; }
+.pp-age span { font-size: 13px; opacity: .75; }
+.pp-age.is-on { background: var(--yellow); box-shadow: 3px 3px 0 var(--black); }
+.chip--hot { background: var(--orange-text); color: #fff; border-color: var(--orange-text); }
+.chip--old { background: #fff; }
