@@ -323,7 +323,31 @@ legend + .option-grid { margin-top: 0; }
 .vbadge-title { font-weight: 800; font-size: 22px; color: var(--yellow); letter-spacing: .02em; text-transform: uppercase; }
 .vbadge-name { font-weight: 700; }
 .vbadge .meta { color: var(--concrete-2); }
+/* verified pros, shown to property owners */
+.vetted-row { display: grid; gap: 28px; }
+.vetted-badge { display: grid; justify-items: center; gap: 10px; }
+.vetted-badge img { width: 130px; }
+.vetted .vbadge-title { padding: 6px 16px; border: 2px solid var(--yellow); border-radius: 999px; font-size: 16px; }
+.vetted .lead { margin-top: 10px; }
+.vetted-list { margin-top: 24px; }
 @media (min-width: 640px) { .unlock { grid-template-columns: auto 1fr auto; } .unlock .btn { grid-column: auto; } }
+.chip--orange { background: var(--orange-tint); color: var(--orange-text); }
+.checking, .passed { text-align: center; display: grid; gap: 16px; justify-items: center; }
+.checking-hound { position: relative; width: 150px; }
+.checking-hound img { width: 150px; transform-origin: 50% 85%; animation: hh-hammer .7s cubic-bezier(.5, 0, .3, 1) infinite alternate; }
+.checking-spark { position: absolute; left: -6px; top: 46%; width: 14px; height: 14px; border-radius: 50%; background: var(--yellow); box-shadow: -14px -10px 0 -3px var(--orange), -10px 12px 0 -4px var(--yellow-dark); animation: hh-spark .7s linear infinite alternate; }
+.checking-line { font-weight: 700; font-size: 18px; min-height: 28px; }
+.checking-bar { width: 100%; height: 18px; border-radius: 999px; border: 2px solid var(--asphalt); background: repeating-linear-gradient(-45deg, var(--yellow) 0 14px, var(--asphalt) 14px 28px); background-size: 39.6px 100%; animation: hh-stripes .8s linear infinite; }
+@keyframes hh-hammer { from { transform: rotate(-9deg); } to { transform: rotate(7deg); } }
+@keyframes hh-spark { 0%, 70% { opacity: 0; transform: scale(.4); } 100% { opacity: 1; transform: scale(1.2); } }
+@keyframes hh-stripes { to { background-position: 39.6px 0; } }
+.passed { background: var(--asphalt); color: var(--white); border: 3px solid var(--yellow); }
+.passed .sub { color: var(--concrete-2); }
+.passed-badge { width: 170px; animation: hh-drop .7s cubic-bezier(.2, 1.4, .4, 1) both; }
+@keyframes hh-drop { from { transform: translateY(-80px) rotate(-18deg) scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
+.result { display: grid; gap: 14px; }
+.result-reason { padding: 14px 16px; border-radius: 10px; background: var(--orange-tint); color: var(--orange-text); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .checking-hound img, .checking-spark, .checking-bar, .passed-badge { animation: none; } }
 
 /* limited-time membership offer */
 .fee-offer { display: grid; justify-items: start; gap: 4px; margin-top: 24px; padding: 16px 20px; border-radius: var(--r); border: 2px dashed var(--asphalt); max-width: 420px; }
@@ -404,6 +428,8 @@ legend + .option-grid { margin-top: 0; }
   .guide-feature .guide-card-body { padding: 28px; align-content: center; }
 }
 @media (min-width: 960px) {
+  .vetted-row { grid-template-columns: 240px 1fr; gap: 48px; align-items: center; }
+  .vetted-badge img { width: 180px; }
   .promise { padding: 64px 0; }
   .promise-row { grid-template-columns: 300px 1fr; gap: 36px; align-items: center; justify-items: stretch; }
   .promise-hound { width: 300px; }

@@ -16,6 +16,10 @@
     { "pattern": "hammerhound.com", "custom_domain": true },
     { "pattern": "www.hammerhound.com", "custom_domain": true }
   ],
+  // Private storage for pros' verification documents. Never served to the web.
+  "r2_buckets": [{ "binding": "DOCS", "bucket_name": "hammer-hound-docs" }],
+  // Sends verification result emails from support@hammerhound.com (Cloudflare Email Sending).
+  "send_email": [{ "name": "EMAIL" }],
   // Every minute: copy new Dalton Digital form leads into the Hammer Hound base (shadow mode only).
   "triggers": { "crons": ["* * * * *"] },
   // Keep Worker logs so a failed copy can be read in the Cloudflare dashboard.
@@ -27,13 +31,16 @@
     "SHADOW_EXCLUSIVE_PRICE": "225",
     "SHADOW_MAX_PROS": "5",
     "SHADOW_OFFER_HOURS": "24",
-    "TEST_BALANCE": "240"
+    "TEST_BALANCE": "240",
+    "AI_MODEL": "claude-sonnet-5-5",
+    "AI_VERSION": "2026-10-21"
   }
   // Secrets (set with `npx wrangler secret put NAME`, never committed):
   //   AIRTABLE_TOKEN   Airtable token: read on Dalton Digital base, read/write on Hammer Hound base
   //   SESSION_SECRET   long random string that signs sign-in sessions
   //   TEST_CODE        6-digit sign-in code for test accounts (555-01xx numbers)
   //   ADMIN_KEY        key for POST /api/admin/ingest
+  //   ANTHROPIC_API_KEY  reads verification documents. Without it, documents wait for a person
   //   INTERNAL_PHONES  optional: comma-separated real mobile numbers allowed to join in shadow mode
   //   TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM   optional: only needed to text codes to real numbers
 }

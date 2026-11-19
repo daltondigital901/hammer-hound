@@ -223,9 +223,25 @@ page({
 </section>
 ${hazard}
 ${ownerPromise}
+<section class="section section--dark vetted">
+  <div class="wrap vetted-row">
+    <div class="vetted-badge"><img src="/assets/img/badge-on-dark.png" alt="" width="161" height="192" loading="lazy"><p class="vbadge-title">Verified Pro</p></div>
+    <div>
+      <p class="eyebrow eyebrow--yellow">Who is allowed to call you</p>
+      <h2>Only Verified Pros get your request.</h2>
+      <p class="lead">A contractor cannot take a single job here until we have checked their business and their insurance.</p>
+      <ul class="trust-list vetted-list">
+        <li>${icon("doc", 22)}<div><h3>A real, registered business</h3><p>Legal name, federal tax ID, and a license or registration on file. One account per business.</p></div></li>
+        <li>${icon("shield", 22)}<div><h3>Insurance on file</h3><p>A current general liability certificate. When it expires, the pro stops getting jobs until they send a new one.</p></div></li>
+        <li>${icon("check", 22)}<div><h3>Checked before the first job</h3><p>Not after a complaint. No documents, no leads.</p></div></li>
+      </ul>
+      <p class="lp-micro">Verified means we received documents that appeared valid on the date we checked them. It is not a guarantee of anyone's work. See the <a href="/terms/">Terms of Use</a>.</p>
+    </div>
+  </div>
+</section>
 <section class="section">
   <div class="wrap">
-    <div class="section-head"><h2>What property owners say</h2><p class="chips"><span class="chip chip--green">${icon("shield", 16)} License on file</span><span class="chip chip--green">${icon("check", 16)} Insured</span></p></div>
+    <div class="section-head"><h2>What property owners say</h2><p class="chips"><span class="chip chip--green">${icon("shield", 16)} Verified Pro</span><span class="chip chip--green">${icon("check", 16)} Insurance on file</span></p></div>
     <div class="grid grid--3">
       ${reviews.map((r) => `<figure class="card review"><div class="stars" aria-label="5 out of 5 stars">${star.repeat(5)}</div><blockquote>&ldquo;${esc(r.quote)}&rdquo;</blockquote><figcaption>${esc(r.who)} &middot; ${esc(r.job)}</figcaption></figure>`).join("")}
     </div>

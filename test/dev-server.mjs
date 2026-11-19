@@ -43,9 +43,21 @@ function matches(table, rec, formula) {
   if (formula.startsWith("AND({Status}='Offered'")) return f.Status === "Offered" && new Date(f["Offer Ends At"]) > new Date();
   throw new Error("mock: unknown formula " + formula);
 }
+// ---- stand-in AI: decides from words inside the uploaded test files ----
+export const ai = { calls: 0, down: false, last: null };
+function aiMock(body, headers) {
+  ai.calls++; ai.last = { body, headers };
+  if (ai.down) return new Response("overloaded", { status: 529 });
+  const docs = body.messages[0].content.filter((c) => c.source).map((c) => Buffer.from(c.source.data, "base64").toString());
+  const read = (text, extra) => ({ result: /FAIL/.test(text) ? "fail" : /UNSURE/.test(text) ? "unsure" : "pass", reason_for_pro: /FAIL/.test(text) ? "This looks like the wrong kind of document." : /UNSURE/.test(text) ? "The photo is too blurry to read." : "", name_on_document: "Test Pro", expires: (text.match(/EXPIRES (\d{4}-\d{2}-\d{2})/) || [])[1] || "", ...extra });
+  const input = { business: read(docs[0], { document_type_matches: true, ein_on_document: (docs[0].match(/EIN (\d{9})/) || [])[1] || "" }), insurance: read(docs[1], { shows_general_liability: true }) };
+  return new Response(JSON.stringify({ content: [{ type: "tool_use", name: "report", input }] }), { status: 200 });
+}
+export const stored = new Map(), sent = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init = {}) => {
   const url = new URL(typeof input === "string" ? input : input.url || input);
+  if (url.hostname === "ai.test") return aiMock(JSON.parse(init.body), init.headers);
   if (url.hostname !== "api.airtable.com") return realFetch(input, init);
   const [, , , table, id] = url.pathname.split("/");
   let rows = db[table]; const method = init.method || "GET"; const body = init.body ? JSON.parse(init.body) : null;
@@ -68,6 +80,9 @@ globalThis.fetch = async (input, init = {}) => {
 export const env = {
   AIRTABLE_TOKEN: "test", SESSION_SECRET: "local-test-secret", TEST_CODE: "424242", ADMIN_KEY: "admin", SHADOW_MODE: "true",
   SHADOW_SHARED_PRICE: "75", SHADOW_EXCLUSIVE_PRICE: "225", SHADOW_MAX_PROS: "5", SHADOW_OFFER_HOURS: "24", TEST_BALANCE: "240",
+  ANTHROPIC_API_KEY: "test-key", ANTHROPIC_API: "https://ai.test/v1/messages",
+  DOCS: { put: async (k, v, o) => { stored.set(k, { size: v.byteLength, ...o }); } },
+  EMAIL: { send: async (msg) => { sent.push(msg); return { messageId: "m" + sent.length }; } },
   ASSETS: { fetch: async (req) => {
     let p = decodeURIComponent(new URL(req.url).pathname); let file = join(DIST, p);
     if (existsSync(file) && statSync(file).isDirectory()) file = join(file, "index.html");
