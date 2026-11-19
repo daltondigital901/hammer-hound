@@ -500,9 +500,9 @@ async function purchase(env, pro, { leadId, kind, reload = false, via = "Portal"
   // Auto-reload: keep at least one lead's worth in the wallet, if the pro turned it on.
   let autoReloaded = 0;
   if (saved.fields["Auto Reload"] && saved.fields.Card && after < lead.fields["Shared Price"]) { const t = await topUp(env, saved, reloadUnit(saved.fields), "Auto-reload"); if (t.ok) { saved = t.pro; autoReloaded = reloadUnit(saved.fields); } }
-  return { status: 200, data: { lead: leadView(lead), kind, price, creditUsed, paidUsed: cents(price - creditUsed), balanceBefore: cents(balance - reloaded), reloaded, autoReloaded, card: saved.fields.Card || "", balance: saved.fields.Balance || 0, credit: Math.min(saved.fields["Welcome Credit"] || 0, saved.fields.Balance || 0), nextPrice: lead.fields["Shared Price"] } };
+  return { status: 200, data: { lead: leadView(lead), kind, price, creditUsed, paidUsed: cents(price - creditUsed), balanceBefore: cents(balance - reloaded), reloaded, autoReloaded, card: saved.fields.Card || "", balance: saved.fields.Balance || 0, credit: Math.min(saved.fields["Welcome Credit"] || 0, saved.fields.Balance || 0), nextPrice: lead.fields["Shared Price"], low: (saved.fields.Balance || 0) < lead.fields["Shared Price"] }, pro: saved };
 }
-const buy = async (env, pro, body) => { const r = await purchase(env, pro, { leadId: body.leadId, kind: body.kind, reload: body.reload === true }); return r.status === 200 ? json(r.data) : json({ error: r.error, short: r.short, card: r.card, reloadAmount: r.reloadAmount }, r.status); };
+const buy = async (env, pro, body) => { const r = await purchase(env, pro, { leadId: body.leadId, kind: body.kind, reload: body.reload === true }); if (r.status === 200 && r.data.low) await promptTopUp(env, r.pro); return r.status === 200 ? json(r.data) : json({ error: r.error, short: r.short, card: r.card, reloadAmount: r.reloadAmount }, r.status); };
 
 // Existing accounts from before the ledger: write their history once so the wallet and invoices are complete.
 async function ensureLedger(env, pro) {
@@ -564,6 +564,17 @@ export async function alertPros(env) {
   }
   return out;
 }
+// Topping up by text. The menu never states a balance; the reply picks the amount.
+const topUpMenu = (f) => f.Card ? `Hammer Hound: your wallet is running low. Reply 1 to add ${usd(RELOADS[0])}, 2 for ${usd(RELOADS[1])}, 3 for ${usd(RELOADS[2])}. It is charged to ${f.Card}. Reply STOP to opt out.`
+  : "Hammer Hound: your wallet is running low. Add a card and top up at hammerhound.com/pros/app/#wallet so you can keep claiming by text. Reply STOP to opt out.";
+// After a claim leaves less than one lead's price, text the menu (only to pros who take texts, on a real number).
+async function promptTopUp(env, pro) {
+  const f = pro.fields;
+  if (!f["Text Offers"] || !twilioReady(env) || isTestPhone(f.Mobile) || f["Auto Reload"]) return false;
+  if (!(await sendText(env, f.Mobile, topUpMenu(f)))) return false;
+  if (f.Card) await update(env, HH.pros, pro.id, { "Text State": `topup|${new Date().toISOString()}` });
+  return true;
+}
 // Twilio signs each inbound request: base64(HMAC-SHA1(auth token, URL + every posted field, sorted by name)).
 async function twilioSigned(env, request, params) {
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.TWILIO_AUTH_TOKEN), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
@@ -581,8 +592,23 @@ async function inboundText(request, env) {
   if (!pro || pro.fields["Closed At"]) return reply("Hammer Hound: this number is not on a pro account. Join at hammerhound.com/pros/");
   if (["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"].includes(word)) { await update(env, HH.pros, pro.id, { "Text Offers": false }); return reply(""); }
   if (word === "BALANCE") return reply(`Hammer Hound: your wallet has ${usd2(pro.fields.Balance)}.`);
+  // Top up by text: TOPUP sends the menu, then 1, 2 or 3 picks the amount. "TOPUP 300" does it in one message.
+  const raw = String(params.get("Body") || "").trim().toUpperCase(), [topic, sentAt] = String(pro.fields["Text State"] || "").split("|");
+  const menuOpen = topic === "topup" && Date.now() - Date.parse(sentAt) < 864e5, pick = raw.match(/^(?:TOP ?UP|RELOAD|ADD)?\s*\$?(\d{1,4})$/);
+  const amount = pick ? (menuOpen && ["1", "2", "3"].includes(pick[1]) ? RELOADS[Number(pick[1]) - 1] : RELOADS.includes(Number(pick[1])) && (menuOpen || /^(TOP ?UP|RELOAD|ADD)/.test(raw)) ? Number(pick[1]) : 0) : 0;
+  if (["TOPUP", "RELOAD", "ADD", "ADDFUNDS"].includes(word) && !pick) {
+    if (pro.fields.Card) await update(env, HH.pros, pro.id, { "Text State": `topup|${new Date().toISOString()}` });
+    return reply(topUpMenu(pro.fields).replace("your wallet is running low. ", pro.fields.Card ? "top up your wallet. " : "your wallet is running low. "));
+  }
+  if (amount) {
+    if (!pro.fields.Card) return reply("Hammer Hound: there is no card on file. Add one at hammerhound.com/pros/app/#wallet");
+    const t = await topUp(env, pro, amount, "Text");
+    await update(env, HH.pros, pro.id, { "Text State": "" });
+    return reply(t.ok ? `Hammer Hound: done. ${usd(amount)} added to your wallet from ${pro.fields.Card}. A receipt is in your email.` : `Hammer Hound: not added. ${t.error}`);
+  }
+  if (pick) return reply(`Hammer Hound: to top up, reply TOPUP and pick an amount: 1 for ${usd(RELOADS[0])}, 2 for ${usd(RELOADS[1])}, 3 for ${usd(RELOADS[2])}.`);
   const kind = ["YES", "Y", "CLAIM"].includes(word) ? "shared" : ["ONLY", "EXCLUSIVE"].includes(word) ? "exclusive" : null;
-  if (!kind) return reply("Hammer Hound: reply YES to claim the last lead we sent, ONLY to take it exclusive, BALANCE for your wallet, STOP to opt out.");
+  if (!kind) return reply("Hammer Hound: reply YES to claim the last lead we sent, ONLY to take it exclusive, TOPUP to add funds, BALANCE for your wallet, STOP to opt out.");
   const leadId = String(pro.fields["Last Offer"] || "").split("|")[0];
   if (!leadId) return reply("Hammer Hound: there is no open offer to claim. See open leads at hammerhound.com/pros/app/");
   const r = await purchase(env, pro, { leadId, kind, reload: true, via: "Text" });
@@ -593,8 +619,11 @@ async function inboundText(request, env) {
   const text = [`Hammer Hound: ${kind === "exclusive" ? "it's all yours" : "claimed"}. ${o.job}, ${o.place}.`,
     `OWNER: ${o.ownerName || "name not given"}`, o.ownerPhone ? `PHONE: ${o.ownerPhone.replace(/^(\d{3})(\d{3})(\d{4})$/, "($1) $2-$3")}` : "PHONE: not given", o.ownerEmail ? `EMAIL: ${o.ownerEmail}` : "", o.address ? `ADDRESS: ${o.address}` : "",
     facts ? facts + "." : "", o.summary ? `JOB: ${o.summary}` : "", o.message ? `THEIR WORDS: ${o.message.replace(/\s+/g, " ").slice(0, 500)}${o.message.length > 500 ? "..." : ""}` : "",
-    `${usd2(d.price)} from your wallet${d.reloaded ? ` after a ${usd2(d.reloaded)} reload on ${d.card}` : ""}. ${usd2(d.balance)} left. Call now.`].filter(Boolean).join("\n");
-  return reply(text.slice(0, 1550));
+    "Call now."].filter(Boolean).join("\n");
+  // The lead text carries no amounts. If the wallet is now low, a second text offers a top-up.
+  let extra = "";
+  if (d.low && !r.pro.fields["Auto Reload"]) { extra = `<Message>${hx(topUpMenu(r.pro.fields))}</Message>`; if (r.pro.fields.Card) await update(env, HH.pros, pro.id, { "Text State": `topup|${new Date().toISOString()}` }); }
+  return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${hx(text.slice(0, 1550))}</Message>${extra}</Response>`, { headers: { "Content-Type": "text/xml" } });
 }
 
 // ---------- monthly invoices ----------

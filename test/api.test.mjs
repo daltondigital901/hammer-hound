@@ -267,10 +267,26 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   };
   assert.equal((await sms("+19012223333", "YES", false)).status, 403, "an unsigned text is refused");
   const yes = await sms("+19012223333", " yes ");
-  for (const part of [/claimed\. Roof Repair, Memphis, TN\./, /OWNER: Sample Owner 60/, /PHONE: \(901\) 555-0160/, /EMAIL: owner60@example\.com/, /Timing: Within a week\. Property: Home\. Size: Small\./, /JOB: The owner wants roof repair/, /THEIR WORDS: Leak over the kitchen\. Need someone this week\./, /\$75\.00 from your wallet after a \$150\.00 reload on Visa ending 1111\. \$90\.00 left\. Call now\./]) assert.match(yes.text, part, "the YES reply carries the whole lead");
+  for (const part of [/claimed\. Roof Repair, Memphis, TN\./, /OWNER: Sample Owner 60/, /PHONE: \(901\) 555-0160/, /EMAIL: owner60@example\.com/, /Timing: Within a week\. Property: Home\. Size: Small\./, /JOB: The owner wants roof repair/, /THEIR WORDS: Leak over the kitchen\. Need someone this week\./, /Call now\./]) assert.match(yes.text, part, "the YES reply carries the whole lead");
   assert.equal(real.fields.Balance, 90); assert.deepEqual(db.tblZ2EIWCgOb36JR2.slice(-2).map((r) => [r.fields.Type, r.fields.Via]), [["Top-up", "Text"], ["Lead", "Text"]]);
   assert.match((await sms("+19012223333", "YES")).text, /not claimed\. You already have this lead/);
   assert.match((await sms("+19012223333", "balance")).text, /wallet has \$90\.00/); assert.match((await sms("+19019990000", "YES")).text, /not on a pro account/);
+  assert.ok(!/\$\d/.test(yes.text), "the lead text shows no charge and no wallet balance");
+  assert.match(sent.at(-1).subject, /Receipt: \$150\.00 added/, "the card charge is confirmed by an emailed receipt instead");
+  // top up by text: the menu, then a numbered reply
+  assert.match((await sms("+19012223333", "2")).text, /to top up, reply TOPUP/, "a bare number does nothing until a menu has been sent");
+  const menu = await sms("+19012223333", "topup"); assert.match(menu.text, /Reply 1 to add \$150, 2 for \$300, 3 for \$600\. It is charged to Visa ending 1111/); assert.ok(!/90/.test(menu.text), "the menu never states the balance");
+  const picked = await sms("+19012223333", "2"); assert.match(picked.text, /done\. \$300 added to your wallet from Visa ending 1111/); assert.equal(real.fields.Balance, 390);
+  assert.deepEqual([db.tblZ2EIWCgOb36JR2.at(-1).fields.Type, db.tblZ2EIWCgOb36JR2.at(-1).fields.Amount, db.tblZ2EIWCgOb36JR2.at(-1).fields.Via], ["Top-up", 300, "Text"]);
+  assert.match((await sms("+19012223333", "2")).text, /to top up, reply TOPUP/, "the menu is used once");
+  assert.match((await sms("+19012223333", "TOPUP 600")).text, /\$600 added/); assert.equal(real.fields.Balance, 990);
+  assert.match((await sms("+19012223333", "TOPUP 37")).text, /pick an amount/, "only the listed amounts");
+  // a claim that leaves the wallet low sends the lead, then the menu as a second text
+  real.fields.Balance = 80; real.fields["Welcome Credit"] = 0; real.fields["Text State"] = "";
+  seedForm(61, { service: "Roof Repair", city: "Memphis" }); await ingest(env); await alertPros(env);
+  const low = await sms("+19012223333", "YES"); assert.equal((low.text.match(/<Message>/g) || []).length, 2); assert.match(low.text, /your wallet is running low\. Reply 1 to add \$150/); assert.match(real.fields["Text State"], /^topup\|/);
+  assert.match((await sms("+19012223333", "1")).text, /\$150 added/); assert.equal(real.fields.Balance, 155);
+  const cardless = { ...real.fields, Card: "", "Card Token": "" }; real.fields.Card = ""; assert.match((await sms("+19012223333", "TOPUP")).text, /Add a card and top up at hammerhound\.com/); real.fields.Card = "Visa ending 1111";
   await sms("+19012223333", "STOP"); assert.equal(real.fields["Text Offers"], false, "STOP turns text offers off");
   assert.match(offerText({ Trade: "roofing", City: "Memphis", State: "TN", Job: "Roof Repair", "Shared Price": 75, "Exclusive Price": 225 }, {}), /\$75 from your wallet\. Reply YES/, "no card, no mention of a charge");
 
