@@ -857,7 +857,7 @@ page({
   noindex: true,
   chrome: `<header class="site-header site-header--dark"><div class="wrap header-row">${logo(true, true)}<div class="header-actions"><span class="chip chip--black">Admin</span></div></div></header>${hazard}`,
   footer: "none", bodyClass: "flow portal", script: "admin.js",
-  body: `<div class="wrap ad-wrap" data-admin><p class="meta">Loading.</p></div>`,
+  body: `<div class="wrap hq-wrap" data-admin><p class="meta">Loading.</p></div>`,
 });
 
 // ---------- pro portal (app shell; everything inside is drawn by portal.js from the API) ----------
