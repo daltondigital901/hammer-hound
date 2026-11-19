@@ -135,7 +135,7 @@ the pricing engine, the owner request form's endpoint, and bad-lead scoring.
 Every lead is rewritten by the AI into one format before any pro sees it (`styleLeads()` in `src/worker.js`, run with every copy, 6 leads a minute, newest first).
 
 - **Fields, always in this order:** `Job` (2 to 5 words), `Trade`, `City` and `State`, `Timing`, `Property Type`, `Job Size`, `Summary`. Anything the owner did not say reads "Not stated". The writer is told never to add a detail that is not in the request.
-- **Held back until written.** Open leads require `Style` = `v1`. A raw form or email subject is never shown.
+- **Held back until written.** Open leads require `Style` = `v2`. A raw form or email subject is never shown.
 - **Not a request for work** (vendor pitch, job application, spam): `Qualified` = "No: reason", `Status` = `Rejected`, never offered.
 - **No owner details before purchase.** The summary is checked in code as well: emails, phone numbers, the owner's name and street addresses are cut (`scrub()`).
 - **After purchase** the pro sees the same block, then the owner's contact details, the job address if given, and the owner's own words.
@@ -167,3 +167,8 @@ Every lead is rewritten by the AI into one format before any pro sees it (`style
 - **Unsubscribe** now turns off lead alert emails as well as nudges. Receipts and renewal notices still send.
 - **Lead writer** marks a lead `failed 1` to `failed 3` when the AI cannot rewrite it and stops after three, so one bad lead cannot spend AI calls every minute. Clear `Style` to retry.
 - **Market requests.** When a pro's market and trade show no open leads, a button records the request in `Market Requests` (`tbl315ujQMh1PHOi8`), once per pro, market and trade.
+
+## Hot leads, older leads, bid invitations
+
+- **Age comes from when the owner sent the request** (`Received At`), not when it was copied. Hot for 72 hours (`HOT_HOURS`), then an older lead until it is 7 days old (`LEAD_DAYS`), then closed. Open leads has a tab for each. Text and email alerts only go out for hot leads.
+- **Bid invitations** from contractors and agencies are accepted. The writer marks them `request_type: bid` and the title is forced to "<Scope> Bid Invitation"; the summary starts "A contractor is inviting bids". Format `v2` re-writes every open lead and re-checks leads the writer rejected under `v1`.
