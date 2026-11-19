@@ -21,7 +21,8 @@
   // Sends verification result emails from support@hammerhound.com (Cloudflare Email Sending).
   "send_email": [{ "name": "EMAIL" }],
   // Every minute: copy new Dalton Digital form leads into the Hammer Hound base (shadow mode only).
-  "triggers": { "crons": ["* * * * *"] },
+  // Hourly at :07: insurance reminders and nudge emails (the Worker only sends 8am to 6pm Central).
+  "triggers": { "crons": ["* * * * *", "7 * * * *"] },
   // Keep Worker logs so a failed copy can be read in the Cloudflare dashboard.
   "observability": { "enabled": true },
   "vars": {
@@ -33,7 +34,9 @@
     "SHADOW_OFFER_HOURS": "24",
     "TEST_BALANCE": "240",
     "AI_MODEL": "claude-sonnet-5-5",
-    "AI_VERSION": "2026-10-21"
+    "AI_VERSION": "2026-10-21",
+    // Postal address shown in email footers. Nudge emails to real pros are held until this is set.
+    "MAILING_ADDRESS": ""
   }
   // Secrets (set with `npx wrangler secret put NAME`, never committed):
   //   AIRTABLE_TOKEN   Airtable token: read on Dalton Digital base, read/write on Hammer Hound base
