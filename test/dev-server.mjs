@@ -16,7 +16,8 @@ let seq = 0;
 const rid = () => "rec" + String(++seq).padStart(14, "0");
 const NUM = "fldfJJYK166eGNfxw";
 // Two stand-in sites: one free to offer, one with a GBP.
-export const SITE_FREE = "recSITEFREE0000000".slice(0, 17), SITE_GBP = "recSITEGBP00000000".slice(0, 17), SITE_CLIENT = "recSITECLIENT00000".slice(0, 17);
+export const SITE_FREE = "recSITEFREE0000000".slice(0, 17), SITE_GBP = "recSITEGBP00000000".slice(0, 17), SITE_CLIENT = "recSITECLIENT00000".slice(0, 17), SITE_PROSPECT = "recSITEPROSPECT000".slice(0, 17);
+db.tbl9olHmI5p746DOe.push({ id: SITE_PROSPECT, fields: { fldxjMNAdLglWFBLl: "Has One!", fldVIdJR2dkmKXRf0: 0, fldCTOMq0Mk1jUb3S: 1 } });
 db.tbl9olHmI5p746DOe.push({ id: SITE_FREE, fields: { fldxjMNAdLglWFBLl: "Yes - Not Requested Yet", fldVIdJR2dkmKXRf0: 0 } }, { id: SITE_GBP, fields: { fldxjMNAdLglWFBLl: "Has One!", fldVIdJR2dkmKXRf0: 0 } }, { id: SITE_CLIENT, fields: { fldxjMNAdLglWFBLl: "Inactive", fldVIdJR2dkmKXRf0: 1 } });
 export function seedForm(n, o = {}) {
   const email = o.kind === "Email";
