@@ -1,3 +1,5 @@
+import { invoicePdf } from "./pdf.js";
+
 // Hammer Hound engine: serves the static site and the pro API, and copies
 // Dalton Digital form leads into the Hammer Hound base for shadow testing.
 // No Retell, no texting of real pros, no card charges: shadow mode is internal only.
@@ -14,7 +16,7 @@ const DD1 = {
 // Leads from these sites are never offered: GBP leads cannot be sold.
 const HAS_GBP = new Set(["Has One!", "Has One - Needs Final Owner Confirmed", "Has One - Needs Owner Transferred", "Has One, Doesn't Need Reviews", "First Suspension Appeal", "Second Suspension Appeal", "Suspended", "Soft Suspension", "Needs deletion"]);
 const RULE = "v2";
-const HH = { base: "app0PSwGlQyC6q7FW", leads: "tblfA6ivDIlWVp4us", pros: "tbl9bEGuy8DPkkee7", purchases: "tblJnYLq2aCiCVU1C", tickets: "tblFDXXEvvlb6F8vN" };
+const HH = { base: "app0PSwGlQyC6q7FW", leads: "tblfA6ivDIlWVp4us", pros: "tbl9bEGuy8DPkkee7", purchases: "tblJnYLq2aCiCVU1C", tickets: "tblFDXXEvvlb6F8vN", ledger: "tblZ2EIWCgOb36JR2" };
 const NOT_OPEN = "Hammer Hound is not open yet, so nothing was sent. Check back soon.";
 
 const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers } });
@@ -182,7 +184,7 @@ const proView = (p) => ({
   balance: p.fields.Balance || 0, credit: Math.min(p.fields["Welcome Credit"] || 0, p.fields.Balance || 0),
   city: p.fields.City || "", extraTrades: String(p.fields["Extra Trades"] || "").split(",").filter(Boolean), tradeName: TRADE_NAME[p.fields.Trade] || "",
   textOffers: !!p.fields["Text Offers"], emailOffers: !!p.fields["Email Offers"], paused: !!p.fields.Paused, dailyCap: p.fields["Daily Cap"] || 0, quietHours: p.fields["Quiet Hours"] || "",
-  agreement: String(p.fields.Agreement || "").split(" | ")[0], memberSince: p.fields["Created At"] || "",
+  agreement: String(p.fields.Agreement || "").split(" | ")[0], memberSince: p.fields["Created At"] || "", card: p.fields.Card || "", autoReload: !!p.fields["Auto Reload"], reloadAmount: reloadUnit(p.fields),
 });
 
 // ---------- document check ----------
@@ -307,12 +309,14 @@ async function sendEmail(env, to, subject, lines, opts = {}) {
   if (!env.EMAIL || !to) return false;
   const text = [...lines, ...(opts.leads && opts.leads.length ? [opts.leadsTitle || "Jobs open in your market right now:", ...opts.leads.map((l) => `- ${l.service}, ${l.city || "your area"} (owner details locked)`)] : []), opts.cta ? `${opts.cta[0]}: ${opts.cta[1]}` : "", opts.unsub ? `Stop these reminders: ${opts.unsub}` : ""].filter(Boolean).join("\n\n");
   try {
-    await env.EMAIL.send({ to, from: { email: SUPPORT, name: "Hammer Hound" }, replyTo: SUPPORT, subject, text, html: brandEmail(subject, lines, { address: env.MAILING_ADDRESS, ...opts }) });
+    await env.EMAIL.send({ to, from: { email: SUPPORT, name: "Hammer Hound" }, replyTo: SUPPORT, subject, text, html: brandEmail(subject, lines, { address: env.MAILING_ADDRESS, ...opts }), ...(opts.attachments ? { attachments: opts.attachments } : {}) });
     return true;
   } catch (e) { console.error("email failed:", e && e.code, String(e && e.message || e)); return false; }
 }
 const APP = "https://hammerhound.com/pros/app/";
 // What verifying gets this pro. A new pro still has free leads; a pro who has used them is told what they actually get back.
+// Membership is free for the first year from sign-up, then $300 a year on the card on file.
+const membershipOf = (f) => { const start = new Date(f["Created At"] || Date.now()), renews = new Date(start); renews.setUTCFullYear(start.getUTCFullYear() + 1); return { fee: 300, freeUntil: renews.toISOString().slice(0, 10), inFreeYear: renews > new Date() }; };
 const creditOf = (f) => Math.min(f["Welcome Credit"] || 0, f.Balance || 0);
 const usd = (n) => "$" + (Number.isInteger(n) ? n : n.toFixed(2));
 const prize = (f) => creditOf(f) > 0 ? `your Verified Pro badge and ${usd(creditOf(f))} in free lead credit` : "your Verified Pro badge and the leads in your market";
@@ -389,7 +393,7 @@ const purchasesFor = (env, key) => list(env, HH.base, HH.purchases, { filterByFo
 // The uniform part of a lead: the same fields, in the same order, for every lead. No owner details.
 const jobView = (l) => ({
   id: l.id, title: l.fields.Lead, job: l.fields.Job || l.fields.Service || "Job", trade: l.fields.Trade || tradeOf(l.fields.Service), tradeName: TRADE_NAME[l.fields.Trade || tradeOf(l.fields.Service)] || "Other",
-  city: l.fields.City || "", state: l.fields.State || "", place: placeOf(l.fields) || "Area not stated", summary: l.fields.Summary || "",
+  city: l.fields.City || "", state: l.fields.State || "", place: placeOf(l.fields) || "Area not stated", summary: noFiller(l.fields.Summary),
   timing: l.fields.Timing || "Not stated", propertyType: l.fields["Property Type"] || "Not stated", jobSize: l.fields["Job Size"] || "Not stated", receivedAt: l.fields["Received At"],
 });
 const offerView = (l, taken, exclusiveTaken) => ({
@@ -399,29 +403,206 @@ const offerView = (l, taken, exclusiveTaken) => ({
 // A bought lead: the uniform part, then the owner's details and their own words.
 const leadView = (l) => ({ ...jobView(l), ownerName: l.fields["Owner Name"] || "", ownerPhone: l.fields["Owner Phone"] || "", ownerEmail: l.fields["Owner Email"] || "", address: l.fields["Job Address"] || "", message: l.fields.Message || "" });
 
-async function buy(env, pro, { leadId, kind }) {
-  if (!isVerified(pro)) return fail(403, "Verify your business to claim or buy leads.");
-  if (!/^rec[A-Za-z0-9]{14}$/.test(leadId || "") || !["shared", "exclusive"].includes(kind)) return fail(400, "That offer is not valid.");
+// ---------- wallet ----------
+// The ledger is the record of every dollar: one row per movement. Balance on the pro is the running total.
+const monthOf = (d = new Date()) => new Date(d).toLocaleDateString("en-CA", { timeZone: "America/Chicago" }).slice(0, 7);
+const usd2 = (n) => "$" + Number(n || 0).toFixed(2);
+const RELOADS = [150, 300, 600];
+const reloadUnit = (f) => Math.max(75, Math.round(f["Reload Amount"] || 150));
+async function post(env, pro, e) {
+  return create(env, HH.ledger, { Entry: String(e.entry).slice(0, 200), Pro: [pro.id], "Pro ID": pro.id, Type: e.type, Amount: cents(e.amount), "Credit Part": cents(e.creditPart || 0), "Balance After": cents(e.balanceAfter),
+    Month: monthOf(e.at), At: e.at || new Date().toISOString(), "Purchase ID": e.purchaseId || "", "Payment ID": e.paymentId || "", Via: e.via || "System", Test: !!pro.fields.Test });
+}
+// Charges the card on file. PLACEHOLDER: the Square call goes here (SQUARE_ACCESS_TOKEN, SQUARE_LOCATION_ID, the customer
+// and card IDs kept in "Card Token", and an idempotency key). Until then only a test account's test card can be charged.
+async function chargeCard(env, pro, amount) {
+  const token = pro.fields["Card Token"];
+  if (!token) return { ok: false, error: "There is no card on file." };
+  if (token === "TEST" && pro.fields.Test) return { ok: true, id: "TEST-" + Date.now().toString(36).toUpperCase() };
+  return { ok: false, error: "Card payments are not switched on yet." };
+}
+const chargedThisMonth = async (env, pro) => (await list(env, HH.base, HH.ledger, { filterByFormula: `AND({Pro ID}='${pro.id}',{Month}='${monthOf()}',{Type}='Top-up')`, pageSize: 100, maxRecords: 100 })).reduce((n, r) => n + (r.fields.Amount || 0), 0);
+// Adds paid funds from the card on file. Honours the pro's monthly limit. Returns { ok, pro, paymentId } or { ok: false, error }.
+async function topUp(env, pro, amount, via) {
+  const limit = pro.fields["Monthly Limit"] || 0;
+  if (limit) { const used = await chargedThisMonth(env, pro); if (used + amount > limit) return { ok: false, error: `That would pass your monthly limit of ${usd2(limit)} (${usd2(used)} charged so far this month). Raise the limit in your wallet to continue.` }; }
+  const paid = await chargeCard(env, pro, amount);
+  if (!paid.ok) return paid;
+  const after = cents((pro.fields.Balance || 0) + amount), saved = await update(env, HH.pros, pro.id, { Balance: after });
+  await post(env, saved, { entry: `${via === "Auto-reload" ? "Auto-reload" : "Reload"} on ${pro.fields.Card || "card on file"}`, type: "Top-up", amount, balanceAfter: after, paymentId: paid.id, via });
+  await sendEmail(env, saved.fields.Email, `Receipt: ${usd2(amount)} added to your Hammer Hound wallet`, [`Hi ${saved.fields["Business Name"]},`, `We charged ${usd2(amount)} to ${pro.fields.Card || "your card on file"} and added it to your wallet.`, `Wallet balance: ${usd2(after)}. Reference: ${paid.id}.`,
+    via === "Auto-reload" ? "This was an automatic reload. You can change the amount, set a monthly limit or turn it off in your wallet." : via === "Text" ? "This reload covered a lead you claimed by text." : ""].filter(Boolean), { heading: `${usd2(amount)} added to your wallet`, cta: ["Open my wallet", APP + "#wallet"] });
+  return { ok: true, pro: saved, paymentId: paid.id };
+}
+
+// Claims a lead for a pro. Used by the portal and by a YES reply to a text.
+// reload: the pro agreed to have the card on file charged if the wallet is short (the button or the text said so).
+async function purchase(env, pro, { leadId, kind, reload = false, via = "Portal" }) {
+  const no = (status, error, extra = {}) => ({ status, error, ...extra });
+  if (!isVerified(pro)) return no(403, "Verify your business to claim or buy leads.");
+  if (!/^rec[A-Za-z0-9]{14}$/.test(leadId || "") || !["shared", "exclusive"].includes(kind)) return no(400, "That offer is not valid.");
   let lead;
-  try { lead = await at(env, HH.base, HH.leads, { id: leadId }); } catch { return fail(404, "That offer no longer exists."); }
+  try { lead = await at(env, HH.base, HH.leads, { id: leadId }); } catch { return no(404, "That offer no longer exists."); }
   const bought = await purchasesFor(env, leadId);
-  if (bought.some((p) => p.fields.Purchase.endsWith(pro.id))) return fail(409, "You already have this lead. It is in My leads.");
-  if (lead.fields.Status !== "Offered" || new Date(lead.fields["Offer Ends At"]) < new Date()) return fail(410, "This offer has ended.");
-  if (bought.some((p) => p.fields.Kind === "Exclusive")) return fail(410, "Another pro took this lead exclusive.");
-  if (kind === "exclusive" && bought.length) return fail(409, "Exclusive is gone because another pro has already bought this lead.");
-  if (bought.length >= lead.fields["Max Pros"]) return fail(410, "All spots on this lead are taken.");
+  if (bought.some((p) => p.fields.Purchase.endsWith(pro.id))) return no(409, "You already have this lead. It is in My leads.");
+  if (lead.fields.Status !== "Offered" || new Date(lead.fields["Offer Ends At"]) < new Date()) return no(410, "This offer has ended.");
+  if (bought.some((p) => p.fields.Kind === "Exclusive")) return no(410, "Another pro took this lead exclusive.");
+  if (kind === "exclusive" && bought.length) return no(409, "Exclusive is gone because another pro has already bought this lead.");
+  if (bought.length >= lead.fields["Max Pros"]) return no(410, "All spots on this lead are taken.");
 
   // Every lead comes out of the wallet. Free welcome credit is spent before paid funds.
   const price = kind === "exclusive" ? lead.fields["Exclusive Price"] : lead.fields["Shared Price"];
-  const balance = pro.fields.Balance || 0, credit = Math.min(pro.fields["Welcome Credit"] || 0, balance);
-  if (price > balance) return fail(402, `This lead is $${price.toFixed(2)} and your wallet has $${balance.toFixed(2)}. Add $${(Math.ceil((price - balance) / 5) * 5).toFixed(0)} or more to claim it.`);
-  const creditUsed = Math.min(credit, price), after = cents(balance - price), creditAfter = cents(credit - creditUsed);
-
-  await create(env, HH.purchases, { Purchase: `${leadId}:${pro.id}`, Lead: [leadId], Pro: [pro.id], Kind: kind === "exclusive" ? "Exclusive" : "Shared", Price: price, "Credit Used": creditUsed, "Bought At": new Date().toISOString(), Test: !!pro.fields.Test || !!lead.fields.Test, "Review Status": "None" });
-  await update(env, HH.pros, pro.id, { Balance: after, "Welcome Credit": creditAfter });
+  let balance = pro.fields.Balance || 0, reloaded = 0;
+  if (price > balance) {
+    const unit = reloadUnit(pro.fields), need = Math.ceil((price - balance) / unit) * unit, card = pro.fields.Card || "";
+    const short = `This lead is ${usd2(price)} and your wallet has ${usd2(balance)}.`;
+    if (!card) return no(402, `${short} Add a card to claim it.`, { short: cents(price - balance), card: "", reloadAmount: need });
+    if (!reload && !pro.fields["Auto Reload"]) return no(402, `${short} Reload ${usd2(need)} on ${card} to claim it.`, { short: cents(price - balance), card, reloadAmount: need });
+    const t = await topUp(env, pro, need, via === "Text" ? "Text" : reload ? via : "Auto-reload");
+    if (!t.ok) return no(402, `${short} ${t.error}`, { short: cents(price - balance), card, reloadAmount: need });
+    pro = t.pro; balance = pro.fields.Balance || 0; reloaded = need;
+  }
+  const credit = Math.min(pro.fields["Welcome Credit"] || 0, balance), creditUsed = Math.min(credit, price), after = cents(balance - price), creditAfter = cents(credit - creditUsed);
+  const made = await create(env, HH.purchases, { Purchase: `${leadId}:${pro.id}`, Lead: [leadId], Pro: [pro.id], Kind: kind === "exclusive" ? "Exclusive" : "Shared", Price: price, "Credit Used": creditUsed, "Bought At": new Date().toISOString(), Test: !!pro.fields.Test || !!lead.fields.Test, "Review Status": "None" });
+  let saved = await update(env, HH.pros, pro.id, { Balance: after, "Welcome Credit": creditAfter });
+  await post(env, saved, { entry: `${kind === "exclusive" ? "Exclusive lead" : "Lead"}: ${lead.fields.Lead}`, type: "Lead", amount: -price, creditPart: -creditUsed, balanceAfter: after, purchaseId: made.id, via });
   if (kind === "exclusive") await update(env, HH.leads, leadId, { Status: "Exclusive" });
   else if (bought.length + 1 >= lead.fields["Max Pros"]) await update(env, HH.leads, leadId, { Status: "Sold out" });
-  return json({ lead: leadView(lead), kind, price, creditUsed, paidUsed: cents(price - creditUsed), balanceBefore: balance, balance: after, credit: creditAfter, nextPrice: lead.fields["Shared Price"] });
+  // Auto-reload: keep at least one lead's worth in the wallet, if the pro turned it on.
+  let autoReloaded = 0;
+  if (saved.fields["Auto Reload"] && saved.fields.Card && after < lead.fields["Shared Price"]) { const t = await topUp(env, saved, reloadUnit(saved.fields), "Auto-reload"); if (t.ok) { saved = t.pro; autoReloaded = reloadUnit(saved.fields); } }
+  return { status: 200, data: { lead: leadView(lead), kind, price, creditUsed, paidUsed: cents(price - creditUsed), balanceBefore: cents(balance - reloaded), reloaded, autoReloaded, card: saved.fields.Card || "", balance: saved.fields.Balance || 0, credit: Math.min(saved.fields["Welcome Credit"] || 0, saved.fields.Balance || 0), nextPrice: lead.fields["Shared Price"] } };
+}
+const buy = async (env, pro, body) => { const r = await purchase(env, pro, { leadId: body.leadId, kind: body.kind, reload: body.reload === true }); return r.status === 200 ? json(r.data) : json({ error: r.error, short: r.short, card: r.card, reloadAmount: r.reloadAmount }, r.status); };
+
+// Existing accounts from before the ledger: write their history once so the wallet and invoices are complete.
+async function ensureLedger(env, pro) {
+  const rows = await list(env, HH.base, HH.ledger, { filterByFormula: `{Pro ID}='${pro.id}'`, "sort[0][field]": "At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 100 });
+  if (rows.length) return rows;
+  const mine = (await purchasesFor(env, pro.id)).sort((a, b) => String(a.fields["Bought At"]).localeCompare(String(b.fields["Bought At"])));
+  const spent = mine.reduce((n, p) => n + (p.fields.Price || 0), 0), start = cents((pro.fields.Balance || 0) + spent);
+  let bal = start;
+  if (start > 0) await post(env, pro, { entry: "Welcome credit", type: "Welcome credit", amount: start, creditPart: start, balanceAfter: start, at: pro.fields["Created At"] });
+  for (const p of mine) { bal = cents(bal - (p.fields.Price || 0)); const lead = await at(env, HH.base, HH.leads, { id: p.fields.Purchase.split(":")[0] }).catch(() => null);
+    await post(env, pro, { entry: `Lead: ${lead ? lead.fields.Lead : "Lead"}`, type: "Lead", amount: -(p.fields.Price || 0), creditPart: -(p.fields["Credit Used"] || 0), balanceAfter: bal, purchaseId: p.id, at: p.fields["Bought At"], via: "Portal" }); }
+  return list(env, HH.base, HH.ledger, { filterByFormula: `{Pro ID}='${pro.id}'`, "sort[0][field]": "At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 100 });
+}
+
+// A bad-lead report marked Approved in Airtable puts the money straight back in the wallet.
+export async function creditBacks(env) {
+  const due = await list(env, HH.base, HH.purchases, { filterByFormula: "AND({Review Status}='Approved',NOT({Credited}))", pageSize: 20, maxRecords: 20 });
+  let done = 0;
+  for (const p of due) {
+    const [leadId, proId] = String(p.fields.Purchase).split(":"), pro = await at(env, HH.base, HH.pros, { id: proId }).catch(() => null), price = p.fields.Price || 0, part = Math.min(p.fields["Credit Used"] || 0, price);
+    if (!pro) continue;
+    const lead = await at(env, HH.base, HH.leads, { id: leadId }).catch(() => null), after = cents((pro.fields.Balance || 0) + price);
+    const saved = await update(env, HH.pros, pro.id, { Balance: after, "Welcome Credit": cents((pro.fields["Welcome Credit"] || 0) + part) });
+    await post(env, saved, { entry: `Bad-lead report approved: ${lead ? lead.fields.Job || lead.fields.Lead : "lead"}`, type: "Credit back", amount: price, creditPart: part, balanceAfter: after, purchaseId: p.id });
+    await update(env, HH.purchases, p.id, { Credited: true });
+    await sendEmail(env, saved.fields.Email, `${usd2(price)} is back in your wallet`, [`Hi ${saved.fields["Business Name"]},`, `We approved your bad-lead report${lead ? ` for ${lead.fields.Job || "that lead"}` : ""}.`, `${usd2(price)} is back in your wallet now. Your balance is ${usd2(after)}.`, part < price ? "If you would rather have the paid part refunded to your card, reply to this email." : ""].filter(Boolean), { heading: "Your report was approved", cta: ["See open leads", APP + "#offers"] });
+    done++;
+  }
+  return done;
+}
+
+// ---------- lead alerts by text and email ----------
+const twilioReady = (env) => !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM);
+async function sendText(env, phone, text) {
+  const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID}/Messages.json`, { method: "POST", headers: { Authorization: "Basic " + btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`), "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ To: "+1" + phone, From: env.TWILIO_FROM, Body: text }) });
+  return r.ok;
+}
+const inQuiet = (q) => { const m = String(q || "").match(/^(\d\d):(\d\d)-(\d\d):(\d\d)$/); if (!m) return false; const now = new Date().toLocaleTimeString("en-GB", { timeZone: "America/Chicago", hour: "2-digit", minute: "2-digit" }), a = `${m[1]}:${m[2]}`, b = `${m[3]}:${m[4]}`; return a <= b ? now >= a && now < b : now >= a || now < b; };
+export const offerText = (l, f) => `Hammer Hound: New ${(TRADE_NAME[l.Trade] || "job").toUpperCase()} lead in ${placeOf(l) || "your area"}. ${l.Job || "Job"}. Size: ${l["Job Size"] || "Not stated"}. Timing: ${l.Timing || "Not stated"}. ${usd(l["Shared Price"])} from your wallet${f.Card ? `; if it is short we charge ${f.Card}` : ""}. Reply YES to claim, ONLY for exclusive (${usd(l["Exclusive Price"])}). Reply STOP to opt out.`;
+// Tells matching pros about leads that have just opened: same market, a trade they take, verified, not paused.
+export async function alertPros(env) {
+  const fresh = await list(env, HH.base, HH.leads, { filterByFormula: `AND({Status}='Offered',{Style}='${STYLE}',IS_AFTER({Offer Ends At},NOW()),{Alerted}='')`, "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 5, maxRecords: 5 });
+  if (!fresh.length) return { leads: 0, texts: 0, emails: 0 };
+  const pros = await list(env, HH.base, HH.pros, { filterByFormula: "AND({Verification}='Verified',NOT({Paused}))", pageSize: 100, maxRecords: 300 });
+  const out = { leads: fresh.length, texts: 0, emails: 0 }, day = today();
+  for (const lead of fresh) {
+    const l = lead.fields; let told = 0;
+    for (const p of pros) {
+      const f = p.fields;
+      if (!isVerified(p) || f["Closed At"] || !sameCity(f.City, l.City) || ![f.Trade, ...String(f["Extra Trades"] || "").split(",")].includes(l.Trade)) continue;
+      const [d, n] = String(f["Offers Today"] || "").split("|"), sentToday = d === day ? Number(n) || 0 : 0;
+      if ((f["Daily Cap"] && sentToday >= f["Daily Cap"]) || inQuiet(f["Quiet Hours"])) continue;
+      let reached = false;
+      if (f["Text Offers"] && twilioReady(env) && !isTestPhone(f.Mobile) && await sendText(env, f.Mobile, offerText(l, f))) { out.texts++; reached = true; }
+      if (f["Email Offers"] && f.Email && await sendEmail(env, f.Email, `New ${(TRADE_NAME[l.Trade] || "job").toLowerCase()} lead in ${placeOf(l) || "your market"}`, [`Hi ${f["Business Name"]},`, "A lead just opened in your market and trade."], { heading: "A lead just opened in your market", leads: [{ service: l.Job || "Job", city: placeOf(l), when: "" }], leadsTitle: `${usd(l["Shared Price"])} shared, or ${usd(l["Exclusive Price"])} exclusive`, cta: ["Claim this lead", APP + "#offers"], unsub: await unsubLink(env, p.id) })) { out.emails++; reached = true; }
+      if (reached) { p.fields["Offers Today"] = `${day}|${sentToday + 1}`; await update(env, HH.pros, p.id, { "Last Offer": `${lead.id}|${new Date().toISOString()}`, "Offers Today": p.fields["Offers Today"] }); told++; }
+    }
+    await update(env, HH.leads, lead.id, { Alerted: `${new Date().toISOString()} | ${told}` });
+  }
+  return out;
+}
+// Twilio signs each inbound request: base64(HMAC-SHA1(auth token, URL + every posted field, sorted by name)).
+async function twilioSigned(env, request, params) {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.TWILIO_AUTH_TOKEN), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const data = request.url + [...params.keys()].sort().map((k) => k + params.get(k)).join("");
+  const sig = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data)))));
+  return sig === request.headers.get("X-Twilio-Signature");
+}
+// A pro's reply to a lead text. YES claims it, ONLY takes it exclusive. The card on file covers a short wallet.
+async function inboundText(request, env) {
+  const reply = (t) => new Response(`<?xml version="1.0" encoding="UTF-8"?><Response>${t ? `<Message>${hx(t)}</Message>` : ""}</Response>`, { headers: { "Content-Type": "text/xml" } });
+  if (!twilioReady(env)) return new Response("Texting is not set up.", { status: 503 });
+  const params = new URLSearchParams(await request.text());
+  if (!(await twilioSigned(env, request, params))) return new Response("Bad signature.", { status: 403 });
+  const phone = digits(params.get("From")), word = String(params.get("Body") || "").trim().toUpperCase().replace(/[^A-Z]/g, ""), pro = phone.length === 10 ? await proByPhone(env, phone) : null;
+  if (!pro || pro.fields["Closed At"]) return reply("Hammer Hound: this number is not on a pro account. Join at hammerhound.com/pros/");
+  if (["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"].includes(word)) { await update(env, HH.pros, pro.id, { "Text Offers": false }); return reply(""); }
+  if (word === "BALANCE") return reply(`Hammer Hound: your wallet has ${usd2(pro.fields.Balance)}.`);
+  const kind = ["YES", "Y", "CLAIM"].includes(word) ? "shared" : ["ONLY", "EXCLUSIVE"].includes(word) ? "exclusive" : null;
+  if (!kind) return reply("Hammer Hound: reply YES to claim the last lead we sent, ONLY to take it exclusive, BALANCE for your wallet, STOP to opt out.");
+  const leadId = String(pro.fields["Last Offer"] || "").split("|")[0];
+  if (!leadId) return reply("Hammer Hound: there is no open offer to claim. See open leads at hammerhound.com/pros/app/");
+  const r = await purchase(env, pro, { leadId, kind, reload: true, via: "Text" });
+  if (r.status !== 200) return reply(`Hammer Hound: not claimed. ${r.error}${r.status === 402 ? " hammerhound.com/pros/app/#wallet" : ""}`);
+  const d = r.data, o = d.lead;
+  return reply(`Hammer Hound: ${kind === "exclusive" ? "it's all yours" : "claimed"}. ${o.job}, ${o.place}. Owner: ${o.ownerName || "name not given"}${o.ownerPhone ? ", " + o.ownerPhone : ""}${o.ownerEmail ? ", " + o.ownerEmail : ""}${o.address ? ", " + o.address : ""}. ${usd2(d.price)} from your wallet${d.reloaded ? ` after a ${usd2(d.reloaded)} reload on ${d.card}` : ""}. ${usd2(d.balance)} left. Call now.`);
+}
+
+// ---------- monthly invoices ----------
+const monthLabel = (m) => new Date(m + "-15T12:00:00Z").toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+export async function buildInvoice(env, pro, month) {
+  const rows = (await list(env, HH.base, HH.ledger, { filterByFormula: `AND({Pro ID}='${pro.id}',{Month}='${month}')`, "sort[0][field]": "At", "sort[0][direction]": "asc", pageSize: 100, maxRecords: 500 })).map((r) => r.fields);
+  if (!rows.length) return null;
+  const sum = (type, key = "Amount") => cents(rows.filter((r) => selectName(r.Type) === type).reduce((n, r) => n + (r[key] || 0), 0));
+  const [y, mo] = month.split("-").map(Number), last = new Date(Date.UTC(y, mo, 0)).getUTCDate(), f = pro.fields;
+  return {
+    number: `HH-${month.replace("-", "")}-${pro.id.slice(-5).toUpperCase()}`, month, monthLabel: monthLabel(month), period: `${monthLabel(month).split(" ")[0]} 1 to ${monthLabel(month).split(" ")[0]} ${last}, ${y}`,
+    issued: new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "America/Chicago" }),
+    seller: { name: "Hammer Hound", address: ["A trade name of Dalton Enterprises LLC", env.MAILING_ADDRESS].filter(Boolean).join(", "), email: SUPPORT },
+    billTo: [f["Legal Business Name"] || f["Business Name"], f["Legal Business Name"] && f["Legal Business Name"] !== f["Business Name"] ? f["Business Name"] : "", f.Email, [f.City, f.ZIP].filter(Boolean).join(" ")],
+    rows: rows.map((r) => ({ date: new Date(r.At).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Chicago" }), entry: r.Entry, type: selectName(r.Type), amount: r.Amount || 0 })),
+    totals: { opening: cents((rows[0]["Balance After"] || 0) - (rows[0].Amount || 0)), added: cents(sum("Welcome credit") + sum("Top-up")), charged: sum("Top-up"), leadCount: rows.filter((r) => selectName(r.Type) === "Lead").length, leadsTotal: -sum("Lead"), creditUsed: -sum("Lead", "Credit Part"), creditBack: sum("Credit back"), closing: rows.at(-1)["Balance After"] || 0 },
+  };
+}
+async function invoiceFile(env, inv) {
+  let logo = null;
+  try { const r = await env.ASSETS.fetch(new Request("https://assets.local/assets/img/badge-dark.jpg")); if (r.ok) logo = { bytes: new Uint8Array(await r.arrayBuffer()), width: 236, height: 281 }; } catch { /* the invoice still prints without the logo */ }
+  return invoicePdf(inv, logo);
+}
+// Emails last month's invoice, as a PDF, to every pro who had wallet activity. Each pro gets a month once.
+export async function sendInvoices(env, { month, dry = false } = {}) {
+  const prev = new Date(); prev.setUTCDate(0);
+  month = /^\d{4}-\d{2}$/.test(month || "") ? month : monthOf(prev);
+  const pros = await list(env, HH.base, HH.pros, { filterByFormula: "NOT({Email}='')", pageSize: 100, maxRecords: 300 });
+  const out = { month, sent: 0, none: 0, list: [] };
+  for (const p of pros) {
+    if (p.fields["Last Invoice"] === month || out.sent >= 25) continue;
+    const inv = await buildInvoice(env, p, month);
+    if (!inv) { out.none++; continue; }
+    out.list.push({ pro: p.fields["Business Name"], number: inv.number, charged: inv.totals.charged });
+    if (dry) continue;
+    const pdf = await invoiceFile(env, inv), t = inv.totals;
+    if (env.DOCS) await env.DOCS.put(`invoices/${p.id}/${month}.pdf`, pdf, { httpMetadata: { contentType: "application/pdf" } });
+    const ok = await sendEmail(env, p.fields.Email, `Your Hammer Hound invoice for ${inv.monthLabel}`, [`Hi ${p.fields["Business Name"]},`, `Your invoice for ${inv.monthLabel} is attached as a PDF.`,
+      `Leads claimed: ${t.leadCount} (${usd2(t.leadsTotal)}). Charged to your card: ${usd2(t.charged)}. Wallet at month end: ${usd2(t.closing)}.`, "Nothing is due. Leads are paid from your wallet as you claim them. Every invoice is also in your wallet."],
+      { heading: `Your ${inv.monthLabel} invoice`, cta: ["Open my wallet", APP + "#wallet"], attachments: [{ content: b64(pdf.buffer), filename: `hammer-hound-invoice-${month}.pdf`, type: "application/pdf", disposition: "attachment" }] });
+    if (ok) { await update(env, HH.pros, p.id, { "Last Invoice": month }); out.sent++; }
+  }
+  return out;
 }
 
 // ---------- uniform leads ----------
@@ -448,7 +629,7 @@ address: the street address of the job if given, else "".
 property_type: Home, Rental, Business, or Not stated.
 timing: Emergency (damage or danger now), Within a week, Within a month, Flexible, or Not stated.
 job_size: Small (a repair, or a few hours of work), Medium (a day to a few days), Large (a full replacement, a new build, or longer). Not stated if the request does not make it clear.
-summary: 2 or 3 plain sentences in the third person describing the work and anything the owner said about the property, the problem and what they want (a quote, an inspection, a repair). Start with "The owner". No person's name, no phone number, no email address, no street address, no company name.
+summary: 2 or 3 plain sentences (60 words at most) in the third person describing the work and anything the owner said about the property, the problem and what they want (a quote, an inspection, a repair). Start with "The owner". No person's name, no phone number, no email address, no street address, no company name. Do not say what was left out: never write a sentence such as "No timing or budget was given."
 
 Reply with one JSON object and nothing else, with exactly these keys:
 {"is_job_request":true,"not_a_job_reason":"","job":"","trade":"","city":"","state":"","address":"","property_type":"","timing":"","job_size":"","summary":""}`;
@@ -460,6 +641,8 @@ export function scrub(text, f) {
   for (const part of String(f["Owner Name"] || "").split(/\s+/).filter((w) => w.length > 2 && w.toLowerCase() !== "owner")) t = t.replace(new RegExp("\\b" + part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "g"), "the owner");
   return t.replace(/\b\d{1,6}\s+(?:[A-Z][a-z]+\s){1,3}(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Ct|Court|Ln|Lane|Blvd|Way|Pl|Place|Cir|Circle|Pkwy|Hwy)\b\.?/g, "[address removed]").replace(/\b(the owner)(\s+the owner)+\b/gi, "$1").replace(/\b([Tt]he) the owner\b/g, "$1 owner").replace(/^the owner/, "The owner").replace(/\s+/g, " ").trim().slice(0, 600);
 }
+// Sentences that only list what the owner did not say add nothing: the facts row already shows "Not stated".
+const noFiller = (t) => String(t || "").replace(/\s*\bNo [^.]{0,90}\b(?:was|were|is|are) (?:given|stated|provided|mentioned|specified|included)\.?/g, "").trim();
 const placeOf = (f) => [f.City, f.State].filter(Boolean).join(", ");
 async function styleOne(env, lead) {
   const f = lead.fields;
@@ -470,7 +653,7 @@ async function styleOne(env, lead) {
   const job = String(w.job || "").replace(/^(fwd?|re):\s*/i, "").trim().slice(0, 60) || (TRADE_NAME[trade] ? TRADE_NAME[trade] + " Job" : "Job");
   return update(env, HH.leads, lead.id, {
     Style: STYLE, Qualified: "Yes", Job: job, Trade: trade, City: city, State: state, Lead: `${job} · ${[city, state].filter(Boolean).join(", ") || "Area not stated"}`,
-    Summary: scrub(w.summary, f), Timing: pickFrom(w.timing, TIMINGS), "Property Type": pickFrom(w.property_type, PROPERTY), "Job Size": pickFrom(w.job_size, SIZES), "Job Address": String(w.address || "").slice(0, 160),
+    Summary: noFiller(scrub(w.summary, f)), Timing: pickFrom(w.timing, TIMINGS), "Property Type": pickFrom(w.property_type, PROPERTY), "Job Size": pickFrom(w.job_size, SIZES), "Job Address": String(w.address || "").slice(0, 160),
   });
 }
 // Rewrites leads that are not yet in the current format, newest first, a few per run.
@@ -563,7 +746,7 @@ export async function sendReminders(env, { dry = false, now = today() } = {}) {
 async function api(request, env, path) {
   if (!env.AIRTABLE_TOKEN || !env.SESSION_SECRET) return fail(503, NOT_OPEN);
   const isForm = (request.headers.get("Content-Type") || "").includes("multipart/form-data");
-  const body = request.method === "POST" && !isForm ? await request.json().catch(() => ({})) : {};
+  const body = request.method === "POST" && !isForm && path !== "/api/sms/inbound" ? await request.json().catch(() => ({})) : {};
 
   if (path === "/api/admin/ingest" && request.method === "POST") {
     if (!env.ADMIN_KEY || request.headers.get("X-Admin-Key") !== env.ADMIN_KEY) return fail(401, "Not allowed.");
@@ -574,6 +757,11 @@ async function api(request, env, path) {
   if (path === "/api/admin/reminders" && request.method === "POST") {
     if (!env.ADMIN_KEY || request.headers.get("X-Admin-Key") !== env.ADMIN_KEY) return fail(401, "Not allowed.");
     try { return json(await sendReminders(env, { dry: !!body.dry })); } catch (e) { return json({ error: String(e && e.message || e) }, 500); }
+  }
+  if (path === "/api/sms/inbound" && request.method === "POST") return inboundText(request, env);
+  if (path === "/api/admin/invoices" && request.method === "POST") {
+    if (!env.ADMIN_KEY || request.headers.get("X-Admin-Key") !== env.ADMIN_KEY) return fail(401, "Not allowed.");
+    try { return json(await sendInvoices(env, { month: body.month, dry: !!body.dry })); } catch (e) { return json({ error: String(e && e.message || e) }, 500); }
   }
   if (path === "/api/unsubscribe") {
     const q = new URL(request.url).searchParams, id = q.get("p") || "";
@@ -593,8 +781,9 @@ async function api(request, env, path) {
     const sent = await sendCode(env, phone);
     if (sent.error) return fail(503, sent.error);
     const test = env.SHADOW_MODE === "true";
-    await create(env, HH.pros, { "Business Name": business, Mobile: phone, Trade: TRADE_NAME[body.trade] ? body.trade : "", ZIP: String(body.zip || "").slice(0, 5), City: city, "Email Offers": true,
+    const made = await create(env, HH.pros, { "Business Name": business, Mobile: phone, Trade: TRADE_NAME[body.trade] ? body.trade : "", ZIP: String(body.zip || "").slice(0, 5), City: city, "Email Offers": true,
       Agreement: `${AGREEMENT_VERSION} | ${new Date().toISOString()} | ${request.headers.get("CF-Connecting-IP") || "unknown"}`, Test: test, Verification: "Not started", Balance: num(env.WELCOME_CREDIT, 240), "Welcome Credit": num(env.WELCOME_CREDIT, 240), "Free Leads Left": 0, "Text Offers": body.sms === "yes", "Created At": new Date().toISOString() });
+    if (num(env.WELCOME_CREDIT, 240) > 0) await post(env, made, { entry: "Welcome credit", type: "Welcome credit", amount: num(env.WELCOME_CREDIT, 240), creditPart: num(env.WELCOME_CREDIT, 240), balanceAfter: num(env.WELCOME_CREDIT, 240) });
     return json({ next: "code", phone, sent: sent.sent });
   }
   if (path === "/api/pro/sign-in" && request.method === "POST") {
@@ -689,21 +878,42 @@ async function api(request, env, path) {
     return json({ pro: proView(saved) });
   }
   if (path === "/api/pro/wallet") {
-    const mine = await purchasesFor(env, pro.id), rows = [];
-    for (const p of mine.sort((a, b) => String(b.fields["Bought At"]).localeCompare(String(a.fields["Bought At"]))).slice(0, 40)) {
-      const lead = await at(env, HH.base, HH.leads, { id: p.fields.Purchase.split(":")[0] }).catch(() => null);
-      rows.push({ id: p.id, date: p.fields["Bought At"], label: lead ? lead.fields.Lead : "Lead", kind: p.fields.Kind, amount: -(p.fields.Price || 0), creditUsed: p.fields["Credit Used"] || 0, review: p.fields["Review Status"] || "None" });
-    }
-    // Card payments run through Square. Until its keys are set, only test accounts can add (test) funds.
-    return json({ balance: pro.fields.Balance || 0, credit: creditOf(pro.fields), leadPrice: num(env.SHADOW_SHARED_PRICE, 75), rows, cardsReady: !!env.SQUARE_ACCESS_TOKEN, testFunds: !!pro.fields.Test, membership: { fee: 300, waived: true }, pro: proView(pro) });
+    const rows = await ensureLedger(env, pro), month = monthOf(), f = pro.fields;
+    return json({
+      balance: f.Balance || 0, credit: creditOf(f), leadPrice: num(env.SHADOW_SHARED_PRICE, 75), card: f.Card || "", cardsReady: !!env.SQUARE_ACCESS_TOKEN, testCard: !!f.Test,
+      autoReload: !!f["Auto Reload"], reloadAmount: reloadUnit(f), monthlyLimit: f["Monthly Limit"] || 0, reloads: RELOADS,
+      chargedThisMonth: cents(rows.filter((r) => r.fields.Month === month && selectName(r.fields.Type) === "Top-up").reduce((n, r) => n + (r.fields.Amount || 0), 0)),
+      rows: rows.slice(0, 60).map((r) => ({ id: r.id, date: r.fields.At, entry: r.fields.Entry, type: selectName(r.fields.Type), amount: r.fields.Amount || 0, creditPart: r.fields["Credit Part"] || 0, balanceAfter: r.fields["Balance After"] || 0, via: r.fields.Via || "" })),
+      months: [...new Set(rows.map((r) => r.fields.Month).filter(Boolean))].sort().reverse().map((m) => ({ month: m, label: monthLabel(m), open: m === month })),
+      membership: membershipOf(f), pro: proView(pro),
+    });
+  }
+  if (path === "/api/pro/card" && request.method === "POST") {
+    if (body.action === "remove") return json({ pro: proView(await update(env, HH.pros, pro.id, { Card: "", "Card Token": "", "Auto Reload": false })) });
+    // PLACEHOLDER: with Square connected, the card form posts a card token here and it is saved as a card on file.
+    if (!pro.fields.Test) return fail(503, "Card payments are not switched on yet. We will email you when you can add a card.");
+    return json({ pro: proView(await update(env, HH.pros, pro.id, { Card: "Test card ending 4242", "Card Token": "TEST" })), test: true });
   }
   if (path === "/api/pro/add-funds" && request.method === "POST") {
-    const amount = Number(body.amount);
-    if (![50, 100, 250, 500].includes(amount)) return fail(400, "Choose an amount from the list.");
-    // PLACEHOLDER: charge the card through Square here (SQUARE_ACCESS_TOKEN, SQUARE_LOCATION_ID), then credit the balance.
-    if (!pro.fields.Test) return fail(503, "Card payments are not switched on yet. We will email you when you can add funds.");
-    const saved = await update(env, HH.pros, pro.id, { Balance: Math.round(((pro.fields.Balance || 0) + amount) * 100) / 100 });
-    return json({ pro: proView(saved), test: true });
+    const amount = Math.round(Number(body.amount));
+    if (!(amount >= 75 && amount <= 2000)) return fail(400, "Choose an amount between $75 and $2,000.");
+    if (!pro.fields.Card) return fail(402, "Add a card first.");
+    const t = await topUp(env, pro, amount, "Portal");
+    return t.ok ? json({ pro: proView(t.pro), added: amount }) : fail(402, t.error);
+  }
+  if (path === "/api/pro/reload-settings" && request.method === "POST") {
+    const amount = Math.round(Number(body.reloadAmount)), limit = body.monthlyLimit === "" || body.monthlyLimit == null ? null : Math.round(Number(body.monthlyLimit));
+    if (!(amount >= 75 && amount <= 2000)) return fail(400, "Choose a reload amount between $75 and $2,000.");
+    if (limit !== null && !(limit >= amount && limit <= 20000)) return fail(400, "Your monthly limit must be at least one reload.");
+    if (body.autoReload && !pro.fields.Card) return fail(400, "Add a card before turning on auto-reload.");
+    return json({ pro: proView(await update(env, HH.pros, pro.id, { "Auto Reload": !!body.autoReload, "Reload Amount": amount, "Monthly Limit": limit })) });
+  }
+  if (path === "/api/pro/invoice") {
+    const month = new URL(request.url).searchParams.get("month") || "";
+    if (!/^\d{4}-\d{2}$/.test(month)) return fail(400, "Choose a month.");
+    const inv = await buildInvoice(env, pro, month);
+    if (!inv) return fail(404, "There is no wallet activity in that month.");
+    return new Response(await invoiceFile(env, inv), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="hammer-hound-invoice-${month}.pdf"`, "Cache-Control": "no-store" } });
   }
   if (path === "/api/pro/tickets" && request.method === "POST") {
     const subject = String(body.subject || "").trim().slice(0, 160), message = String(body.message || "").trim().slice(0, 4000);
@@ -741,7 +951,14 @@ export default {
       if (hour >= 8 && hour < 18) ctx.waitUntil(sendReminders(env).then((r) => console.log("reminders", JSON.stringify({ due: r.due, sent: r.sent, held: r.held })), (e) => console.error("reminders failed:", String(e && e.message || e))));
       return;
     }
-    if (env.SHADOW_MODE !== "true") return;
-    ctx.waitUntil(ingest(env).then((r) => console.log("ingest", JSON.stringify(r)), (e) => console.error("ingest failed:", String(e && e.message || e))));
+    // Invoices: the 1st to the 3rd of each month, for the month before. Each pro gets a month once.
+    if (event.cron === "13 15 1-3 * *") { ctx.waitUntil(sendInvoices(env).then((r) => console.log("invoices", JSON.stringify({ month: r.month, sent: r.sent })), (e) => console.error("invoices failed:", String(e && e.message || e)))); return; }
+    // Every minute: copy and write new leads (shadow mode), tell matching pros, and return money for approved reports.
+    const run = async () => {
+      if (env.SHADOW_MODE === "true") console.log("ingest", JSON.stringify(await ingest(env)));
+      const alerts = await alertPros(env); if (alerts.leads) console.log("alerts", JSON.stringify(alerts));
+      const back = await creditBacks(env); if (back) console.log("credit backs", back);
+    };
+    ctx.waitUntil(run().catch((e) => console.error("minute job failed:", String(e && e.message || e))));
   },
 };

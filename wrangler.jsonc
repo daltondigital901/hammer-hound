@@ -21,8 +21,8 @@
   // Sends verification result emails from support@hammerhound.com (Cloudflare Email Sending).
   "send_email": [{ "name": "EMAIL" }],
   // Every minute: copy new Dalton Digital form leads into the Hammer Hound base (shadow mode only).
-  // Hourly at :07: insurance reminders and nudge emails (the Worker only sends 8am to 6pm Central).
-  "triggers": { "crons": ["* * * * *", "7 * * * *"] },
+  // 15:13 UTC on the 1st to 3rd: monthly invoices by email. Hourly at :07: insurance reminders and nudge emails (the Worker only sends 8am to 6pm Central).
+  "triggers": { "crons": ["* * * * *", "7 * * * *", "13 15 1-3 * *"] },
   // Keep Worker logs so a failed copy can be read in the Cloudflare dashboard.
   "observability": { "enabled": true },
   "vars": {

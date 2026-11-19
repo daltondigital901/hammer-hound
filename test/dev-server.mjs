@@ -11,7 +11,7 @@ const DIST = join(ROOT, "site", "dist");
 const TYPES = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".ico": "image/x-icon", ".json": "application/json", ".webmanifest": "application/manifest+json", ".xml": "application/xml", ".txt": "text/plain" };
 
 // ---- in-memory Airtable ----
-export const db = { tblW1A0iKDAd111iI: [], tblfA6ivDIlWVp4us: [], tbl9bEGuy8DPkkee7: [], tblJnYLq2aCiCVU1C: [], tbl9olHmI5p746DOe: [], tblFDXXEvvlb6F8vN: [] };
+export const db = { tblW1A0iKDAd111iI: [], tblfA6ivDIlWVp4us: [], tbl9bEGuy8DPkkee7: [], tblJnYLq2aCiCVU1C: [], tbl9olHmI5p746DOe: [], tblFDXXEvvlb6F8vN: [], tblZ2EIWCgOb36JR2: [] };
 let seq = 0;
 const rid = () => "rec" + String(++seq).padStart(14, "0");
 const NUM = "fldfJJYK166eGNfxw";
@@ -42,6 +42,11 @@ function matches(table, rec, formula) {
   if ((m = formula.match(/^\{Pro ID\}='(.*)'$/))) return f["Pro ID"] === m[1];
   if (formula.startsWith("AND(NOT({Email}='')")) return !!f.Email && ["Verified", "Declined"].includes(f.Verification);
   if ((m = formula.match(/^FIND\('(.*)',\{Purchase\}\)>0$/))) return String(f.Purchase).includes(m[1]);
+  if ((m = formula.match(/^AND\(\{Pro ID\}='(.*?)',\{Month\}='(.*?)'(,\{Type\}='Top-up')?\)$/))) return f["Pro ID"] === m[1] && f.Month === m[2] && (!m[3] || f.Type === "Top-up");
+  if (formula === "AND({Review Status}='Approved',NOT({Credited}))") return f["Review Status"] === "Approved" && !f.Credited;
+  if (formula === "AND({Verification}='Verified',NOT({Paused}))") return f.Verification === "Verified" && !f.Paused;
+  if (formula === "NOT({Email}='')") return !!f.Email;
+  if (formula.includes("{Alerted}=''")) return f.Status === "Offered" && f.Style === "v1" && new Date(f["Offer Ends At"]) > new Date() && !f.Alerted;
   if (formula.startsWith("AND({Status}='Offered',{Style}='v1'")) return f.Status === "Offered" && f.Style === "v1" && new Date(f["Offer Ends At"]) > new Date();
   if (formula.startsWith("AND(NOT({Style}='v1')")) return f.Style !== "v1" && f.Status !== "Rejected";
   throw new Error("mock: unknown formula " + formula);
@@ -68,11 +73,12 @@ function aiMock(body, headers) {
   const text = ai.chatty && !body.output_config ? "Here is the report:\n```json\n" + JSON.stringify(report) + "\n```" : ai.garbage ? "I cannot help with that." : JSON.stringify(report);
   return new Response(JSON.stringify({ content: [{ type: "text", text }] }), { status: 200 });
 }
-export const stored = new Map(), sent = [];
+export const stored = new Map(), sent = [], texts = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init = {}) => {
   const url = new URL(typeof input === "string" ? input : input.url || input);
   if (url.hostname === "ai.test") return aiMock(JSON.parse(init.body), init.headers);
+  if (url.hostname === "api.twilio.com") { const b = new URLSearchParams(init.body); texts.push({ to: b.get("To"), body: b.get("Body") }); return new Response("{}", { status: 201 }); }
   if (url.hostname !== "api.airtable.com") return realFetch(input, init);
   const [, , , table, id] = url.pathname.split("/");
   let rows = db[table]; const method = init.method || "GET"; const body = init.body ? JSON.parse(init.body) : null;

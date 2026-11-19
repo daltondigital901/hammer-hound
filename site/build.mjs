@@ -224,6 +224,15 @@ page({
 </section>
 ${hazard}
 ${ownerPromise}
+<section class="section">
+  <div class="wrap">
+    <div class="section-head"><h2>What property owners say</h2><p class="chips"><span class="chip chip--green">${icon("shield", 16)} Verified Pro</span><span class="chip chip--green">${icon("check", 16)} Insurance on file</span></p></div>
+    <div class="grid grid--3">
+      ${reviews.map((r) => `<figure class="card review"><div class="stars" aria-label="5 out of 5 stars">${star.repeat(5)}</div><blockquote>&ldquo;${esc(r.quote)}&rdquo;</blockquote><figcaption>${esc(r.who)} &middot; ${esc(r.job)}</figcaption></figure>`).join("")}
+    </div>
+    ${placeholderNote("Sample reviews and badges. Placeholders until real reviews and license checks exist.")}
+  </div>
+</section>
 <section class="section section--dark vetted">
   <div class="wrap vetted-row">
     <div class="vetted-badge"><img src="/assets/img/badge-on-dark.png" alt="" width="161" height="192" loading="lazy"><p class="vbadge-title">Verified Pro</p></div>
@@ -238,15 +247,6 @@ ${ownerPromise}
       </ul>
       <p class="lp-micro">Verified means we received documents that appeared valid on the date we checked them. It is not a guarantee of anyone's work. See the <a href="/terms/">Terms of Use</a>.</p>
     </div>
-  </div>
-</section>
-<section class="section">
-  <div class="wrap">
-    <div class="section-head"><h2>What property owners say</h2><p class="chips"><span class="chip chip--green">${icon("shield", 16)} Verified Pro</span><span class="chip chip--green">${icon("check", 16)} Insurance on file</span></p></div>
-    <div class="grid grid--3">
-      ${reviews.map((r) => `<figure class="card review"><div class="stars" aria-label="5 out of 5 stars">${star.repeat(5)}</div><blockquote>&ldquo;${esc(r.quote)}&rdquo;</blockquote><figcaption>${esc(r.who)} &middot; ${esc(r.job)}</figcaption></figure>`).join("")}
-    </div>
-    ${placeholderNote("Sample reviews and badges. Placeholders until real reviews and license checks exist.")}
   </div>
 </section>
 
@@ -685,10 +685,10 @@ ${proPromise}
 
 // ---------- pro ads landing page ----------
 const feeOffer = (dark) => `<div class="fee-offer${dark ? " fee-offer--dark" : ""}">
-  <span class="chip chip--yellow">Limited-time offer</span>
+  <span class="chip chip--yellow">First year free</span>
   <p class="fee-line"><span class="fee-was"><span class="sr-only">Was </span>$300</span><span class="fee-now"><span class="sr-only">now </span>$0</span></p>
-  <p class="fee-text">Annual membership fee waived</p>
-  <p class="fee-fine">Waived for now. We give notice before it starts. See the <a href="/terms/">Terms of Use</a>.</p>
+  <p class="fee-text">Membership is free for your first year</p>
+  <p class="fee-fine">From year two it renews at $300 a year on your card on file, until you close your account. We email you before each charge. See the <a href="/pro-agreement/">Pro Agreement</a>.</p>
 </div>`;
 const landingHeader = `<header class="site-header">
   <div class="wrap header-row">
@@ -701,7 +701,7 @@ const fixes = [
   ["The same lead sold to a dozen contractors", "Five pros at most, or just you", "The owner picks how many pros can call, from 1 to 5. That is the limit. If no one has bought a lead yet, you can take it exclusive and it is sold to nobody else."],
   ["Paying for jobs you would never have taken", "See the job before you spend a dollar", "Each offer shows the trade, the area, the job size and the price. Reply YES to the ones you want and ignore the rest. You are never charged for a lead you did not choose."],
   ["Not enough work coming in", "Every job in your area, as many as you want", "You get a text the moment a job in your trades and service area is confirmed. Buy one or buy them all. There is no cap. We cannot promise how many jobs your area produces, but you will be offered every one."],
-  ["Paying every month whether the phone rings or not", "You pay for leads, not for waiting", "Leads come out of a balance you load yourself, and you spend it only on leads you choose. There is no minimum purchase and auto-refill is optional. The $300 annual membership fee is waived for now."],
+  ["Paying every month whether the phone rings or not", "You pay for leads, not for waiting", "Leads come out of a balance you load yourself, and you spend it only on leads you choose. There is no minimum purchase and auto-refill is optional. Membership is free for your first year, then $300 a year."],
   ["By the time you call, they have hired someone else", "Details in seconds", "Reply YES and the owner's name, number, address and job notes arrive by text right away, while the owner is still expecting calls."],
 ];
 const proFaqs = [
@@ -710,13 +710,13 @@ const proFaqs = [
   ["Are the leads exclusive?", "They are shared with up to 5 pros, because the owner chooses how many can call. If no one has bought a lead yet, you can buy it exclusive at the exclusive price shown."],
   ["What counts as a bad lead?", "A wrong or disconnected number, a duplicate of a lead you already bought from us, a request that was not real, or a job outside your trades or service area. Report it within the window in the Terms and choose a credit or a refund. An owner who does not pick up, hires someone else or changes their mind is not a bad lead."],
   ["What do I need to get my 3 free leads?", "Create an account, then verify your business: your EIN, one proof of business such as a contractor or business license, and proof of insurance. Your Verified Pro badge and free leads unlock when both documents pass. You can look at leads in your market before you verify."],
-  ["Is there a membership fee?", "Membership is $300 a year, and that fee is waived for now while Hammer Hound launches. We will give you notice before it starts, and you can close your account before then without paying it."],
-  ["What am I agreeing to?", "The Terms of Use, which cover leads, balances, the membership fee and refunds. There is no minimum purchase, and you can close your account at any time."],
+  ["Is there a membership fee?", "Membership is free for your first year. After that it renews automatically at $300 a year, charged to your card on file, until you close your account. We email you before each charge, and you can close your account before then without paying it."],
+  ["What am I agreeing to?", "The Pro Agreement and Terms of Use, which cover leads, your wallet, the membership fee and refunds. There is no minimum purchase, and you can close your account at any time."],
 ];
 page({
   path: "/pros/leads/",
   title: `Contractor Leads That Are Real Jobs | ${site.name}`,
-  desc: D("Phone-confirmed jobs by text. Buy as many as you want. Membership fee waived. First 3 free."),
+  desc: D("Phone-confirmed jobs by text. Buy as many as you want. First year of membership free."),
   noindex: true,
   chrome: landingHeader,
   bodyClass: "landing",
@@ -823,6 +823,7 @@ page({
       <h3 class="agree-title">Pro Agreement</h3>
       <p class="meta">Read it here or <a href="/pro-agreement/" target="_blank" rel="noopener">open it in a new tab</a>. Version of ${esc(agreement.updated)}.</p>
       <div class="agree-box prose" tabindex="0" role="region" aria-label="Pro Agreement">${agreement.html}</div>
+      <p class="renewal-note"><strong>Membership renews automatically.</strong> It is free for your first year. After that it is $300 a year, charged to your card on file on each anniversary of the day you join, until you close your account. We email you at least 30 days before each charge. Close your account any time in Account, at no cost, to stop it.</p>
       <label class="consent consent--strong"><input type="checkbox" name="agree" value="yes" required><span>I have read and agree to the <a href="/pro-agreement/" target="_blank" rel="noopener">Pro Agreement</a>, the <a href="/terms/" target="_blank" rel="noopener">Terms of Use</a> and the <a href="/privacy/" target="_blank" rel="noopener">Privacy Policy</a>, and I have authority to accept them for this business.</span></label>
       <p class="form-status" data-status role="status" hidden></p>
       <button class="btn btn--yellow btn--block" type="submit">Agree and create account</button>
