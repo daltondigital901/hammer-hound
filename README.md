@@ -129,3 +129,14 @@ the pricing engine, the owner request form's endpoint, and bad-lead scoring.
 - **Stored but not yet acted on:** pause, daily cap, quiet hours, extra trades and email alerts are saved on the pro. Nothing sends offers yet, so nothing reads them.
 - **Trade matching.** A lead's trade comes from keywords in its `Service` text (`TRADES` in `src/worker.js`). Unmatched leads show as "Other".
 - **Pro Agreement.** `site/src/legal/pro-agreement.md`, shown in full on the join form with a required box. Acceptance is saved in `Agreement` as version, time and IP. Change `AGREEMENT_VERSION` in `src/worker.js` whenever the "Last updated" date changes; a test fails if they differ.
+
+## Uniform leads
+
+Every lead is rewritten by the AI into one format before any pro sees it (`styleLeads()` in `src/worker.js`, run with every copy, 6 leads a minute, newest first).
+
+- **Fields, always in this order:** `Job` (2 to 5 words), `Trade`, `City` and `State`, `Timing`, `Property Type`, `Job Size`, `Summary`. Anything the owner did not say reads "Not stated". The writer is told never to add a detail that is not in the request.
+- **Held back until written.** Open leads require `Style` = `v1`. A raw form or email subject is never shown.
+- **Not a request for work** (vendor pitch, job application, spam): `Qualified` = "No: reason", `Status` = `Rejected`, never offered.
+- **No owner details before purchase.** The summary is checked in code as well: emails, phone numbers, the owner's name and street addresses are cut (`scrub()`).
+- **After purchase** the pro sees the same block, then the owner's contact details, the job address if given, and the owner's own words.
+- To change the format, edit `LEAD_RULES` and bump `STYLE`; every lead is rewritten on the next runs.

@@ -62,7 +62,7 @@ const u = await call("/api/pro/verify-code", { phone: unverifiedPhone, code: "42
 seedForm(15); await ingest(env);
 const browse = await call(ALL, null, u.cookie);
 assert.equal(browse.status, 200); assert.equal(browse.canBuy, false); assert.ok(browse.offers.length > 0);
-assert.ok(!JSON.stringify(browse.offers).match(/owner|Phone|example\.com/i), "browsing shows no owner details");
+assert.ok(!JSON.stringify(browse.offers).match(/ownerName|ownerPhone|ownerEmail|example\.com|555-?01\d\d|Sample Owner/i), "browsing shows no owner details");
 assert.equal((await call("/api/pro/buy", { leadId: browse.offers[0].id, kind: "shared" }, u.cookie)).status, 403, "cannot claim before verification");
 // verification rules: EIN, document type, expiry, one account per EIN
 assert.equal((await send(docs(50, { ein: "123-45-678" }), u.cookie)).status, 400, "8 digits is not an EIN");
@@ -118,7 +118,7 @@ assert.equal((await call("/api/pro/buy", { leadId: browse.offers[0].id, kind: "s
 
 // offers hide the owner; buying reveals them
 const offers = (await call(ALL, null, a)).offers; assert.equal(offers.length, 5);
-assert.ok(!JSON.stringify(offers).match(/owner|Phone|example\.com/i), "offers carry no owner details");
+assert.ok(!JSON.stringify(offers).match(/ownerName|ownerPhone|ownerEmail|example\.com|555-?01\d\d|Sample Owner/i), "offers carry no owner details");
 const L = offers[0].id;
 const first = await call("/api/pro/buy", { leadId: L, kind: "shared" }, a);
 assert.equal(first.free, true); assert.equal(first.balance, 240); assert.equal(first.freeLeadsLeft, 2); assert.ok(first.lead.ownerPhone);
@@ -155,6 +155,26 @@ assert.match(readFileSync(new URL("../site/src/legal/pro-agreement.md", import.m
 const agreed = db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550101").fields.Agreement;
 assert.match(agreed, new RegExp("^" + AGREEMENT_VERSION + " \\| \\d{4}-\\d{2}-\\d{2}T.* \\| "), "version, time and IP are recorded");
 assert.match(readFileSync(new URL("../site/dist/pros/join/index.html", import.meta.url), "utf8"), /name="agree" value="yes" required[\s\S]*Agree and create account/, "the join page shows the agreement and the box");
+
+// ---- every lead is in the uniform format before it is offered ----
+{
+  const { styleLeads, scrub, STYLE } = await import("../src/worker.js");
+  const L = db.tblfA6ivDIlWVp4us;
+  assert.ok(L.filter((l) => l.fields.Status !== "Rejected").every((l) => l.fields.Style === STYLE), "the writer runs with every copy");
+  const shown = (await call(ALL, null, a)).offers;
+  for (const o of shown) { assert.ok(o.job && o.place && o.tradeName, "job, place and trade on every lead"); for (const k of ["timing", "propertyType", "jobSize"]) assert.ok(typeof o[k] === "string" && o[k], k + " is always present"); assert.match(o.summary, /^The owner/); }
+  assert.ok(!JSON.stringify(shown).match(/901-555-0100|owner1@example/), "contact details are cut from the summary in code");
+  const mailLead = L.find((l) => String(l.fields["Lead Source"]).startsWith("Email")); assert.ok(!/^(fwd?|re):/i.test(mailLead.fields.Job)); assert.match(mailLead.fields.Lead, / · Baltimore, MD$/, "an email lead gets a job name and a place, not its subject line");
+  // not a request for work: never offered
+  seedForm(28, { service: "Roof Repair", message: "SPAM we offer SEO services" }); await ingest(env);
+  const spam = L.find((l) => l.fields["DD1 Call Number"] === 28); assert.equal(spam.fields.Status, "Rejected"); assert.match(spam.fields.Qualified, /^No: vendor pitch/);
+  assert.ok(!(await call(ALL, null, a)).offers.some((o) => o.id === spam.id));
+  // a lead the writer has not reached is not offered
+  L.push({ id: "recUNSTYLED0000001", fields: { Lead: "Fwd: raw subject", Service: "Fwd: raw subject", Status: "Offered", "Offer Ends At": new Date(Date.now() + 1e7).toISOString(), "Received At": new Date().toISOString(), Source: "DD1 form (shadow)", Rule: "v2" } });
+  assert.ok(!(await call(ALL, null, a)).offers.some((o) => o.id === "recUNSTYLED0000001"), "raw leads are held back");
+  ai.down = true; assert.equal((await styleLeads(env)).failed, 1); ai.down = false; assert.equal((await styleLeads(env)).styled, 1);
+  assert.equal(scrub("Jane Doe at 746 Highland Springs Ct, 765-661-3431, jane@x.com wants brick fixed.", { "Owner Name": "Jane Doe" }), "The owner at [address removed], [removed], [removed] wants brick fixed.");
+}
 
 // ---- markets and trades ----
 assert.deepEqual(["Roof leak repair", "Driveway Replacement", "Asphalt driveway", "Water Heater", "Fence Install", "Quote for a retaining wall", "Mystery"].map(tradeOf), ["roofing", "concrete", "asphalt-paving", "water-heaters", "fencing", "masonry", "other"]);

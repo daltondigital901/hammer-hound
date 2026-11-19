@@ -42,7 +42,8 @@ function matches(table, rec, formula) {
   if ((m = formula.match(/^\{Pro ID\}='(.*)'$/))) return f["Pro ID"] === m[1];
   if (formula.startsWith("AND(NOT({Email}='')")) return !!f.Email && ["Verified", "Declined"].includes(f.Verification);
   if ((m = formula.match(/^FIND\('(.*)',\{Purchase\}\)>0$/))) return String(f.Purchase).includes(m[1]);
-  if (formula.startsWith("AND({Status}='Offered'")) return f.Status === "Offered" && new Date(f["Offer Ends At"]) > new Date();
+  if (formula.startsWith("AND({Status}='Offered',{Style}='v1'")) return f.Status === "Offered" && f.Style === "v1" && new Date(f["Offer Ends At"]) > new Date();
+  if (formula.startsWith("AND(NOT({Style}='v1')")) return f.Style !== "v1" && f.Status !== "Rejected";
   throw new Error("mock: unknown formula " + formula);
 }
 // ---- stand-in AI: decides from words inside the uploaded test files ----
@@ -53,6 +54,14 @@ function aiMock(body, headers) {
   // Matches the live API: this model refuses a forced tool call.
   if (body.tool_choice && ["tool", "any"].includes(body.tool_choice.type)) return new Response(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: 'tool_choice: type "tool" and "any" are not supported for this model.' } }), { status: 400 });
   if (ai.noSchema && body.output_config) return new Response(JSON.stringify({ type: "error", error: { message: "output_config is not supported" } }), { status: 400 });
+  // The lead writer: no documents, just the request text.
+  if (!body.messages[0].content.some((c) => c.source)) {
+    const text = body.messages[0].content[0].text, get = (k) => (text.match(new RegExp(k + ": (.*)")) || [])[1] || "", service = get("Service or subject field"), msg = text.split("Message:\n")[1] || "";
+    const lead = /SPAM|we offer seo/i.test(msg) ? { is_job_request: false, not_a_job_reason: "vendor pitch" }
+      : { is_job_request: true, not_a_job_reason: "", job: service.replace(/^(fwd?|re):\s*/i, "").replace(/\b\w/g, (ch) => ch.toUpperCase()).slice(0, 40), trade: /roof/i.test(service) ? "roofing" : /fenc/i.test(service) ? "fencing" : /wall|brick/i.test(service) ? "masonry" : /driveway/i.test(service) ? "concrete" : /water heater/i.test(service) ? "water-heaters" : "other",
+        city: get("City field") || "Baltimore", state: get("City field") ? "TN" : "MD", address: "", property_type: "Home", timing: /this week/i.test(msg) ? "Within a week" : "Not stated", job_size: "Small", summary: "The owner wants " + service.toLowerCase() + ". Call 901-555-0100 or owner1@example.com." };
+    return new Response(JSON.stringify({ content: [{ type: "text", text: JSON.stringify(lead) }] }), { status: 200 });
+  }
   const docs = body.messages[0].content.filter((c) => c.source).map((c) => Buffer.from(c.source.data, "base64").toString());
   const read = (text, extra) => ({ result: /FAIL/.test(text) ? "fail" : /UNSURE/.test(text) ? "unsure" : "pass", reason_for_pro: /FAIL/.test(text) ? "This looks like the wrong kind of document." : /UNSURE/.test(text) ? "The photo is too blurry to read." : "", name_on_document: "Test Pro", expires: (text.match(/EXPIRES (\d{4}-\d{2}-\d{2})/) || [])[1] || "", ...extra });
   const report = { business: read(docs[0], { ein_on_document: (docs[0].match(/EIN (\d{9})/) || [])[1] || "" }), insurance: read(docs[1], { shows_general_liability: true }) };
@@ -86,7 +95,7 @@ globalThis.fetch = async (input, init = {}) => {
 export const env = {
   AIRTABLE_TOKEN: "test", SESSION_SECRET: "local-test-secret", TEST_CODE: "424242", ADMIN_KEY: "admin", SHADOW_MODE: "true",
   SHADOW_SHARED_PRICE: "75", SHADOW_EXCLUSIVE_PRICE: "225", SHADOW_MAX_PROS: "5", SHADOW_OFFER_HOURS: "24", TEST_BALANCE: "240",
-  ANTHROPIC_API_KEY: "test-key", ANTHROPIC_API: "https://ai.test/v1/messages",
+  ANTHROPIC_API_KEY: "test-key", ANTHROPIC_API: "https://ai.test/v1/messages", STYLE_BATCH: "50",
   DOCS: { put: async (k, v, o) => { stored.set(k, { size: v.byteLength, ...o }); } },
   EMAIL: { send: async (msg) => { sent.push(msg); return { messageId: "m" + sent.length }; } },
   ASSETS: { fetch: async (req) => {
