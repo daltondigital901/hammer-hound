@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { worker, env, db, seedForm, ingest, SITE_GBP, SITE_CLIENT, ai, stored, sent, texts } from "./dev-server.mjs";
 import { createHmac } from "node:crypto";
-import { decide, reminderFor, sendReminders, brandEmail, tradeOf, AGREEMENT_VERSION, alertPros, creditBacks, buildInvoice, sendInvoices, offerText } from "../src/worker.js";
+import { membershipOf, membershipNotice, decide, reminderFor, sendReminders, brandEmail, tradeOf, AGREEMENT_VERSION, alertPros, creditBacks, buildInvoice, sendInvoices, offerText } from "../src/worker.js";
 import { readFileSync } from "node:fs";
 import { parseForm } from "../src/worker.js";
 
@@ -27,7 +27,7 @@ const send = async (form, cookie) => {
 const ALL = "/api/pro/offers?market=all&trade=all";   // older checks look at every open lead
 const signUp = async (n) => {
   const phone = "90155501" + String(n).padStart(2, "0");
-  assert.equal((await call("/api/pro/join", { city: "Memphis", agree: "yes", business: "Test Pro " + n, phone, trade: "roofing", zip: "38103" })).next, "code");
+  assert.equal((await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "join@example.com", business: "Test Pro " + n, phone, trade: "roofing", zip: "38103" })).next, "code");
   const v = await call("/api/pro/verify-code", { phone, code: "424242" }); assert.equal(v.status, 200);
   assert.equal((await send(docs(n), v.cookie)).pro.verified, true);
   return v.cookie;
@@ -52,12 +52,12 @@ const leads = db.tblfA6ivDIlWVp4us; assert.ok(leads.every((l) => l.fields.Test =
 const mail = leads.find((l) => l.fields["Lead Source"].startsWith("Email")); assert.equal(mail.fields.Service, "Quote for a retaining wall"); assert.equal(mail.fields["Owner Phone"], "");
 
 // gates
-assert.equal((await call("/api/pro/join", { city: "Memphis", agree: "yes", business: "Outsider", phone: "9012223333" })).status, 403, "shadow mode blocks non-internal numbers");
+assert.equal((await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "join@example.com", business: "Outsider", phone: "9012223333" })).status, 403, "shadow mode blocks non-internal numbers");
 assert.equal((await call("/api/pro/me")).status, 401);
 const a = await signUp(1);
-assert.equal((await call("/api/pro/join", { city: "Memphis", agree: "yes", business: "Dup", phone: "9015550101" })).status, 409);
+assert.equal((await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "join@example.com", business: "Dup", phone: "9015550101" })).status, 409);
 assert.equal((await call("/api/pro/verify-code", { phone: "9015550101", code: "000000" })).status, 401, "wrong code refused");
-const unverifiedPhone = "9015550150"; await call("/api/pro/join", { city: "Memphis", agree: "yes", business: "Unverified", phone: unverifiedPhone });
+const unverifiedPhone = "9015550150"; await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "join@example.com", business: "Unverified", phone: unverifiedPhone });
 const u = await call("/api/pro/verify-code", { phone: unverifiedPhone, code: "424242" });
 // an unverified pro can browse but not claim, and sees no owner details
 seedForm(15); await ingest(env);
@@ -78,7 +78,7 @@ assert.equal((await call(ALL, null, u.cookie)).canBuy, true);
 assert.ok([...stored.keys()].some((k) => k.endsWith("-business.pdf")) && [...stored.keys()].some((k) => k.endsWith("-insurance.pdf")), "both files are kept");
 assert.equal(ai.last.headers["anthropic-version"], "2026-10-21"); assert.equal(ai.last.body.model, "claude-sonnet-5-5"); assert.ok(!ai.last.body.tool_choice, "no forced tool call: the live model refuses it"); assert.equal(ai.last.body.output_config.format.type, "json_schema");
 // the AI check: fail, unsure, expired, EIN mismatch, AI down, daily limit, review request
-const v2 = async (n) => { const phone = "90155501" + n; await call("/api/pro/join", { city: "Memphis", agree: "yes", business: "Check " + n, phone }); return (await call("/api/pro/verify-code", { phone, code: "424242" })).cookie; };
+const v2 = async (n) => { const phone = "90155501" + n; await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "join@example.com", business: "Check " + n, phone }); return (await call("/api/pro/verify-code", { phone, code: "424242" })).cookie; };
 const c1 = await v2(60), before = sent.length;
 assert.equal((await send(docs(60, { type: "text/plain" }), c1)).status, 400, "file type refused");
 assert.equal((await send(docs(60, { email: "nope" }), c1)).status, 400, "email required");
@@ -267,7 +267,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   };
   assert.equal((await sms("+19012223333", "YES", false)).status, 403, "an unsigned text is refused");
   const yes = await sms("+19012223333", " yes ");
-  assert.match(yes.text, /claimed\. Roof Repair, Memphis, TN\. Owner: Sample Owner 60, 9015550160.*\$75\.00 from your wallet after a \$150\.00 reload on Visa ending 1111\. \$90\.00 left\. Call now\./);
+  for (const part of [/claimed\. Roof Repair, Memphis, TN\./, /OWNER: Sample Owner 60/, /PHONE: \(901\) 555-0160/, /EMAIL: owner60@example\.com/, /Timing: Within a week\. Property: Home\. Size: Small\./, /JOB: The owner wants roof repair/, /THEIR WORDS: Leak over the kitchen\. Need someone this week\./, /\$75\.00 from your wallet after a \$150\.00 reload on Visa ending 1111\. \$90\.00 left\. Call now\./]) assert.match(yes.text, part, "the YES reply carries the whole lead");
   assert.equal(real.fields.Balance, 90); assert.deepEqual(db.tblZ2EIWCgOb36JR2.slice(-2).map((r) => [r.fields.Type, r.fields.Via]), [["Top-up", "Text"], ["Lead", "Text"]]);
   assert.match((await sms("+19012223333", "YES")).text, /not claimed\. You already have this lead/);
   assert.match((await sms("+19012223333", "balance")).text, /wallet has \$90\.00/); assert.match((await sms("+19019990000", "YES")).text, /not on a pro account/);
@@ -289,6 +289,30 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   const again = await sendInvoices(env, { month }); assert.ok(!again.list.some((x) => x.pro === proA.fields["Business Name"] && again.sent), "the same invoice is not emailed twice");
   assert.equal((await call("/api/admin/invoices", { dry: true }, null)).status, 401);
   for (const p of [real, other]) P.splice(P.indexOf(p), 1);
+}
+
+// ---- membership: first year free, then renews; notices 35, 18 and 3 days before every charge ----
+{
+  const F = (o) => ({ Email: "m@example.com", "Business Name": "Member Co", "Created At": "2026-03-10T15:00:00.000Z", ...o });
+  assert.deepEqual(membershipOf(F(), "2026-11-19"), { fee: 300, freeUntil: "2027-03-10", inFreeYear: true, renews: "2027-03-10", first: true });
+  assert.deepEqual([membershipOf(F(), "2027-03-11").renews, membershipOf(F(), "2027-03-11").inFreeYear, membershipOf(F(), "2029-01-01").renews], ["2028-03-10", false, "2029-03-10"], "it renews every year");
+  const st = (now) => (membershipNotice(F(), now) || {}).stage;
+  // 2027-03-10 is the first charge: 35 days before is Feb 3, 18 days before is Feb 20, 3 days before is Mar 7
+  assert.deepEqual(["2027-02-02", "2027-02-03", "2027-02-07", "2027-02-08", "2027-02-19", "2027-02-20", "2027-02-23", "2027-02-24", "2027-03-06", "2027-03-07", "2027-03-10", "2027-03-11"].map(st),
+    [undefined, "m35", "m35", undefined, undefined, "m18", "m18", undefined, undefined, "m3", "m3", undefined], "a late notice still lands inside its window, never outside it");
+  for (const [now, lo, hi] of [["2027-02-03", 30, 40], ["2027-02-07", 30, 40], ["2027-02-20", 15, 21], ["2027-02-23", 15, 21]]) { const n = membershipNotice(F(), now); assert.ok(n.left >= lo && n.left <= hi, now); }
+  assert.equal(membershipNotice(F({ "Closed At": "2027-01-01" }), "2027-02-03"), null, "a closed account gets no renewal notice"); assert.equal(membershipNotice(F({ Email: "" }), "2027-02-03"), null);
+  const P = db.tbl9bEGuy8DPkkee7, keep = P.map((p) => p.fields.Email); for (const p of P) p.fields.Email = "";
+  const member = { id: "recMEMBER000000001", fields: F({ Card: "Visa ending 1111", Verification: "Not started" }) }; P.push(member);
+  const m0 = sent.length, run = await sendReminders(env, { now: "2027-02-03" }); assert.equal(run.membership, 1);
+  const mail = sent[m0]; assert.match(mail.subject, /membership renews on March 10, 2027 for \$300/); assert.match(mail.text, /free. It ends on March 10, 2027/);
+  assert.match(mail.text, /renews automatically for 12 months and \$300 is charged to Visa ending 1111\. It renews every year on that date until you cancel/); assert.match(mail.text, /To cancel and avoid the charge, close your account before March 10, 2027/); assert.match(mail.text, /no fee to cancel/);
+  assert.ok(!/unsubscribe/.test(mail.html), "an account notice has no unsubscribe link");
+  assert.equal((await sendReminders(env, { now: "2027-02-04" })).membership, 0, "the same notice is not sent twice"); assert.equal((await sendReminders(env, { now: "2027-02-20" })).membership, 1); assert.equal((await sendReminders(env, { now: "2027-03-08" })).membership, 1);
+  P.splice(P.indexOf(member), 1); P.forEach((p, i) => { p.fields.Email = keep[i]; });
+  // sign-up: email required, and the terms are confirmed in writing
+  assert.equal((await call("/api/pro/join", { business: "No Email", phone: "9015550189", city: "Memphis", agree: "yes" })).status, 400);
+  const ack = sent.find((e) => /Welcome to Hammer Hound: your membership terms/.test(e.subject)); assert.ok(ack); assert.match(ack.text, /renews automatically for 12 months and \$300 is charged/); assert.match(ack.text, /To cancel at any time/);
 }
 
 // ---- insurance reminders and nudges ----

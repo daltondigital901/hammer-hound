@@ -412,7 +412,7 @@
           r.months.length ? h("ul", { class: "summary" }, r.months.map(function (x) { return h("li", {}, [h("a", { class: "link-more", href: "/api/pro/invoice?month=" + x.month, target: "_blank", rel: "noopener", text: x.label + (x.open ? " (so far)" : "") + " · PDF" })]); })) : h("p", { class: "meta", text: "No invoices yet." })], "pp-wide"),
         card([h("h2", { text: "Activity" }), rows.length ? h("div", { class: "table-wrap" }, [h("table", { class: "pp-table" }, [h("thead", {}, [h("tr", {}, [h("th", { text: "Date" }), h("th", { text: "What" }), h("th", { text: "Type" }), h("th", { class: "num", text: "Amount" }), h("th", { class: "num", text: "Balance" })])]), h("tbody", {}, rows)])]) : h("p", { class: "sub", text: "Nothing yet." })], "pp-wide"),
         card([h("h2", { text: "Membership" }), h("div", { class: "fee-offer" }, [h("span", { class: "chip chip--yellow", text: m.inFreeYear ? "First year free" : "Member" }), h("p", { class: "fee-text", text: m.inFreeYear ? "Free until " + day(m.freeUntil) : "$" + m.fee + " a year" })]),
-          h("p", { class: "hint", text: "Membership renews automatically at $" + m.fee + " a year on your card on file, starting " + day(m.freeUntil) + ", until you close your account. We email you before each charge. Close your account in Account to stop it. See the Pro Agreement, section 5.5." })], "pp-wide"),
+          h("p", { class: "hint", text: "Membership renews automatically at $" + m.fee + " a year on your card on file, starting " + day(m.freeUntil) + ", until you close your account. We email you about 35, 18 and 3 days before each charge. To cancel, close your account in Account. See the Pro Agreement, section 5.5." })], "pp-wide"),
       ]);
     });
   }

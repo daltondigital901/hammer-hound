@@ -316,7 +316,36 @@ async function sendEmail(env, to, subject, lines, opts = {}) {
 const APP = "https://hammerhound.com/pros/app/";
 // What verifying gets this pro. A new pro still has free leads; a pro who has used them is told what they actually get back.
 // Membership is free for the first year from sign-up, then $300 a year on the card on file.
-const membershipOf = (f) => { const start = new Date(f["Created At"] || Date.now()), renews = new Date(start); renews.setUTCFullYear(start.getUTCFullYear() + 1); return { fee: 300, freeUntil: renews.toISOString().slice(0, 10), inFreeYear: renews > new Date() }; };
+// Membership is free for the first year from sign-up, then $300 a year on the card on file, on each anniversary.
+export function membershipOf(f, now = today()) {
+  const start = String(f["Created At"] || new Date().toISOString()).slice(0, 10), [y, m, d] = start.split("-").map(Number);
+  const ann = (n) => new Date(Date.UTC(y + n, m - 1, d)).toISOString().slice(0, 10);
+  let n = 1; while (ann(n) < now) n++;
+  return { fee: 300, freeUntil: ann(1), inFreeYear: ann(1) >= now, renews: ann(n), first: n === 1 };
+}
+// Renewal notices are sent about 35, 18 and 3 days before every charge. Those three dates together sit inside
+// each notice window state automatic-renewal laws use: 30 to 60, 25 to 40 and 15 to 45 days before a renewal,
+// 5 to 30 days before, at least 14 days and 3 to 21 days before a free period converts.
+export function membershipNotice(f, now = today()) {
+  if (!f.Email || f["Closed At"]) return null;
+  const mem = membershipOf(f, now), left = Math.round((Date.parse(mem.renews + "T00:00:00Z") - Date.parse(now + "T00:00:00Z")) / 864e5);
+  // Each stage has a hard floor, so a missed day sends late inside the same legal window rather than outside it.
+  const stage = left <= 35 && left >= 31 ? "m35" : left <= 18 && left >= 15 ? "m18" : left <= 3 && left >= 0 ? "m3" : null;
+  return stage ? { key: `${mem.renews}|${stage}`, stage, left, mem } : null;
+}
+function membershipCopy(f, n) {
+  const date = niceDate(n.mem.renews), card = f.Card ? f.Card : "your card on file", days = n.left === 0 ? "today" : n.left === 1 ? "tomorrow" : `in ${n.left} days`;
+  return {
+    subject: `Your Hammer Hound membership renews ${days === "today" ? "today" : "on " + date} for $300`,
+    heading: n.mem.first ? `Your free year ends ${days}.` : `Your membership renews ${days}.`,
+    lines: [`Hi ${f["Business Name"]},`,
+      n.mem.first ? `Your first year of Hammer Hound membership was free. It ends on ${date}.` : `Your Hammer Hound membership year ends on ${date}.`,
+      `On ${date} your membership renews automatically for 12 months and $300 is charged to ${card}. It renews every year on that date until you cancel.`,
+      f.Card ? "" : "There is no card on file for your account. Add one in your wallet before that date, or your ability to claim leads may be paused.",
+      `To cancel and avoid the charge, close your account before ${date}. It takes one minute: open Account in your portal and choose Close account, or reply to this email and we will close it for you. There is no fee to cancel.`,
+      "The membership fee is separate from the leads you buy. The full terms are in section 5.5 of the Pro Agreement: https://hammerhound.com/pro-agreement/"].filter(Boolean),
+    cta: ["Manage or cancel my membership", APP + "#account"] };
+}
 const creditOf = (f) => Math.min(f["Welcome Credit"] || 0, f.Balance || 0);
 const usd = (n) => "$" + (Number.isInteger(n) ? n : n.toFixed(2));
 const prize = (f) => creditOf(f) > 0 ? `your Verified Pro badge and ${usd(creditOf(f))} in free lead credit` : "your Verified Pro badge and the leads in your market";
@@ -559,7 +588,13 @@ async function inboundText(request, env) {
   const r = await purchase(env, pro, { leadId, kind, reload: true, via: "Text" });
   if (r.status !== 200) return reply(`Hammer Hound: not claimed. ${r.error}${r.status === 402 ? " hammerhound.com/pros/app/#wallet" : ""}`);
   const d = r.data, o = d.lead;
-  return reply(`Hammer Hound: ${kind === "exclusive" ? "it's all yours" : "claimed"}. ${o.job}, ${o.place}. Owner: ${o.ownerName || "name not given"}${o.ownerPhone ? ", " + o.ownerPhone : ""}${o.ownerEmail ? ", " + o.ownerEmail : ""}${o.address ? ", " + o.address : ""}. ${usd2(d.price)} from your wallet${d.reloaded ? ` after a ${usd2(d.reloaded)} reload on ${d.card}` : ""}. ${usd2(d.balance)} left. Call now.`);
+  // The whole lead, at once: the pro should be able to call from this text without opening anything.
+  const facts = [["Timing", o.timing], ["Property", o.propertyType], ["Size", o.jobSize]].filter(([, v]) => v && v !== "Not stated").map(([k, v]) => `${k}: ${v}`).join(". ");
+  const text = [`Hammer Hound: ${kind === "exclusive" ? "it's all yours" : "claimed"}. ${o.job}, ${o.place}.`,
+    `OWNER: ${o.ownerName || "name not given"}`, o.ownerPhone ? `PHONE: ${o.ownerPhone.replace(/^(\d{3})(\d{3})(\d{4})$/, "($1) $2-$3")}` : "PHONE: not given", o.ownerEmail ? `EMAIL: ${o.ownerEmail}` : "", o.address ? `ADDRESS: ${o.address}` : "",
+    facts ? facts + "." : "", o.summary ? `JOB: ${o.summary}` : "", o.message ? `THEIR WORDS: ${o.message.replace(/\s+/g, " ").slice(0, 500)}${o.message.length > 500 ? "..." : ""}` : "",
+    `${usd2(d.price)} from your wallet${d.reloaded ? ` after a ${usd2(d.reloaded)} reload on ${d.card}` : ""}. ${usd2(d.balance)} left. Call now.`].filter(Boolean).join("\n");
+  return reply(text.slice(0, 1550));
 }
 
 // ---------- monthly invoices ----------
@@ -722,11 +757,17 @@ async function teaserLeads(env, f) {
 }
 const unsubLink = async (env, id) => `${SITE}/api/unsubscribe?p=${id}&s=${(await hmac(env.SESSION_SECRET, "unsub:" + id)).slice(0, 32)}`;
 export async function sendReminders(env, { dry = false, now = today() } = {}) {
-  const pros = await list(env, HH.base, HH.pros, { filterByFormula: "AND(NOT({Email}=''),OR({Verification}='Verified',{Verification}='Declined'))", pageSize: 100, maxRecords: 300 });
-  const out = { due: 0, sent: 0, held: 0, list: [] };
+  const pros = await list(env, HH.base, HH.pros, { filterByFormula: "NOT({Email}='')", pageSize: 100, maxRecords: 300 });
+  const out = { due: 0, sent: 0, held: 0, membership: 0, list: [] };
   const byTrade = {};   // sample leads are looked up once per trade
   for (const p of pros) {
-    const f = p.fields, r = reminderFor(f, now);
+    const f = p.fields, r = reminderFor(f, now), mn = membershipNotice(f, now);
+    // Membership renewal notices are account notices: they always send, with no unsubscribe.
+    if (mn && f["Membership Notice"] !== mn.key) {
+      const copy = membershipCopy(f, mn);
+      out.list.push({ pro: f["Business Name"], stage: mn.stage, subject: copy.subject });
+      if (!dry && await sendEmail(env, f.Email, copy.subject, copy.lines, { heading: copy.heading, cta: copy.cta })) { await update(env, HH.pros, p.id, { "Membership Notice": mn.key }); out.membership++; }
+    }
     if (!r || f["Reminder Stage"] === r.key) continue;
     if (r.nudge && f["Nudges Off"]) continue;
     // Nudges carry sample leads, so outside test accounts they wait until a mailing address is set for the footer.
@@ -775,15 +816,25 @@ async function api(request, env, path) {
     const city = String(body.city || "").trim().slice(0, 80);
     if (phone.length !== 10 || !business) return fail(400, "Enter your business name and a 10-digit mobile number.");
     if (!city) return fail(400, "Enter the city you work in.");
+    const email = String(body.email || "").trim().toLowerCase().slice(0, 160);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(400, "Enter your email address. We send your receipts and membership notices there.");
     if (body.agree !== "yes") return fail(400, "Tick the box to accept the Pro Agreement before creating your account.");
     if (env.SHADOW_MODE === "true" && !internal(env, phone)) return fail(403, NOT_OPEN);
     if (await proByPhone(env, phone)) return fail(409, "That number already has an account. Sign in instead.");
     const sent = await sendCode(env, phone);
     if (sent.error) return fail(503, sent.error);
     const test = env.SHADOW_MODE === "true";
-    const made = await create(env, HH.pros, { "Business Name": business, Mobile: phone, Trade: TRADE_NAME[body.trade] ? body.trade : "", ZIP: String(body.zip || "").slice(0, 5), City: city, "Email Offers": true,
+    const made = await create(env, HH.pros, { "Business Name": business, Mobile: phone, Trade: TRADE_NAME[body.trade] ? body.trade : "", ZIP: String(body.zip || "").slice(0, 5), City: city, Email: email, "Email Offers": true,
       Agreement: `${AGREEMENT_VERSION} | ${new Date().toISOString()} | ${request.headers.get("CF-Connecting-IP") || "unknown"}`, Test: test, Verification: "Not started", Balance: num(env.WELCOME_CREDIT, 240), "Welcome Credit": num(env.WELCOME_CREDIT, 240), "Free Leads Left": 0, "Text Offers": body.sms === "yes", "Created At": new Date().toISOString() });
     if (num(env.WELCOME_CREDIT, 240) > 0) await post(env, made, { entry: "Welcome credit", type: "Welcome credit", amount: num(env.WELCOME_CREDIT, 240), creditPart: num(env.WELCOME_CREDIT, 240), balanceAfter: num(env.WELCOME_CREDIT, 240) });
+    // Acknowledgment: the membership terms and how to cancel, in writing, kept by the pro.
+    const mem = membershipOf(made.fields);
+    await sendEmail(env, email, "Welcome to Hammer Hound: your membership terms", [`Hi ${business},`, "Your pro account is open. Here is what you agreed to, for your records.",
+      `Membership is free until ${niceDate(mem.freeUntil)}. On that date, and on the same date every year after, it renews automatically for 12 months and $300 is charged to your card on file. It keeps renewing until you cancel.`,
+      "We email you about 35, 18 and 3 days before every charge.",
+      "To cancel at any time, open Account in your portal and choose Close account, or reply to this email. There is no fee to cancel, and if you cancel before a renewal date you are not charged.",
+      `You also start with $${num(env.WELCOME_CREDIT, 240)} of welcome credit for leads, which unlocks when you verify your business.`,
+      "The full terms are the Pro Agreement: https://hammerhound.com/pro-agreement/"], { heading: "Your account is open", cta: ["Open my portal", APP] });
     return json({ next: "code", phone, sent: sent.sent });
   }
   if (path === "/api/pro/sign-in" && request.method === "POST") {

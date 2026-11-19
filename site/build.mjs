@@ -688,7 +688,7 @@ const feeOffer = (dark) => `<div class="fee-offer${dark ? " fee-offer--dark" : "
   <span class="chip chip--yellow">First year free</span>
   <p class="fee-line"><span class="fee-was"><span class="sr-only">Was </span>$300</span><span class="fee-now"><span class="sr-only">now </span>$0</span></p>
   <p class="fee-text">Membership is free for your first year</p>
-  <p class="fee-fine">From year two it renews at $300 a year on your card on file, until you close your account. We email you before each charge. See the <a href="/pro-agreement/">Pro Agreement</a>.</p>
+  <p class="fee-fine">From year two it renews at $300 a year on your card on file, until you close your account. We email you 35, 18 and 3 days before each charge. Cancel any time in your account. See the <a href="/pro-agreement/">Pro Agreement</a>.</p>
 </div>`;
 const landingHeader = `<header class="site-header">
   <div class="wrap header-row">
@@ -710,7 +710,7 @@ const proFaqs = [
   ["Are the leads exclusive?", "They are shared with up to 5 pros, because the owner chooses how many can call. If no one has bought a lead yet, you can buy it exclusive at the exclusive price shown."],
   ["What counts as a bad lead?", "A wrong or disconnected number, a duplicate of a lead you already bought from us, a request that was not real, or a job outside your trades or service area. Report it within the window in the Terms and choose a credit or a refund. An owner who does not pick up, hires someone else or changes their mind is not a bad lead."],
   ["What do I need to get my 3 free leads?", "Create an account, then verify your business: your EIN, one proof of business such as a contractor or business license, and proof of insurance. Your Verified Pro badge and free leads unlock when both documents pass. You can look at leads in your market before you verify."],
-  ["Is there a membership fee?", "Membership is free for your first year. After that it renews automatically at $300 a year, charged to your card on file, until you close your account. We email you before each charge, and you can close your account before then without paying it."],
+  ["Is there a membership fee?", "Membership is free for your first year. After that it renews automatically at $300 a year, charged to your card on file, until you close your account. We email you about 35, 18 and 3 days before each charge, and you can cancel in your account before then without paying it."],
   ["What am I agreeing to?", "The Pro Agreement and Terms of Use, which cover leads, your wallet, the membership fee and refunds. There is no minimum purchase, and you can close your account at any time."],
 ];
 page({
@@ -812,6 +812,7 @@ page({
       <h2>Create your pro account</h2>
       <p class="sub">Create your account and see the leads in your market. Verify your business to unlock your Verified Pro badge and 3 free leads.</p>
       <label class="label" for="j-biz">Business name</label><input class="input" id="j-biz" name="business" type="text" placeholder="Business name" autocomplete="organization" required>
+      <label class="label" for="j-email">Email</label><input class="input" id="j-email" name="email" type="email" placeholder="you@business.com" autocomplete="email" required>
       <label class="label" for="j-phone">Mobile number</label><input class="input" id="j-phone" name="phone" type="tel" placeholder="(555) 555-0100" autocomplete="tel" required>
       <div class="form-row">
         <div><label class="label" for="j-trade">Main trade</label><select class="input" id="j-trade" name="trade" required><option value="">Choose a trade</option>${trades.map((t) => `<option value="${t.slug}">${esc(t.name)}</option>`).join("")}</select></div>
@@ -823,7 +824,7 @@ page({
       <h3 class="agree-title">Pro Agreement</h3>
       <p class="meta">Read it here or <a href="/pro-agreement/" target="_blank" rel="noopener">open it in a new tab</a>. Version of ${esc(agreement.updated)}.</p>
       <div class="agree-box prose" tabindex="0" role="region" aria-label="Pro Agreement">${agreement.html}</div>
-      <p class="renewal-note"><strong>Membership renews automatically.</strong> It is free for your first year. After that it is $300 a year, charged to your card on file on each anniversary of the day you join, until you close your account. We email you at least 30 days before each charge. Close your account any time in Account, at no cost, to stop it.</p>
+      <p class="renewal-note"><strong>Membership renews automatically.</strong> It is free for your first year. After that it is $300 a year, charged to your card on file on each anniversary of the day you join, until you close your account. We email you about 35, 18 and 3 days before each charge. To cancel, close your account in Account or reply to any of our emails. There is no fee to cancel.</p>
       <label class="consent consent--strong"><input type="checkbox" name="agree" value="yes" required><span>I have read and agree to the <a href="/pro-agreement/" target="_blank" rel="noopener">Pro Agreement</a>, the <a href="/terms/" target="_blank" rel="noopener">Terms of Use</a> and the <a href="/privacy/" target="_blank" rel="noopener">Privacy Policy</a>, and I have authority to accept them for this business.</span></label>
       <p class="form-status" data-status role="status" hidden></p>
       <button class="btn btn--yellow btn--block" type="submit">Agree and create account</button>
