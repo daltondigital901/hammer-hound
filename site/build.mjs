@@ -690,7 +690,7 @@ const proFaqs = [
   ["How many leads will I get?", "As many as you want to buy. There is no cap and no minimum. How many are offered depends on how many property owners in your service area ask for your trade."],
   ["Are the leads exclusive?", "They are shared with up to 5 pros, because the owner chooses how many can call. If no one has bought a lead yet, you can buy it exclusive at the exclusive price shown."],
   ["What counts as a bad lead?", "A wrong or disconnected number, a duplicate of a lead you already bought from us, a request that was not real, or a job outside your trades or service area. Report it within the window in the Terms and choose a credit or a refund. An owner who does not pick up, hires someone else or changes their mind is not a bad lead."],
-  ["What do I need to get my 3 free leads?", "Create an account, then upload proof of your business and proof of insurance. Your free leads unlock when both pass."],
+  ["What do I need to get my 3 free leads?", "Create an account, then verify your business: your EIN, one proof of business such as a contractor or business license, and proof of insurance. Your Verified Pro badge and free leads unlock when both documents pass. You can look at leads in your market before you verify."],
   ["Is there a membership fee?", "Membership is $300 a year, and that fee is waived for now while Hammer Hound launches. We will give you notice before it starts, and you can close your account before then without paying it."],
   ["What am I agreeing to?", "The Terms of Use, which cover leads, balances, the membership fee and refunds. There is no minimum purchase, and you can close your account at any time."],
 ];
@@ -791,7 +791,7 @@ page({
     `<h1>Your first 3 leads are free.</h1>${feeOffer(true)}${checks(proBullets, "checks--yellow")}`,
     `<form class="form" data-form="proJoin" novalidate>
       <h2>Create your pro account</h2>
-      <p class="sub">Create your account, then upload proof of business and insurance. Your free leads unlock when both pass.</p>
+      <p class="sub">Create your account and see the leads in your market. Verify your business to unlock your Verified Pro badge and 3 free leads.</p>
       <label class="label" for="j-biz">Business name</label><input class="input" id="j-biz" name="business" type="text" placeholder="Business name" autocomplete="organization" required>
       <label class="label" for="j-phone">Mobile number</label><input class="input" id="j-phone" name="phone" type="tel" placeholder="(555) 555-0100" autocomplete="tel" required>
       <div class="form-row">

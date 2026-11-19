@@ -38,6 +38,7 @@ function matches(table, rec, formula) {
   if ((m = formula.match(/^AND\(\{DD1 Call Number\}>0,\{Rule\}='(.*)'\)$/))) return f["DD1 Call Number"] > 0 && f.Rule === m[1];
   if ((m = formula.match(/^AND\(\{Source\}='DD1 form \(shadow\)',NOT\(\{Rule\}='(.*)'\)\)$/))) return f.Source === "DD1 form (shadow)" && f.Rule !== m[1];
   if ((m = formula.match(/^\{Mobile\}='(.*)'$/))) return f.Mobile === m[1];
+  if ((m = formula.match(/^\{EIN\}='(.*)'$/))) return f.EIN === m[1];
   if ((m = formula.match(/^FIND\('(.*)',\{Purchase\}\)>0$/))) return String(f.Purchase).includes(m[1]);
   if (formula.startsWith("AND({Status}='Offered'")) return f.Status === "Offered" && new Date(f["Offer Ends At"]) > new Date();
   throw new Error("mock: unknown formula " + formula);
