@@ -88,3 +88,10 @@ node test/dev-server.mjs      # full site and portal on http://localhost:8790, t
 
 Not built yet: document storage and the AI document check, text offers and YES replies, card payments,
 the pricing engine, the owner request form's endpoint, and bad-lead scoring.
+
+## Pro verification
+
+- **Browse before verifying.** Any signed-in pro can see open leads and prices. Owner details are never in an offer. Only a verified pro can claim, buy or get offers by text.
+- **To verify:** legal business name, EIN (9 digits, one account per EIN, never a Social Security number), one proof of business from the accepted list in `DOC_TYPES` (`src/worker.js`), a certificate of insurance and its expiry date.
+- **Verified Pro badge** shows on the account page and lapses on the insurance expiry date.
+- **Not built yet:** document storage, the AI document check, failure emails, the public "what Verified means" page and the downloadable badge. Test accounts pass at once; any other account waits as Pending.

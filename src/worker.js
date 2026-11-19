@@ -151,7 +151,17 @@ async function currentPro(env, request) {
 }
 const proByPhone = async (env, phone) => (await list(env, HH.base, HH.pros, { filterByFormula: `{Mobile}='${esc(phone)}'`, maxRecords: 1 }))[0] || null;
 const internal = (env, phone) => isTestPhone(phone) || String(env.INTERNAL_PHONES || "").split(",").map(digits).includes(phone);
-const proView = (p) => ({ business: p.fields["Business Name"], mobile: p.fields.Mobile, trade: p.fields.Trade || "", zip: p.fields.ZIP || "", test: !!p.fields.Test, verification: p.fields.Verification || "Not started", balance: p.fields.Balance || 0, freeLeadsLeft: p.fields["Free Leads Left"] || 0 });
+// Accepted proof-of-business documents. The pro picks one and uploads it.
+export const DOC_TYPES = ["State contractor license", "City or county business license", "Secretary of State registration", "IRS EIN letter (CP 575 or 147C)", "DBA or assumed-name certificate", "State tax registration certificate"];
+const today = () => new Date().toISOString().slice(0, 10);
+// Verified means documents passed and the insurance on file has not expired.
+const isVerified = (p) => p.fields.Verification === "Verified" && (!p.fields["Insurance Expires"] || p.fields["Insurance Expires"] >= today());
+const proView = (p) => ({
+  business: p.fields["Business Name"], mobile: p.fields.Mobile, trade: p.fields.Trade || "", zip: p.fields.ZIP || "", test: !!p.fields.Test,
+  verified: isVerified(p), verification: p.fields.Verification === "Verified" && !isVerified(p) ? "Insurance expired" : p.fields.Verification || "Not started",
+  legalName: p.fields["Legal Business Name"] || "", einLast4: (p.fields.EIN || "").slice(-4), insuranceExpires: p.fields["Insurance Expires"] || "", verifiedAt: p.fields["Verified At"] || "",
+  balance: p.fields.Balance || 0, freeLeadsLeft: p.fields["Free Leads Left"] || 0,
+});
 
 // ---------- leads ----------
 const purchasesFor = (env, key) => list(env, HH.base, HH.purchases, { filterByFormula: `FIND('${esc(key)}',{Purchase})>0`, pageSize: 100 });
@@ -162,7 +172,7 @@ const offerView = (l, taken, exclusiveTaken) => ({
 const leadView = (l) => ({ id: l.id, title: l.fields.Lead, service: l.fields.Service || "", city: l.fields.City || "", ownerName: l.fields["Owner Name"] || "", ownerPhone: l.fields["Owner Phone"] || "", ownerEmail: l.fields["Owner Email"] || "", message: l.fields.Message || "", receivedAt: l.fields["Received At"] });
 
 async function buy(env, pro, { leadId, kind }) {
-  if (pro.fields.Verification !== "Verified") return fail(403, "Verify your business before buying leads.");
+  if (!isVerified(pro)) return fail(403, "Verify your business to claim or buy leads.");
   if (!/^rec[A-Za-z0-9]{14}$/.test(leadId || "") || !["shared", "exclusive"].includes(kind)) return fail(400, "That offer is not valid.");
   let lead;
   try { lead = await at(env, HH.base, HH.leads, { id: leadId }); } catch { return fail(404, "That offer no longer exists."); }
@@ -227,16 +237,23 @@ async function api(request, env, path) {
   if (path === "/api/pro/me") return json({ pro: proView(pro) });
   if (path === "/api/pro/documents" && request.method === "POST") {
     const business = String(body.businessFile || "").slice(0, 200), insurance = String(body.insuranceFile || "").slice(0, 200);
+    const ein = digits(body.ein), legalName = String(body.legalName || "").trim().slice(0, 160), docType = String(body.docType || ""), expires = String(body.insuranceExpires || "");
+    if (!legalName) return fail(400, "Enter your legal business name.");
+    if (ein.length !== 9 || /^(\d)\1{8}$/.test(ein) || ein.startsWith("00")) return fail(400, "Enter your 9-digit EIN. We cannot accept a Social Security number.");
+    if (!DOC_TYPES.includes(docType)) return fail(400, "Choose which proof of business you are uploading.");
     if (!business || !insurance) return fail(400, "Choose both documents: proof of business and proof of insurance.");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(expires) || expires < today()) return fail(400, "Enter the date your insurance expires. It must be in the future.");
+    const sameEin = await list(env, HH.base, HH.pros, { filterByFormula: `{EIN}='${ein}'`, maxRecords: 2 });
+    if (sameEin.some((x) => x.id !== pro.id)) return fail(409, "That EIN already has a Hammer Hound account. Sign in to that account, or contact support if this is a mistake.");
     // Document storage and the AI check are not built yet. Test accounts pass at once so the
     // rest of the flow can be tested; any other account waits as Pending.
-    const fields = { "Proof of Business File": business, "Insurance File": insurance, Verification: pro.fields.Test ? "Verified" : "Pending" };
+    const fields = { EIN: ein, "Legal Business Name": legalName, "Proof of Business Type": docType, "Insurance Expires": expires, "Proof of Business File": business, "Insurance File": insurance, Verification: pro.fields.Test ? "Verified" : "Pending" };
     if (pro.fields.Test) fields["Verified At"] = new Date().toISOString();
     const saved = await update(env, HH.pros, pro.id, fields);
     return json({ pro: proView(saved) });
   }
   if (path === "/api/pro/offers") {
-    if (pro.fields.Verification !== "Verified") return fail(403, "Verify your business to see offers.");
+    // Any signed-in pro can browse. Owner details are never in an offer, and only a verified pro can claim or buy.
     const [leads, mine, all] = await Promise.all([
       list(env, HH.base, HH.leads, { filterByFormula: "AND({Status}='Offered',IS_AFTER({Offer Ends At},NOW()))", "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 50, maxRecords: 50 }),
       purchasesFor(env, pro.id),
@@ -245,7 +262,7 @@ async function api(request, env, path) {
     const mineIds = new Set(mine.map((p) => p.fields.Purchase.split(":")[0]));
     const count = {}, excl = {};
     for (const p of all) { const id = p.fields.Purchase.split(":")[0]; count[id] = (count[id] || 0) + 1; if (p.fields.Kind === "Exclusive") excl[id] = true; }
-    return json({ offers: leads.filter((l) => !mineIds.has(l.id)).map((l) => offerView(l, count[l.id] || 0, !!excl[l.id])), pro: proView(pro) });
+    return json({ offers: leads.filter((l) => !mineIds.has(l.id)).map((l) => offerView(l, count[l.id] || 0, !!excl[l.id])), canBuy: isVerified(pro), pro: proView(pro) });
   }
   if (path === "/api/pro/buy" && request.method === "POST") return buy(env, pro, body);
   if (path === "/api/pro/leads") {

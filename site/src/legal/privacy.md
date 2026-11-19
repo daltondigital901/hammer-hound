@@ -20,7 +20,7 @@ This policy explains what Dalton Enterprises LLC ("Hammer Hound", "we") collects
 | Contact details | Name, mobile number, email, job or business address | You |
 | Request details | Trade, job description, size, budget, timing, property type | You, and your confirmation call |
 | Call and message records | Recordings and transcripts of calls with our AI assistant, text messages with us, call times and outcomes | Your calls and texts with us |
-| Pro business records | Business name, trades, service area, proof-of-business documents, insurance certificates | The Pro |
+| Pro business records | Business name, legal business name, Employer Identification Number (EIN), trades, service area, proof-of-business documents, insurance certificates and their expiry date | The Pro |
 | Payment details | Card type and last four digits, charges, balance history. Full card numbers are held by our payment processor, not by us. | The Pro, our payment processor |
 | Device and usage | IP address, browser, pages viewed, approximate location, cookies | Your device |
 | Support records | Chat messages, tickets, dispute decisions | You |

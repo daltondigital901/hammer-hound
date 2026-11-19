@@ -7,11 +7,13 @@ const call = async (path, body, cookie) => {
   const r = await worker.fetch(new Request("http://x" + path, { method: body ? "POST" : "GET", headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) }, body: body ? JSON.stringify(body) : undefined }), env);
   return { status: r.status, cookie: (r.headers.get("Set-Cookie") || "").split(";")[0], ...(await r.json()) };
 };
+const nextYear = new Date(Date.now() + 365 * 864e5).toISOString().slice(0, 10);
+const docs = (n, o = {}) => ({ legalName: "Test Pro " + n + " LLC", ein: "12-34567" + String(n).padStart(2, "0"), docType: "City or county business license", businessFile: "a.pdf", insuranceFile: "b.pdf", insuranceExpires: nextYear, ...o });
 const signUp = async (n) => {
   const phone = "90155501" + String(n).padStart(2, "0");
   assert.equal((await call("/api/pro/join", { business: "Test Pro " + n, phone, trade: "roofing", zip: "38103" })).next, "code");
   const v = await call("/api/pro/verify-code", { phone, code: "424242" }); assert.equal(v.status, 200);
-  assert.equal((await call("/api/pro/documents", { businessFile: "a.pdf", insuranceFile: "b.pdf" }, v.cookie)).pro.verification, "Verified");
+  assert.equal((await call("/api/pro/documents", docs(n), v.cookie)).pro.verified, true);
   return v.cookie;
 };
 
@@ -41,16 +43,35 @@ assert.equal((await call("/api/pro/join", { business: "Dup", phone: "9015550101"
 assert.equal((await call("/api/pro/verify-code", { phone: "9015550101", code: "000000" })).status, 401, "wrong code refused");
 const unverifiedPhone = "9015550150"; await call("/api/pro/join", { business: "Unverified", phone: unverifiedPhone });
 const u = await call("/api/pro/verify-code", { phone: unverifiedPhone, code: "424242" });
-assert.equal((await call("/api/pro/offers", null, u.cookie)).status, 403, "no offers before verification");
+// an unverified pro can browse but not claim, and sees no owner details
+seedForm(15); await ingest(env);
+const browse = await call("/api/pro/offers", null, u.cookie);
+assert.equal(browse.status, 200); assert.equal(browse.canBuy, false); assert.ok(browse.offers.length > 0);
+assert.ok(!JSON.stringify(browse.offers).match(/owner|Phone|example\.com/i), "browsing shows no owner details");
+assert.equal((await call("/api/pro/buy", { leadId: browse.offers[0].id, kind: "shared" }, u.cookie)).status, 403, "cannot claim before verification");
+// verification rules: EIN, document type, expiry, one account per EIN
+assert.equal((await call("/api/pro/documents", docs(50, { ein: "123-45-678" }), u.cookie)).status, 400, "8 digits is not an EIN");
+assert.equal((await call("/api/pro/documents", docs(50, { ein: "111111111" }), u.cookie)).status, 400);
+assert.equal((await call("/api/pro/documents", docs(50, { docType: "Business card" }), u.cookie)).status, 400, "document type must be on the list");
+assert.equal((await call("/api/pro/documents", docs(50, { insuranceExpires: "2020-01-01" }), u.cookie)).status, 400, "expired insurance refused");
+assert.equal((await call("/api/pro/documents", docs(50, { legalName: "" }), u.cookie)).status, 400);
+assert.equal((await call("/api/pro/documents", docs(1), u.cookie)).status, 409, "one account per EIN");
+const uv = await call("/api/pro/documents", docs(50), u.cookie);
+assert.equal(uv.pro.verified, true); assert.equal(uv.pro.einLast4, "6750"); assert.ok(!JSON.stringify(uv).includes("123456750"), "full EIN never returned");
+assert.equal((await call("/api/pro/offers", null, u.cookie)).canBuy, true);
+// insurance expiry ends verification
+db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === unverifiedPhone).fields["Insurance Expires"] = "2020-01-01";
+const lapsed = await call("/api/pro/me", null, u.cookie); assert.equal(lapsed.pro.verified, false); assert.equal(lapsed.pro.verification, "Insurance expired");
+assert.equal((await call("/api/pro/buy", { leadId: browse.offers[0].id, kind: "shared" }, u.cookie)).status, 403);
 
 // offers hide the owner; buying reveals them
-const offers = (await call("/api/pro/offers", null, a)).offers; assert.equal(offers.length, 4);
+const offers = (await call("/api/pro/offers", null, a)).offers; assert.equal(offers.length, 5);
 assert.ok(!JSON.stringify(offers).match(/owner|Phone|example\.com/i), "offers carry no owner details");
 const L = offers[0].id;
 const first = await call("/api/pro/buy", { leadId: L, kind: "shared" }, a);
 assert.equal(first.free, true); assert.equal(first.balance, 240); assert.equal(first.freeLeadsLeft, 2); assert.ok(first.lead.ownerPhone);
 assert.equal((await call("/api/pro/buy", { leadId: L, kind: "shared" }, a)).status, 409, "cannot buy the same lead twice");
-assert.equal((await call("/api/pro/offers", null, a)).offers.length, 3);
+assert.equal((await call("/api/pro/offers", null, a)).offers.length, 4);
 
 // exclusive only while nobody has bought
 const b = await signUp(2);

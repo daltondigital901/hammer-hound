@@ -32,7 +32,7 @@ You must be at least 18 and able to enter a binding contract. Information you gi
 
 ### 5. Pros
 
-**5.1 Verification.** To buy or receive leads, including free leads, you must create an account and upload proof of your business and proof of insurance. We review these documents using automated tools, including AI, and may ask for more. "Verified" means only that we received documents that appeared valid on the date reviewed. You must keep your licenses and insurance current and tell us within \[5\] days if either lapses.
+**5.1 Verification.** You may create an account and view available leads before you are verified. To claim, buy or receive leads, including free leads, you must give us your legal business name and Employer Identification Number (EIN), and upload one proof of your business and proof of insurance. We accept one account per EIN and do not accept a Social Security number in place of an EIN. We review these documents using automated tools, including AI, and may ask for more. "Verified" and the Verified Pro badge mean only that we received documents that appeared valid on the date reviewed. They are not an endorsement of your work. Verification ends when the insurance on file expires, until you upload a current certificate. We may remove verification if a document was false or is no longer valid, and you must then stop displaying the badge. You must keep your licenses and insurance current and tell us within \[5\] days if either lapses.
 
 **5.2 Leads are shared unless bought exclusive.** A lead may be sold to as many Pros as the property owner allowed, up to 5. If no other Pro has bought a lead, you may buy it at the exclusive price shown, and it will not be sold to anyone else.
 
