@@ -75,7 +75,10 @@ no pro outside the team can join, no card is charged, and Retell is not used.
 | Balance | Test accounts start with a $240 test balance and 3 free leads |
 | Offer window | 24 hours instead of 10 minutes, so there is time to test |
 
-Secrets to set before it runs: `AIRTABLE_TOKEN`, `SESSION_SECRET`, `TEST_CODE`, `ADMIN_KEY`. See `wrangler.jsonc`.
+Deploys run from GitHub Actions (`.github/workflows/deploy.yml`) on every push to `main`. The workflow
+builds the site, runs the API checks, deploys the Worker and copies its secrets from GitHub. Repository
+secrets it needs: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `AIRTABLE_TOKEN`, `SESSION_SECRET`,
+`TEST_CODE`, `ADMIN_KEY`.
 
 ```
 node test/api.test.mjs        # rule checks against the stand-in database
