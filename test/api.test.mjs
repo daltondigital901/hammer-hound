@@ -1,7 +1,8 @@
 // Rule checks for the pro API. Run: node test/api.test.mjs
 import assert from "node:assert/strict";
 import { worker, env, db, seedForm, ingest, SITE_GBP, SITE_CLIENT, ai, stored, sent } from "./dev-server.mjs";
-import { decide, reminderFor, sendReminders, brandEmail } from "../src/worker.js";
+import { decide, reminderFor, sendReminders, brandEmail, tradeOf, AGREEMENT_VERSION } from "../src/worker.js";
+import { readFileSync } from "node:fs";
 import { parseForm } from "../src/worker.js";
 
 const call = async (path, body, cookie) => {
@@ -22,9 +23,10 @@ const send = async (form, cookie) => {
   const r = await worker.fetch(new Request("http://x/api/pro/documents", { method: "POST", headers: { Cookie: cookie }, body: form }), env);
   return { status: r.status, ...(await r.json()) };
 };
+const ALL = "/api/pro/offers?market=all&trade=all";   // older checks look at every open lead
 const signUp = async (n) => {
   const phone = "90155501" + String(n).padStart(2, "0");
-  assert.equal((await call("/api/pro/join", { business: "Test Pro " + n, phone, trade: "roofing", zip: "38103" })).next, "code");
+  assert.equal((await call("/api/pro/join", { city: "Memphis", agree: "yes", business: "Test Pro " + n, phone, trade: "roofing", zip: "38103" })).next, "code");
   const v = await call("/api/pro/verify-code", { phone, code: "424242" }); assert.equal(v.status, 200);
   assert.equal((await send(docs(n), v.cookie)).pro.verified, true);
   return v.cookie;
@@ -49,16 +51,16 @@ const leads = db.tblfA6ivDIlWVp4us; assert.ok(leads.every((l) => l.fields.Test =
 const mail = leads.find((l) => l.fields["Lead Source"].startsWith("Email")); assert.equal(mail.fields.Service, "Quote for a retaining wall"); assert.equal(mail.fields["Owner Phone"], "");
 
 // gates
-assert.equal((await call("/api/pro/join", { business: "Outsider", phone: "9012223333" })).status, 403, "shadow mode blocks non-internal numbers");
+assert.equal((await call("/api/pro/join", { city: "Memphis", agree: "yes", business: "Outsider", phone: "9012223333" })).status, 403, "shadow mode blocks non-internal numbers");
 assert.equal((await call("/api/pro/me")).status, 401);
 const a = await signUp(1);
-assert.equal((await call("/api/pro/join", { business: "Dup", phone: "9015550101" })).status, 409);
+assert.equal((await call("/api/pro/join", { city: "Memphis", agree: "yes", business: "Dup", phone: "9015550101" })).status, 409);
 assert.equal((await call("/api/pro/verify-code", { phone: "9015550101", code: "000000" })).status, 401, "wrong code refused");
-const unverifiedPhone = "9015550150"; await call("/api/pro/join", { business: "Unverified", phone: unverifiedPhone });
+const unverifiedPhone = "9015550150"; await call("/api/pro/join", { city: "Memphis", agree: "yes", business: "Unverified", phone: unverifiedPhone });
 const u = await call("/api/pro/verify-code", { phone: unverifiedPhone, code: "424242" });
 // an unverified pro can browse but not claim, and sees no owner details
 seedForm(15); await ingest(env);
-const browse = await call("/api/pro/offers", null, u.cookie);
+const browse = await call(ALL, null, u.cookie);
 assert.equal(browse.status, 200); assert.equal(browse.canBuy, false); assert.ok(browse.offers.length > 0);
 assert.ok(!JSON.stringify(browse.offers).match(/owner|Phone|example\.com/i), "browsing shows no owner details");
 assert.equal((await call("/api/pro/buy", { leadId: browse.offers[0].id, kind: "shared" }, u.cookie)).status, 403, "cannot claim before verification");
@@ -71,11 +73,11 @@ assert.equal((await send(docs(50, { legalName: "" }), u.cookie)).status, 400);
 assert.equal((await send(docs(1), u.cookie)).status, 409, "one account per EIN");
 const uv = await send(docs(50), u.cookie);
 assert.equal(uv.pro.verified, true); assert.equal(uv.pro.einLast4, "6750"); assert.ok(!JSON.stringify(uv).includes("123456750"), "full EIN never returned");
-assert.equal((await call("/api/pro/offers", null, u.cookie)).canBuy, true);
+assert.equal((await call(ALL, null, u.cookie)).canBuy, true);
 assert.ok([...stored.keys()].some((k) => k.endsWith("-business.pdf")) && [...stored.keys()].some((k) => k.endsWith("-insurance.pdf")), "both files are kept");
 assert.equal(ai.last.headers["anthropic-version"], "2026-10-21"); assert.equal(ai.last.body.model, "claude-sonnet-5-5"); assert.ok(!ai.last.body.tool_choice, "no forced tool call: the live model refuses it"); assert.equal(ai.last.body.output_config.format.type, "json_schema");
 // the AI check: fail, unsure, expired, EIN mismatch, AI down, daily limit, review request
-const v2 = async (n) => { const phone = "90155501" + n; await call("/api/pro/join", { business: "Check " + n, phone }); return (await call("/api/pro/verify-code", { phone, code: "424242" })).cookie; };
+const v2 = async (n) => { const phone = "90155501" + n; await call("/api/pro/join", { city: "Memphis", agree: "yes", business: "Check " + n, phone }); return (await call("/api/pro/verify-code", { phone, code: "424242" })).cookie; };
 const c1 = await v2(60), before = sent.length;
 assert.equal((await send(docs(60, { type: "text/plain" }), c1)).status, 400, "file type refused");
 assert.equal((await send(docs(60, { email: "nope" }), c1)).status, 400, "email required");
@@ -115,13 +117,13 @@ const lapsed = await call("/api/pro/me", null, u.cookie); assert.equal(lapsed.pr
 assert.equal((await call("/api/pro/buy", { leadId: browse.offers[0].id, kind: "shared" }, u.cookie)).status, 403);
 
 // offers hide the owner; buying reveals them
-const offers = (await call("/api/pro/offers", null, a)).offers; assert.equal(offers.length, 5);
+const offers = (await call(ALL, null, a)).offers; assert.equal(offers.length, 5);
 assert.ok(!JSON.stringify(offers).match(/owner|Phone|example\.com/i), "offers carry no owner details");
 const L = offers[0].id;
 const first = await call("/api/pro/buy", { leadId: L, kind: "shared" }, a);
 assert.equal(first.free, true); assert.equal(first.balance, 240); assert.equal(first.freeLeadsLeft, 2); assert.ok(first.lead.ownerPhone);
 assert.equal((await call("/api/pro/buy", { leadId: L, kind: "shared" }, a)).status, 409, "cannot buy the same lead twice");
-assert.equal((await call("/api/pro/offers", null, a)).offers.length, 4);
+assert.equal((await call(ALL, null, a)).offers.length, 4);
 
 // exclusive only while nobody has bought
 const b = await signUp(2);
@@ -139,13 +141,55 @@ assert.equal(leads.find((l) => l.id === L).fields.Status, "Sold out");
 
 // paid purchase after free leads run out, my leads, bad-lead report
 seedForm(20); seedForm(21); seedForm(22); await ingest(env);
-const open = (await call("/api/pro/offers", null, a)).offers;
+const open = (await call(ALL, null, a)).offers;
 await call("/api/pro/buy", { leadId: open[0].id, kind: "shared" }, a); await call("/api/pro/buy", { leadId: open[1].id, kind: "shared" }, a);
 const paid = await call("/api/pro/buy", { leadId: open[2].id, kind: "shared" }, a); assert.equal(paid.free, false); assert.equal(paid.balance, 165);
 const mine = (await call("/api/pro/leads", null, a)).leads; assert.equal(mine.length, 4);
 assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "wrong number" }, a)).status, 200);
 assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "again" }, a)).status, 409);
 assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId }, b)).status, 404, "cannot report another pro's lead");
+// ---- sign-up agreement ----
+assert.equal((await call("/api/pro/join", { business: "No Agree", phone: "9015550190", city: "Memphis" })).status, 400, "the Pro Agreement must be accepted");
+assert.equal((await call("/api/pro/join", { business: "No City", phone: "9015550190", agree: "yes" })).status, 400, "a city is required");
+assert.match(readFileSync(new URL("../site/src/legal/pro-agreement.md", import.meta.url), "utf8"), new RegExp("Last updated: " + AGREEMENT_VERSION), "the recorded version matches the published agreement");
+const agreed = db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550101").fields.Agreement;
+assert.match(agreed, new RegExp("^" + AGREEMENT_VERSION + " \\| \\d{4}-\\d{2}-\\d{2}T.* \\| "), "version, time and IP are recorded");
+assert.match(readFileSync(new URL("../site/dist/pros/join/index.html", import.meta.url), "utf8"), /name="agree" value="yes" required[\s\S]*Agree and create account/, "the join page shows the agreement and the box");
+
+// ---- markets and trades ----
+assert.deepEqual(["Roof leak repair", "Driveway Replacement", "Asphalt driveway", "Water Heater", "Fence Install", "Quote for a retaining wall", "Mystery"].map(tradeOf), ["roofing", "concrete", "asphalt-paving", "water-heaters", "fencing", "masonry", "other"]);
+seedForm(30, { service: "Roof Repair", city: "Memphis" }); seedForm(31, { service: "Fence Install", city: "Memphis" }); seedForm(32, { service: "Roof Repair", city: "Nashville" }); await ingest(env);
+const m1 = await signUp(70);   // trade roofing, city Memphis
+const mineOnly = await call("/api/pro/offers", null, m1);
+assert.equal(mineOnly.filters.market, "Memphis"); assert.equal(mineOnly.filters.trade, "roofing"); assert.ok(mineOnly.offers.length > 0 && mineOnly.offers.every((o) => o.city === "Memphis" && o.trade === "roofing"), "defaults to the pro's market and trade");
+const nash = await call("/api/pro/offers?market=Nashville&trade=all", null, m1); assert.ok(nash.offers.length > 0 && nash.offers.every((o) => o.city === "Nashville"), "another market can be picked");
+const everything = await call("/api/pro/offers?market=all&trade=all", null, m1); assert.equal(everything.offers.length, everything.filters.total); assert.ok(everything.filters.markets.some((k) => k.name === "Nashville") && everything.filters.trades.some((k) => k.slug === "fencing"));
+assert.ok(!JSON.stringify(everything).match(/owner\d|9015550\d{3}@|Sample Owner/), "filters never expose owner details");
+
+// ---- profile, notifications, pipeline, wallet, tickets, closing ----
+assert.equal((await call("/api/pro/profile", { business: "New Name", city: "Nashville", zip: "37201", trade: "nope" }, m1)).status, 400);
+const prof = await call("/api/pro/profile", { business: "New Name", city: "Nashville", zip: "37201", trade: "fencing", extraTrades: ["roofing", "fencing", "bogus"] }, m1);
+assert.equal(prof.pro.city, "Nashville"); assert.equal(prof.pro.trade, "fencing"); assert.deepEqual(prof.pro.extraTrades, ["roofing"]);
+assert.equal((await call("/api/pro/offers", null, m1)).filters.market, "Nashville", "the default market follows the profile");
+assert.equal((await call("/api/pro/notifications", { quietStart: "21:00" }, m1)).status, 400);
+const noti = await call("/api/pro/notifications", { textOffers: true, emailOffers: false, paused: true, dailyCap: "5", quietStart: "21:00", quietEnd: "07:00" }, m1);
+assert.equal(noti.pro.paused, true); assert.equal(noti.pro.dailyCap, 5); assert.equal(noti.pro.quietHours, "21:00-07:00");
+const got = await call("/api/pro/buy", { leadId: everything.offers[0].id, kind: "shared" }, m1); assert.equal(got.free, true);
+const pl = (await call("/api/pro/leads", null, m1)).leads[0]; assert.equal(pl.pipeline, "New");
+assert.equal((await call("/api/pro/lead-status", { purchaseId: pl.purchaseId, pipeline: "Dancing" }, m1)).status, 400);
+assert.equal((await call("/api/pro/lead-status", { purchaseId: pl.purchaseId, pipeline: "Quoted", notes: "Sent quote" }, m1)).status, 200);
+assert.equal((await call("/api/pro/lead-status", { purchaseId: pl.purchaseId, pipeline: "Won" }, a)).status, 404, "cannot change another pro's lead");
+const pl2 = (await call("/api/pro/leads", null, m1)).leads[0]; assert.equal(pl2.pipeline, "Quoted"); assert.equal(pl2.notes, "Sent quote");
+const wal = await call("/api/pro/wallet", null, m1); assert.equal(wal.balance, 240); assert.equal(wal.rows.length, 1); assert.equal(wal.cardsReady, false); assert.equal(wal.membership.waived, true);
+assert.equal((await call("/api/pro/add-funds", { amount: 7 }, m1)).status, 400); assert.equal((await call("/api/pro/add-funds", { amount: 100 }, m1)).pro.balance, 340, "test accounts can add test funds");
+db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550170").fields.Test = false;
+assert.equal((await call("/api/pro/add-funds", { amount: 100 }, m1)).status, 503, "real accounts cannot add funds until Square is connected");
+assert.equal((await call("/api/pro/tickets", { subject: "", message: "" }, m1)).status, 400);
+assert.equal((await call("/api/pro/tickets", { topic: "Billing", subject: "Charge question", message: "Why was I charged?" }, m1)).status, 200);
+assert.equal((await call("/api/pro/tickets", null, m1)).tickets[0].subject, "Charge question"); assert.equal((await call("/api/pro/tickets", null, a)).tickets.length, 0, "tickets are private to the pro");
+assert.equal((await call("/api/pro/close", { confirm: "yes" }, m1)).status, 400); assert.equal((await call("/api/pro/close", { confirm: "CLOSE" }, m1)).status, 200);
+assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed account is signed out"); assert.equal((await call("/api/pro/sign-in", { phone: "9015550170" })).status, 403, "and cannot sign back in");
+
 // ---- insurance reminders and nudges ----
 const R = (f, now) => (reminderFor({ Email: "a@b.co", Verification: "Verified", ...f }, now) || {}).stage;
 assert.equal(R({ "Insurance Expires": "2027-03-31" }, "2027-02-01"), undefined, "nothing more than 30 days out");

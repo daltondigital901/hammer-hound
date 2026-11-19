@@ -108,3 +108,24 @@ the pricing engine, the owner request form's endpoint, and bad-lead scoring.
   - Nudges carry a "Stop these reminders" link (`Nudges Off`). Outside test accounts they are held until `MAILING_ADDRESS` is set in `wrangler.jsonc`.
   - `POST /api/admin/reminders` with `X-Admin-Key` runs it now; send `{"dry":true}` to list what would go without sending.
 - **Not built yet:** the public "what Verified means" page, the downloadable badge.
+
+## Pro portal
+
+`/pros/app/` is one page drawn by `site/src/portal.js`. Bottom tab bar on phones, sidebar from 960px. Each section has its own address (`#home`, `#offers`, ...).
+
+| Section | What it does | API |
+| --- | --- | --- |
+| Home | Next action, counts, wallet and verification at a glance | `/api/pro/offers`, `/api/pro/leads` |
+| Leads | Open leads, filtered by market and trade. Defaults to the pro's own (`City`, `Trade`); `?market=all&trade=all` widens | `/api/pro/offers`, `/api/pro/buy` |
+| My leads | Owner details, stage (New, Contacted, Quoted, Won, Lost), notes, bad-lead report | `/api/pro/leads`, `/api/pro/lead-status`, `/api/pro/report` |
+| Wallet | Balance, activity, membership | `/api/pro/wallet`, `/api/pro/add-funds` |
+| Verification | Verify, renew, download the Verified Pro badge | `/api/pro/documents`, `/api/pro/review` |
+| Business profile | Name, email, market, trades | `/api/pro/profile` |
+| Notifications | Text and email offers, pause, daily cap, quiet hours | `/api/pro/notifications` |
+| Support | Tickets, stored in the `Tickets` table (`tblFDXXEvvlb6F8vN`). Answer by filling `Reply` and setting `Status` to Answered | `/api/pro/tickets` |
+| Account | Agreement on record, sign out, close account | `/api/pro/close` |
+
+- **Square is a placeholder.** `/api/pro/add-funds` has a marked spot for the Square charge. Until `SQUARE_ACCESS_TOKEN` is set, real accounts get "not switched on yet" and test accounts can add test funds. No saved card or auto-reload yet.
+- **Stored but not yet acted on:** pause, daily cap, quiet hours, extra trades and email alerts are saved on the pro. Nothing sends offers yet, so nothing reads them.
+- **Trade matching.** A lead's trade comes from keywords in its `Service` text (`TRADES` in `src/worker.js`). Unmatched leads show as "Other".
+- **Pro Agreement.** `site/src/legal/pro-agreement.md`, shown in full on the join form with a required box. Acceptance is saved in `Agreement` as version, time and IP. Change `AGREEMENT_VERSION` in `src/worker.js` whenever the "Last updated" date changes; a test fails if they differ.
