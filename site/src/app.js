@@ -71,6 +71,23 @@
       send(form.getAttribute("data-form"), data, st, $("button[type=submit]", form), OK[form.getAttribute("data-form")]);
     });
   });
+  // Pro join: carry over the trade and ZIP picked on the landing page.
+  var join = $('form[data-form="proJoin"]');
+  if (join) {
+    var jq = new URLSearchParams(LOC.search);
+    if (jq.get("trade") && $('option[value="' + jq.get("trade").replace(/[^a-z-]/g, "") + '"]', join)) join.elements.trade.value = jq.get("trade");
+    if (jq.get("zip") && validZip(jq.get("zip"))) join.elements.zip.value = jq.get("zip");
+  }
+
+  // Landing page: pin the button to the bottom on phones once the first one has scrolled away.
+  var sticky = $("[data-sticky-cta]"), heroCta = $("[data-hero-cta]"), finalCta = $("[data-final-cta]");
+  if (sticky && heroCta && "IntersectionObserver" in window) {
+    var seen = { hero: true, end: false };
+    var update = function () { sticky.hidden = seen.hero || seen.end; };
+    new IntersectionObserver(function (es) { seen.hero = es[0].isIntersecting; update(); }).observe(heroCta);
+    if (finalCta) new IntersectionObserver(function (es) { seen.end = es[0].isIntersecting; update(); }).observe(finalCta);
+  }
+
   var chat = $("[data-chat]");
   if (chat) chat.addEventListener("click", function () { status($("[data-chat-status]"), "Chat is not open yet. Use the message form for now."); });
 

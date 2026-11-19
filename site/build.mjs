@@ -668,7 +668,12 @@ page({
       <p class="eyebrow eyebrow--yellow">For contractors</p>
       <h1>Real jobs, confirmed by phone. Buy as many as you want.</h1>
       <p class="lead">Done paying for wrong numbers and tire-kickers? We call every property owner before you ever see the lead. You see the job, then decide.</p>
-      <p class="btn-row"><a class="btn btn--yellow btn--lg" href="/pros/join/">Get my 3 free leads</a></p>
+      <form class="lp-form" action="/pros/join/" method="get" data-hero-cta>
+        <label><span class="sr-only">Your trade</span><select class="input" name="trade" required><option value="">Your trade</option>${trades.map((t) => `<option value="${t.slug}">${esc(t.name)}</option>`).join("")}</select></label>
+        <label><span class="sr-only">Business ZIP code</span><input class="input" type="text" name="zip" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" placeholder="Business ZIP code" autocomplete="postal-code"></label>
+        <button class="btn btn--yellow btn--lg" type="submit">Get my 3 free leads</button>
+      </form>
+      <p class="lp-micro">Two minutes to create your account. Free leads unlock once your business and insurance documents pass.</p>
       ${checks(["Every job confirmed by phone", "No cap, no contract", "Bad lead? Credit or refund"], "checks--row checks--yellow")}
     </div>
     <div class="sms" aria-label="Sample lead offer by text">
@@ -685,9 +690,30 @@ ${hazard}
   <div class="wrap">
     <h2>The lead problems you already know, and what we do about each one</h2>
     <div class="grid grid--3 fixes">
-      ${fixes.map(([prob, fix, body]) => `<div class="card fix"><p class="fix-problem">${icon("close", 16)}<span>${esc(prob)}</span></p><h3>${esc(fix)}</h3><p>${esc(body)}</p></div>`).join("")}
+      ${fixes.map(([prob, fix, body]) => `<div class="card fix"><p class="fix-problem">${icon("close", 16)}<span><span class="sr-only">Problem: </span>${esc(prob)}</span></p><h3>${esc(fix)}</h3><p>${esc(body)}</p></div>`).join("")}
     </div>
     <p class="btn-row btn-row--center"><a class="btn btn--black btn--lg" href="/pros/join/">Get my 3 free leads</a></p>
+  </div>
+</section>
+<section class="section section--dark">
+  <div class="wrap trust-grid">
+    <div>
+      <p class="eyebrow eyebrow--yellow">Why you can trust the lead</p>
+      <h2>We do the checking before you pay, and we put the refund rule in writing.</h2>
+      <ul class="trust-list">
+        <li>${icon("phone", 22)}<div><h3>We call the owner first</h3><p>A recorded call confirms the job, the address and the timing before any pro is offered the lead.</p></div></li>
+        <li>${icon("doc", 22)}<div><h3>The rule is in the Terms</h3><p>Wrong number, duplicate, not a real request or outside your area: credit or refund, your choice. It is the <a href="/terms/">Lead Credit Policy</a>, not a sales promise.</p></div></li>
+        <li>${icon("user", 22)}<div><h3>A person, if you ask</h3><p>We review the confirmation call to decide a bad-lead report. If you disagree with the result, ask for a person to review it.</p></div></li>
+        <li>${icon("chat", 22)}<div><h3>Support tied to your account</h3><p>Chat opens a ticket attached to your account and to the lead in question, so you never explain it twice.</p></div></li>
+      </ul>
+      <p class="lp-micro">${esc(site.name)} is a trade name of ${esc(site.legalName)}. Read the <a href="/terms/">Terms of Use</a>, <a href="/privacy/">Privacy Policy</a> and <a href="/sms-policy/">SMS Policy</a>.</p>
+    </div>
+    <div class="card lead-card">
+      <p class="chips"><span class="chip chip--green">${icon("check", 16)} Owner confirmed by phone</span></p>
+      <h3>What you get when you buy a lead</h3>
+      ${checks(["Owner's name and mobile number", "Job address", "Trade and type of job", "Job size, budget range and timing", "The owner's own notes about the job"])}
+      <a class="btn btn--yellow btn--block" href="/pros/join/">Get my 3 free leads</a>
+    </div>
   </div>
 </section>
 <section class="section section--concrete">
@@ -698,6 +724,7 @@ ${hazard}
       ["Get offers by text", "Each offer shows the trade, the area, the job size and the price. No contact details yet, and no charge."],
       ["Reply YES and call", "The lead comes out of your balance and the owner's details arrive in seconds. Call while they are expecting you."],
     ])}
+    <p class="btn-row"><a class="btn btn--black btn--lg" href="/pros/join/">Get my 3 free leads</a></p>
   </div>
 </section>
 <section class="section">
@@ -706,10 +733,10 @@ ${hazard}
     <div class="faq">${proFaqs.map(([q, a]) => `<details><summary>${esc(q)}${icon("chevron", 18)}</summary><p>${esc(a)}</p></details>`).join("")}</div>
   </div>
 </section>
-<section class="pro-band pro-band--yellow">
+<section class="pro-band pro-band--yellow" data-final-cta>
   <div class="wrap pro-band-row"><div><h2>Your first 3 leads are free.</h2><p>See the quality for yourself before you load a dollar.</p></div><a class="btn btn--black btn--lg" href="/pros/join/">Create my pro account</a></div>
 </section>
-<div class="sticky-cta"><a class="btn btn--yellow btn--block" href="/pros/join/">Get my 3 free leads</a></div>`,
+<div class="sticky-cta" data-sticky-cta hidden><a class="btn btn--yellow btn--block" href="/pros/join/">Get my 3 free leads</a></div>`,
 });
 
 const splitShell = (left, right) => `<div class="split"><div class="split-dark"><div class="split-inner">${logo(true, true)}${left}</div></div><div class="split-light"><div class="split-inner">${right}</div></div></div>${hazard}`;
