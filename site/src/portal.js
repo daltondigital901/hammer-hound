@@ -415,6 +415,7 @@
         pro = res.pro;
         if (res.claimed) { claimed(res.claimed); go("leads"); return; }
         walletView();
+        if (res.pendingError) setTimeout(function () { var m = document.querySelector(".pp-main"); if (m) m.insertBefore(note("Card saved, but the reload did not go through: " + res.pendingError, "bad"), m.children[1] || null); }, 400);
         if (res.reloaded) setTimeout(function () { var m = document.querySelector(".pp-main"); if (m) m.insertBefore(note(money0(res.reloaded) + " added to your wallet." + (res.claimError ? " The lead could not be claimed: " + res.claimError : ""), "good"), m.children[1] || null); }, 400);
       }); }; }
       var auto = toggle("w-auto", "Auto-reload", "When your wallet cannot cover a lead, charge my card the reload amount so the claim goes through.", r.autoReload);

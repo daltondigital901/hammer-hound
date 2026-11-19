@@ -48,7 +48,7 @@ function matches(table, rec, formula) {
   if (formula === "AND({Review Status}='Approved',NOT({Credited}))") return f["Review Status"] === "Approved" && !f.Credited;
   if (formula === "AND({Verification}='Verified',NOT({Paused}))") return f.Verification === "Verified" && !f.Paused;
   if (formula === "NOT({Email}='')") return !!f.Email;
-  if (formula.includes("{Alerted}=''")) return f.Status === "Offered" && f.Style === "v2" && Date.now() - Date.parse(f["Received At"]) < 72 * 3600e3 && !f.Alerted;
+  if (formula.includes("{Alerted}=''")) return f.Status === "Offered" && f.Style === "v2" && Date.now() - Date.parse(f["Received At"]) < 12 * 3600e3 && !f.Alerted;
   if (formula.startsWith("AND({Status}='Offered',{Style}='v2'")) return f.Status === "Offered" && f.Style === "v2" && Date.now() - Date.parse(f["Received At"]) < 7 * 864e5;
   if (formula.startsWith("AND(NOT({Style}='v2')")) return f.Style !== "v2" && f.Style !== "failed 3" && (f.Status !== "Rejected" || String(f.Qualified || "").startsWith("No:")) && Date.now() - Date.parse(f["Received At"]) < 7 * 864e5;
   throw new Error("mock: unknown formula " + formula);
@@ -64,6 +64,7 @@ function aiMock(body, headers) {
   // The lead writer: no documents, just the request text.
   if (!body.messages[0].content.some((c) => c.source)) {
     const text = body.messages[0].content[0].text, get = (k) => (text.match(new RegExp(k + ": (.*)")) || [])[1] || "", service = get("Service or subject field"), msg = text.split("Message:\n")[1] || "";
+    if (/UNWRITABLE/.test(msg)) return new Response(JSON.stringify({ content: [{ type: "text", text: "I cannot help with that." }] }), { status: 200 });
     const lead = /SPAM|we offer seo/i.test(msg) ? { is_job_request: false, not_a_job_reason: "vendor pitch" }
       : { is_job_request: true, not_a_job_reason: "", request_type: /invitation to bid|ITB/i.test(msg + service) ? "bid" : "owner", job: service.replace(/^(fwd?|re):\s*/i, "").replace(/\b\w/g, (ch) => ch.toUpperCase()).slice(0, 40), trade: /roof/i.test(service) ? "roofing" : /fenc/i.test(service) ? "fencing" : /wall|brick/i.test(service) ? "masonry" : /driveway/i.test(service) ? "concrete" : /water heater/i.test(service) ? "water-heaters" : "other",
         city: get("City field") || "Baltimore", state: get("City field") ? "TN" : "MD", address: "", property_type: "Home", timing: /this week/i.test(msg) ? "Within a week" : "Not stated", job_size: "Small", summary: "The owner wants " + service.toLowerCase() + ". Call 901-555-0100 or owner1@example.com." };
@@ -90,9 +91,11 @@ globalThis.fetch = async (input, init = {}) => {
   if (method === "GET") {
     let out = rows.filter((r) => matches(table, r, url.searchParams.get("filterByFormula")));
     const sf = url.searchParams.get("sort[0][field]"), dir = url.searchParams.get("sort[0][direction]") === "desc" ? -1 : 1;
-    if (sf) { const key = sf === "Call Number" ? NUM : sf; out = [...out].sort((a, b) => (Number(a.fields[key]) - Number(b.fields[key]) || String(a.fields[key]).localeCompare(String(b.fields[key]))) * dir); }
-    const max = Number(url.searchParams.get("maxRecords") || 100);
-    return ok({ records: out.slice(0, max).map(clean) });
+    if (sf) { const key = sf === "Call Number" ? NUM : sf; const pos = new Map(rows.map((r, i) => [r, i])); out = [...out].sort((a, b) => (Number(a.fields[key]) - Number(b.fields[key]) || String(a.fields[key]).localeCompare(String(b.fields[key])) || pos.get(a) - pos.get(b)) * dir); }
+    // Like Airtable: at most pageSize (100) rows a call, with an offset while more remain, up to maxRecords in all.
+    const max = Number(url.searchParams.get("maxRecords") || Infinity), size = Math.min(Number(url.searchParams.get("pageSize") || 100), 100), from = Number(url.searchParams.get("offset") || 0);
+    out = out.slice(0, max); const page = out.slice(from, from + size);
+    return ok({ records: page.map(clean), ...(from + size < out.length ? { offset: String(from + size) } : {}) });
   }
   if (method === "POST") { const made = body.records.map((r) => ({ id: rid(), fields: { ...r.fields } })); rows.push(...made); return ok({ records: made.map(clean) }); }
   if (method === "PATCH") { const r = rows.find((x) => x.id === id); Object.assign(r.fields, body.fields); return ok(clean(r)); }

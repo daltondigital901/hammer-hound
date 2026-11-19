@@ -370,9 +370,13 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
 
   // the lead writer stops after three failed runs on the same lead
   const { styleLeads } = await import("../src/worker.js"), LD = db.tblfA6ivDIlWVp4us;
-  LD.push({ id: "recSTUCKLEAD000001", fields: { Lead: "raw", Service: "raw", Status: "Offered", "Offer Ends At": new Date(Date.now() + 1e7).toISOString(), "Received At": new Date().toISOString() } });
-  ai.down = true; for (let i = 0; i < 3; i++) await styleLeads(env); const calls = ai.calls; await styleLeads(env); ai.down = false;
+  LD.push({ id: "recSTUCKLEAD000001", fields: { Lead: "raw", Service: "raw", Message: "UNWRITABLE", Status: "Offered", "Received At": new Date().toISOString() } });
+  for (let i = 0; i < 3; i++) await styleLeads(env); const calls = ai.calls; await styleLeads(env);
   assert.equal(LD.at(-1).fields.Style, "failed 3"); assert.equal(ai.calls, calls, "no more AI calls are spent on it");
+  // an AI outage is not counted against the leads waiting: they are written when it comes back
+  LD.push({ id: "recOUTAGELEAD00001", fields: { Lead: "raw", Service: "Roof Repair", Message: "Leak.", Status: "Offered", "Received At": new Date().toISOString() } }, { id: "recOUTAGELEAD00002", fields: { Lead: "raw", Service: "Roof Repair", Message: "Leak.", Status: "Offered", "Received At": new Date().toISOString() } });
+  ai.down = true; for (let i = 0; i < 4; i++) assert.equal((await styleLeads(env)).outage, true); ai.down = false;
+  assert.equal(LD.at(-1).fields.Style, undefined); await styleLeads(env); assert.equal(LD.at(-1).fields.Style, "v2"); assert.equal(LD.at(-2).fields.Style, "v2");
 
   // "I want more leads here": recorded once per pro, market and trade
   const MR = db.tbl315ujQMh1PHOi8;
@@ -380,6 +384,26 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   assert.equal((await call("/api/pro/market-request", { market: "Tupelo", trade: "roofing", total: 12 }, dc)).status, 200); await call("/api/pro/market-request", { market: "tupelo", trade: "roofing" }, dc);
   assert.equal(MR.length, 1); assert.deepEqual([MR[0].fields.Request, MR[0].fields.Market, MR[0].fields.Trade, MR[0].fields["Open Leads Then"], MR[0].fields.Verified], ["Roofing · Tupelo", "Tupelo", "roofing", 12, true]);
   assert.equal((await call("/api/pro/market-request", { market: "Tupelo", trade: "roofing" }, null)).status, 401);
+}
+
+// ---- second audit: paging past 100 rows, and a reload settling a declined one ----
+{
+  const { creditBacks } = await import("../src/worker.js"), PU = db.tblJnYLq2aCiCVU1C, P = db.tbl9bEGuy8DPkkee7, before = PU.length;
+  // 130 approved reports for one pro: every one is found, though Airtable hands back 100 rows a call
+  const pp = { id: "recPAGINGPRO000001".slice(0, 17), fields: { "Business Name": "Paging Pro", Email: "pg@example.com", Balance: 0, Test: true } }; P.push(pp);
+  for (let i = 0; i < 130; i++) PU.push({ id: "recPG" + String(i).padStart(12, "0"), fields: { Purchase: `recNOLEAD${String(i).padStart(8, "0")}:${pp.id}`, Price: 1, "Review Status": "Approved", Kind: "Shared" } });
+  const { default: w } = await import("../src/worker.js");
+  let total = 0; for (let i = 0; i < 8 && total < 130; i++) total += await creditBacks(env);
+  assert.equal(total, 130); assert.equal(pp.fields.Balance, 130);
+  const adminCookie = (await (async () => { const r = await worker.fetch(new Request("https://hammerhound.com/api/admin/sign-in", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: env.ADMIN_KEY }) }), env); return (r.headers.get("Set-Cookie") || "").split(";")[0]; })());
+  const ov = await (await worker.fetch(new Request("https://hammerhound.com/api/admin/overview", { headers: { Cookie: adminCookie } }), env)).json();
+  assert.ok(ov.stats.pros.total === P.length, "the admin overview counts every pro");
+  PU.splice(before, 130); P.splice(P.indexOf(pp), 1); db.tblZ2EIWCgOb36JR2 = db.tblZ2EIWCgOb36JR2.filter((r) => r.fields["Pro ID"] !== pp.id);
+  // a reload that succeeds clears one left waiting by a declined card, so saving a card later cannot charge twice
+  const c2 = await signUp(88), p2 = P.find((p) => p.fields.Mobile === "9015550188");
+  await call("/api/pro/card", { action: "save" }, c2); p2.fields["Pending Reload"] = `150|||${new Date().toISOString()}`;
+  assert.equal((await call("/api/pro/add-funds", { amount: 150 }, c2)).status, 200); assert.equal(p2.fields["Pending Reload"], "");
+  const bal2 = p2.fields.Balance; assert.equal((await call("/api/pro/card", { action: "save" }, c2)).reloaded, 0); assert.equal(p2.fields.Balance, bal2);
 }
 
 // ---- hot leads, older leads, and bid invitations ----

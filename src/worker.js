@@ -35,7 +35,15 @@ async function at(env, base, table, { method = "GET", query, body, id } = {}) {
   if (!r.ok) throw new Error(`Airtable ${method} ${table} ${r.status}: ${(await r.text()).slice(0, 300)}`);
   return r.json();
 }
-const list = async (env, base, table, query) => (await at(env, base, table, { query })).records;
+// Airtable returns at most 100 rows a call. This follows the offset until maxRecords (or 5,000) is reached.
+const list = async (env, base, table, query) => {
+  const out = [], cap = Math.min(Number(query && query.maxRecords) || 5000, 5000);
+  for (let offset; ;) {
+    const r = await at(env, base, table, { query: offset ? { ...query, offset } : query });
+    out.push(...r.records);
+    if (!(offset = r.offset) || out.length >= cap) return out.slice(0, cap);
+  }
+};
 const create = async (env, table, fields) => (await at(env, HH.base, table, { method: "POST", body: { records: [{ fields }], typecast: true } })).records[0];
 const update = (env, table, id, fields) => at(env, HH.base, table, { method: "PATCH", id, body: { fields, typecast: true } });
 
@@ -58,7 +66,7 @@ const selectName = (v) => (v && v.name) || v || "";
 async function purgeOldRule(env) {
   const old = await list(env, HH.base, HH.leads, { filterByFormula: `AND({Source}='DD1 form (shadow)',NOT({Rule}='${RULE}'))`, pageSize: 100, maxRecords: 200, "fields[]": ["Lead"] });
   if (!old.length) return 0;
-  const bought = new Set((await list(env, HH.base, HH.purchases, { pageSize: 100, maxRecords: 1000, "fields[]": ["Purchase"] })).map((p) => String(p.fields.Purchase).split(":")[0]));
+  const bought = new Set((await list(env, HH.base, HH.purchases, { pageSize: 100, "fields[]": ["Purchase"] })).map((p) => String(p.fields.Purchase).split(":")[0]));
   const ids = old.map((r) => r.id).filter((id) => !bought.has(id));
   for (let i = 0; i < ids.length; i += 10) await at(env, HH.base, HH.leads, { method: "DELETE", query: { "records[]": ids.slice(i, i + 10) } });
   // Kept because bought: stamp them so they are not looked at again.
@@ -115,8 +123,8 @@ export async function ingest(env) {
       "DD1 Call Number": Number(c[DD1.f.number]), Source: "DD1 form (shadow)", Rule: RULE, "Site GBP": selectName((sites[(c[DD1.f.siteLink] || [])[0]] || {})[DD1.s.gbp]) || "Blank", Test: true, Status: "Offered", Style: "",
       "Owner Name": f.Name || "", "Owner Phone": digits(f.Phone), "Owner Email": f.Email || "", City: f.City || "", Service: what.slice(0, 200),
       Message: (f.Message || "").slice(0, 5000), "Site Name": c[DD1.f.site] || "", "Lead Source": `${email ? "Email" : "Form"} · ${selectName(c[DD1.f.source]) || "Unknown"}`,
-      "Received At": c[DD1.f.created], "Max Pros": num(env.SHADOW_MAX_PROS, 5),
-      "Shared Price": num(env.SHADOW_SHARED_PRICE, 75), "Exclusive Price": num(env.SHADOW_EXCLUSIVE_PRICE, 225), "Offer Ends At": new Date(Date.parse(c[DD1.f.created]) + LEAD_DAYS * 864e5).toISOString(),
+      "Received At": c[DD1.f.created] || new Date().toISOString(), "Max Pros": num(env.SHADOW_MAX_PROS, 5),
+      "Shared Price": num(env.SHADOW_SHARED_PRICE, 75), "Exclusive Price": num(env.SHADOW_EXCLUSIVE_PRICE, 225), "Offer Ends At": new Date((Date.parse(c[DD1.f.created]) || Date.now()) + LEAD_DAYS * 864e5).toISOString(),
     } };
   });
   for (let i = 0; i < records.length; i += 10) await at(env, HH.base, HH.leads, { method: "POST", body: { records: records.slice(i, i + 10), typecast: true } });
@@ -430,6 +438,8 @@ const purchasesFor = (env, key) => list(env, HH.base, HH.purchases, { filterByFo
 // The uniform part of a lead: the same fields, in the same order, for every lead. No owner details.
 // A lead is hot for 72 hours after the owner sent it, then stays open as an older lead until it is a week old.
 export const HOT_HOURS = 72, LEAD_DAYS = 7;
+// "New lead" alerts go out only for leads that came in during the last 12 hours, so a re-copy or a late rewrite never texts pros about old requests.
+export const ALERT_HOURS = 12;
 const ageHours = (l) => (Date.now() - Date.parse(l.fields["Received At"] || 0)) / 3600e3;
 const isHot = (l) => ageHours(l) < HOT_HOURS, isOpenAge = (l) => ageHours(l) < LEAD_DAYS * 24;
 // Older leads are priced down by age. Percent of the hot price for each day past the hot window:
@@ -487,7 +497,7 @@ async function topUp(env, pro, amount, via, ctx = {}) {
   if (limit) { const used = await chargedThisMonth(env, pro); if (used + amount > limit) return { ok: false, error: `That would pass your monthly limit of ${usd2(limit)} (${usd2(used)} charged so far this month). Raise the limit in your wallet to continue.` }; }
   const paid = await chargeCard(env, pro, amount);
   if (!paid.ok) { if (paid.declined) paid.link = await cardDeclined(env, pro, amount, ctx); return paid; }
-  const after = cents((pro.fields.Balance || 0) + amount), saved = await update(env, HH.pros, pro.id, { Balance: after });
+  const after = cents((pro.fields.Balance || 0) + amount), saved = await update(env, HH.pros, pro.id, { Balance: after, ...(pro.fields["Pending Reload"] ? { "Pending Reload": "" } : {}) });
   await post(env, saved, { entry: `${via === "Auto-reload" ? "Auto-reload" : "Reload"} on ${pro.fields.Card || "card on file"}`, type: "Top-up", amount, balanceAfter: after, paymentId: paid.id, via });
   await sendEmail(env, saved.fields.Email, `Receipt: ${usd2(amount)} added to your Hammer Hound wallet`, [`Hi ${saved.fields["Business Name"]},`, `We charged ${usd2(amount)} to ${pro.fields.Card || "your card on file"} and added it to your wallet.`, `Wallet balance: ${usd2(after)}. Reference: ${paid.id}.`,
     via === "Auto-reload" ? "This was an automatic reload. You can change the amount, set a monthly limit or turn it off in your wallet." : via === "Text" ? "This reload covered a lead you claimed by text." : ""].filter(Boolean), { heading: `${usd2(amount)} added to your wallet`, cta: ["Open my wallet", APP + "#wallet"] });
@@ -584,9 +594,9 @@ const inQuiet = (q) => { const m = String(q || "").match(/^(\d\d):(\d\d)-(\d\d):
 export const offerText = (l, f) => `Hammer Hound: New ${(TRADE_NAME[l.Trade] || "job").toUpperCase()} lead in ${placeOf(l) || "your area"}. ${l.Job || "Job"}. Size: ${l["Job Size"] || "Not stated"}. Timing: ${l.Timing || "Not stated"}. ${usd(l["Shared Price"])} from your wallet${f.Card ? `; if it is short we charge ${f.Card}` : ""}. Reply YES to claim, ONLY for exclusive (${usd(l["Exclusive Price"])}). Reply STOP to opt out.`;
 // Tells matching pros about leads that have just opened: same market, a trade they take, verified, not paused.
 export async function alertPros(env) {
-  const fresh = await list(env, HH.base, HH.leads, { filterByFormula: `AND({Status}='Offered',{Style}='${STYLE}',IS_AFTER({Received At},DATEADD(NOW(),-${HOT_HOURS},'hours')),{Alerted}='')`, "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 5, maxRecords: 5 });
+  const fresh = await list(env, HH.base, HH.leads, { filterByFormula: `AND({Status}='Offered',{Style}='${STYLE}',IS_AFTER({Received At},DATEADD(NOW(),-${ALERT_HOURS},'hours')),{Alerted}='')`, "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 5, maxRecords: 5 });
   if (!fresh.length) return { leads: 0, texts: 0, emails: 0 };
-  const pros = await list(env, HH.base, HH.pros, { filterByFormula: "AND({Verification}='Verified',NOT({Paused}))", pageSize: 100, maxRecords: 300 });
+  const pros = await list(env, HH.base, HH.pros, { filterByFormula: "AND({Verification}='Verified',NOT({Paused}))", pageSize: 100, maxRecords: 5000 });
   const out = { leads: fresh.length, texts: 0, emails: 0 }, day = today();
   for (const lead of fresh) {
     const l = lead.fields; let told = 0;
@@ -692,7 +702,7 @@ async function invoiceFile(env, inv) {
 export async function sendInvoices(env, { month, dry = false } = {}) {
   const prev = new Date(); prev.setUTCDate(0);
   month = /^\d{4}-\d{2}$/.test(month || "") ? month : monthOf(prev);
-  const pros = await list(env, HH.base, HH.pros, { filterByFormula: "NOT({Email}='')", pageSize: 100, maxRecords: 300 });
+  const pros = await list(env, HH.base, HH.pros, { filterByFormula: "NOT({Email}='')", pageSize: 100, maxRecords: 5000 });
   const out = { month, sent: 0, none: 0, list: [] };
   for (const p of pros) {
     if (p.fields["Last Invoice"] === month || out.sent >= 25) continue;
@@ -774,9 +784,11 @@ export async function styleLeads(env) {
   const done = await Promise.allSettled(batch.map((l) => styleOne(env, l)));
   const failed = done.filter((d) => d.status === "rejected");
   // Count the misses on the lead itself. After three it is left for a person, so one bad lead cannot burn AI calls every minute.
-  for (let i = 0; i < done.length; i++) if (done[i].status === "rejected") { const n = (Number(String(batch[i].fields.Style || "").replace("failed ", "")) || 0) + 1; await update(env, HH.leads, batch[i].id, { Style: `failed ${n}` }).catch(() => {}); }
+  // An outage (every lead in the run failed, or the error is a rate limit, a server error or a timeout) is not the lead's fault and is not counted.
+  const why = failed.length ? String(failed[0].reason && failed[0].reason.message || failed[0].reason) : "", outage = failed.length === done.length && (done.length > 1 || /\b(429|5\d\d):|timed? ?out|abort|fetch failed|network/i.test(why));
+  for (let i = 0; i < done.length && !outage; i++) if (done[i].status === "rejected") { const n = (Number(String(batch[i].fields.Style || "").replace("failed ", "")) || 0) + 1; await update(env, HH.leads, batch[i].id, { Style: `failed ${n}` }).catch(() => {}); }
   if (failed.length) console.error("lead writer failed:", String(failed[0].reason && failed[0].reason.message || failed[0].reason).slice(0, 300));
-  return { styled: done.length - failed.length, failed: failed.length, waiting: todo.length - batch.length };
+  return { styled: done.length - failed.length, failed: failed.length, outage, waiting: todo.length - batch.length };
 }
 // Only leads in the uniform format are ever offered.
 const OPEN = `AND({Status}='Offered',{Style}='${STYLE}',IS_AFTER({Received At},DATEADD(NOW(),-${LEAD_DAYS},'days')))`;
@@ -834,7 +846,7 @@ async function teaserLeads(env, f) {
 }
 const unsubLink = async (env, id) => `${SITE}/api/unsubscribe?p=${id}&s=${(await hmac(env.SESSION_SECRET, "unsub:" + id)).slice(0, 32)}`;
 export async function sendReminders(env, { dry = false, now = today() } = {}) {
-  const pros = await list(env, HH.base, HH.pros, { filterByFormula: "NOT({Email}='')", pageSize: 100, maxRecords: 300 });
+  const pros = await list(env, HH.base, HH.pros, { filterByFormula: "NOT({Email}='')", pageSize: 100, maxRecords: 5000 });
   const out = { due: 0, sent: 0, held: 0, membership: 0, list: [] };
   const byTrade = {};   // sample leads are looked up once per trade
   for (const p of pros) {
@@ -888,10 +900,10 @@ const dayCT = (iso) => (iso ? new Date(iso).toLocaleDateString("en-CA", { timeZo
 const sum = (rows, f) => cents(rows.reduce((n, r) => n + (Number(f(r)) || 0), 0));
 async function adminOverview(env, realOnly) {
   const [prosAll, leads, buysAll, ledgerAll, ticketsAll, requestsAll] = await Promise.all([
-    list(env, HH.base, HH.pros, { pageSize: 100, maxRecords: 500 }),
-    list(env, HH.base, HH.leads, { "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 400, "fields[]": ["Lead", "Job", "Trade", "City", "State", "Status", "Style", "Qualified", "Received At"] }),
-    list(env, HH.base, HH.purchases, { "sort[0][field]": "Bought At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 500 }),
-    list(env, HH.base, HH.ledger, { "sort[0][field]": "At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 500 }),
+    list(env, HH.base, HH.pros, { pageSize: 100, maxRecords: 5000 }),
+    list(env, HH.base, HH.leads, { "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 2000, "fields[]": ["Lead", "Job", "Trade", "City", "State", "Status", "Style", "Qualified", "Received At"] }),
+    list(env, HH.base, HH.purchases, { "sort[0][field]": "Bought At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 2000 }),
+    list(env, HH.base, HH.ledger, { "sort[0][field]": "At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 2000 }),
     list(env, HH.base, HH.tickets, { "sort[0][field]": "Created At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 200 }),
     list(env, HH.base, HH.requests, { "sort[0][field]": "At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 500 }),
   ]);
@@ -1085,9 +1097,9 @@ async function api(request, env, path) {
   if (path === "/api/pro/offers") {
     // Any signed-in pro can browse. Owner details are never in an offer, and only a verified pro can claim or buy.
     const [leads, mine, all] = await Promise.all([
-      list(env, HH.base, HH.leads, { filterByFormula: OPEN, "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 100 }),
+      list(env, HH.base, HH.leads, { filterByFormula: OPEN, "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 1000 }),
       purchasesFor(env, pro.id),
-      list(env, HH.base, HH.purchases, { "sort[0][field]": "Bought At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 500, "fields[]": ["Purchase", "Kind"] }),
+      list(env, HH.base, HH.purchases, { "sort[0][field]": "Bought At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 2000, "fields[]": ["Purchase", "Kind"] }),
     ]);
     const mineIds = new Set(mine.map((p) => p.fields.Purchase.split(":")[0]));
     const count = {}, excl = {};
@@ -1235,11 +1247,13 @@ export default {
     // Invoices: the 1st to the 3rd of each month, for the month before. Each pro gets a month once.
     if (event.cron === "13 15 1-3 * *") { ctx.waitUntil(sendInvoices(env).then((r) => console.log("invoices", JSON.stringify({ month: r.month, sent: r.sent })), (e) => console.error("invoices failed:", String(e && e.message || e)))); return; }
     // Every minute: copy and write new leads (shadow mode), tell matching pros, and return money for approved reports.
+    // Each job is on its own: a failure copying leads must not stop alerts or credit-backs.
+    const step = (name, fn) => fn().catch((e) => console.error(`${name} failed:`, String(e && e.message || e)));
     const run = async () => {
-      if (env.SHADOW_MODE === "true") console.log("ingest", JSON.stringify(await ingest(env)));
-      const alerts = await alertPros(env); if (alerts.leads) console.log("alerts", JSON.stringify(alerts));
-      const back = await creditBacks(env); if (back) console.log("credit backs", back);
+      if (env.SHADOW_MODE === "true") await step("ingest", async () => console.log("ingest", JSON.stringify(await ingest(env))));
+      await step("alerts", async () => { const alerts = await alertPros(env); if (alerts.leads) console.log("alerts", JSON.stringify(alerts)); });
+      await step("credit backs", async () => { const back = await creditBacks(env); if (back) console.log("credit backs", back); });
     };
-    ctx.waitUntil(run().catch((e) => console.error("minute job failed:", String(e && e.message || e))));
+    ctx.waitUntil(run());
   },
 };

@@ -189,3 +189,13 @@ Every lead is rewritten by the AI into one format before any pro sees it (`style
 ## Which Dalton Digital leads are copied (rule v3)
 
 A valid form or email, not assigned to a client, on a site with `Active Clients` = 0 (`fldVIdJR2dkmKXRf0`) and `Open Prospects` = 0 (`fldCTOMq0Mk1jUb3S`). Sites with a GBP are included for now. Each lead stores the site's `Needs GBP?` value in `Site GBP` (`fld9ylese5Vwa3twG`). To stop copying GBP sites later, set `EXCLUDE_GBP_SITES` to `"true"` in `wrangler.jsonc`. Changing the rule version removes unbought leads copied under the old rule and copies the last `BACKFILL_DAYS` days again.
+
+## Second audit fixes
+
+- `list()` now follows Airtable's `offset`. Before, every list stopped at 100 rows whatever `maxRecords` said, which would have cut off reminders, renewal notices, invoices, alerts and the admin counts past 100 pros or rows.
+- Open leads loads up to 1,000 (it was capped at 100; a week of leads from all unsold sites is already more than that).
+- The lead writer does not count an AI outage (every lead in the run failed, or a 429, 5xx or timeout) as one of a lead's three tries.
+- The three every-minute jobs (copy, alerts, credit-backs) run independently.
+- "New lead" alerts only go out for leads received in the last `ALERT_HOURS` (12).
+- Any successful reload clears a reload left waiting by a declined card.
+- A DD1 row with no created time can no longer stop the copy.
