@@ -272,7 +272,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   const yes = await sms("+19012223333", " yes ");
   for (const part of [/claimed\. Roof Repair, Memphis, TN\./, /OWNER: Sample Owner 60/, /PHONE: \(901\) 555-0160/, /EMAIL: owner60@example\.com/, /Timing: Within a week\. Property: Home\. Size: Small\./, /JOB: The owner wants roof repair/, /THEIR WORDS: Leak over the kitchen\. Need someone this week\./, /Call now\./]) assert.match(yes.text, part, "the YES reply carries the whole lead");
   assert.equal(real.fields.Balance, 90); assert.deepEqual(db.tblZ2EIWCgOb36JR2.slice(-2).map((r) => [r.fields.Type, r.fields.Via]), [["Top-up", "Text"], ["Lead", "Text"]]);
-  assert.match((await sms("+19012223333", "YES")).text, /not claimed\. You already have this lead/);
+  { const again = (await sms("+19012223333", "YES")).text; assert.match(again, /already claimed by Real Roofing\. No charge\. Here are the details\./); assert.match(again, /OWNER: Sample Owner 60/); }
   assert.match((await sms("+19012223333", "balance")).text, /wallet has \$90\.00/); assert.match((await sms("+19019990000", "YES")).text, /not on a pro account/);
   assert.ok(!/\$\d/.test(yes.text), "the lead text shows no charge and no wallet balance");
   assert.match(sent.at(-1).subject, /Receipt: \$150\.00 added/, "the card charge is confirmed by an emailed receipt instead");
@@ -496,6 +496,71 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   assert.equal((await adm("/api/admin/overview", null, null, hdr(token({ ...good, aud: ["other"] })))).status, 401); assert.equal((await adm("/api/admin/overview", null, null, hdr(token({ ...good, exp: 1 })))).status, 401);
   assert.equal((await adm("/api/admin/overview", null, null, hdr(token(good, generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey)))).status, 401, "a token signed by another key is refused");
   delete env.ACCESS_TEAM; delete env.ACCESS_AUD; delete env.ACCESS_CERTS;
+}
+
+// ---- team members: invite, pay authority with a double confirm, claims by text ----
+{
+  Object.assign(env, { TWILIO_ACCOUNT_SID: "AC1", TWILIO_AUTH_TOKEN: "tok", TWILIO_FROM: "+19015550000" });
+  const P = db.tbl9bEGuy8DPkkee7, T = db.tblAxauFF33UVS2gV, LOG = db.tblTYo9QOk8hTwQad, LD = db.tblfA6ivDIlWVp4us, PU = db.tblJnYLq2aCiCVU1C, { alertPros } = await import("../src/worker.js");
+  const sms = async (from, body) => { const url = "https://hammerhound.com/api/sms/inbound", p = { Body: body, From: from }; const r = await worker.fetch(new Request(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Twilio-Signature": createHmac("sha1", "tok").update(url + Object.keys(p).sort().map((k) => k + p[k]).join("")).digest("base64") }, body: new URLSearchParams(p) }), env); return r.text(); };
+  const c = await signUp(91), me = P.find((p) => p.fields.Mobile === "9015550191"), acts = () => LOG.filter((r) => r.fields["Account ID"] === me.id).map((r) => r.fields.Action);
+  // adding: a name and a number nobody else uses; the invite goes out by text
+  assert.equal((await call("/api/pro/team/add", { name: "", phone: "9017771111" }, c)).status, 400); assert.equal((await call("/api/pro/team/add", { name: "Me", phone: "9015550191" }, c)).status, 409);
+  const t0 = texts.length, added = await call("/api/pro/team/add", { name: "Dana", phone: "(901) 777-1111" }, c); assert.equal(added.members.length, 1); assert.equal(added.max, 5);
+  const dana = T.at(-1); assert.deepEqual([dana.fields["Gets Texts"], dana.fields["Can Pay"], dana.fields.Portal], [true, false, false]);
+  assert.equal(texts[t0].to, "+19017771111"); assert.match(texts[t0].body, /Test Pro 91 added you to their account to get lead texts\. Reply YES to accept/); assert.deepEqual(acts(), ["Added", "Invited"]);
+  assert.equal((await call("/api/pro/team/add", { name: "Dana again", phone: "9017771111" }, c)).status, 409, "one number, one account");
+  // pay authority cannot be given before the person accepts, and the invite is accepted from their own phone
+  assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes" }, c)).status, 409);
+  assert.match(await sms("+19017771111", "hello"), /Reply YES to get lead texts/); assert.match(await sms("+19017771111", "Yes"), /you're in\. You'll get lead texts for Test Pro 91/); assert.ok(dana.fields["Opted In At"]); assert.equal(acts().at(-1), "Opted in");
+  // a new lead is texted to the member; without pay authority a YES only asks the owner
+  for (const l of LD) l.fields.Alerted = "x"; seedForm(74, { service: "Roof Repair", city: "Memphis" }); await ingest(env); const lead = LD.at(-1), t1 = texts.length; await alertPros(env);
+  const toDana = texts.slice(t1).find((m) => m.to === "+19017771111"); assert.match(toDana.body, /New ROOFING lead in Memphis, TN.*Reply YES to ask Test Pro 91 to claim it/); assert.ok(!/\$75/.test(toDana.body)); assert.equal(dana.fields["Last Offer"].split("|")[0], lead.id);
+  const m0 = sent.length, bal0 = me.fields.Balance; assert.match(await sms("+19017771111", "YES"), /you cannot claim leads by text on this account\. We told Test Pro 91/); assert.equal(me.fields.Balance, bal0); assert.ok(sent.slice(m0).some((e) => e.subject === "Dana wants a lead"));
+  // the double confirm: on screen, then a code texted to the owner. Both are needed, and a wrong code grants nothing
+  assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true }, c)).status, 400, "the first confirmation is required");
+  const step = await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes" }, c); assert.equal(step.next, "code"); assert.equal(dana.fields["Can Pay"], false);
+  assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes", code: "111111" }, c)).status, 401); assert.equal(dana.fields["Can Pay"], false);
+  assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true, code: "424242" }, c)).status, 400, "a code alone is not enough");
+  const m1 = sent.length, granted = await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes", code: "424242" }, c);
+  assert.equal(granted.members[0].canPay, true); assert.ok(granted.members[0].payGrantedAt); assert.match(dana.fields["Pay Granted By"], /^Owner · \(901\) 555-0191$/);
+  const grantRow = LOG.at(-1).fields; assert.equal(grantRow.Action, "Pay authority granted"); assert.ok(grantRow.At && grantRow.IP && grantRow.Agreement); assert.match(grantRow.Detail, /Confirmed twice/);
+  assert.ok(sent.slice(m1).some((e) => /Dana can now claim and pay for leads by text/.test(e.subject) && /responsible for every charge/.test(e.html)));
+  // now a YES claims it: the full details go to the person who claimed, and the claim is recorded against them
+  const m2 = sent.length, claim = await sms("+19017771111", "YES"); assert.match(claim, /claimed\. Roof Repair, Memphis, TN\.\nOWNER: Sample Owner 74\nPHONE: \(901\) 555-0174/); assert.ok(!/\$\d/.test(claim));
+  assert.equal(me.fields.Balance, bal0 - 75); const buyRow = PU.find((p) => p.fields.Purchase === `${lead.id}:${me.id}`); assert.equal(buyRow.fields["Claimed By"], "Dana · (901) 777-1111");
+  assert.equal(db.tblZ2EIWCgOb36JR2.filter((r) => r.fields["Pro ID"] === me.id).at(-1).fields.By, "Dana · (901) 777-1111"); assert.ok(sent.slice(m2).some((e) => e.subject === "Dana claimed a lead" && e.to === me.fields.Email));
+  assert.equal((await call("/api/pro/leads", null, c)).leads.find((l) => l.id === lead.id).claimedBy, "Dana");
+  // a second person on the team, and the owner, see who claimed it and the details, with no second charge
+  await call("/api/pro/team/add", { name: "Eli", phone: "9017772222" }, c); const eli = T.at(-1); await sms("+19017772222", "YES"); eli.fields["Last Offer"] = lead.id + "|x";
+  const second = await sms("+19017772222", "YES"); assert.match(second, /already claimed by Dana\. No charge\. Here are the details\. Roof Repair, Memphis, TN\.\nOWNER: Sample Owner 74/); assert.equal(me.fields.Balance, bal0 - 75);
+  assert.equal(PU.filter((p) => p.fields.Purchase === `${lead.id}:${me.id}`).length, 1);
+  // the owner's daily limit for a member
+  assert.equal((await call("/api/pro/team/update", { memberId: dana.id, getsTexts: true, portal: false, dailyCap: 5 }, c)).status, 400);
+  assert.equal((await call("/api/pro/team/update", { memberId: dana.id, getsTexts: true, portal: false, dailyCap: 100 }, c)).members[0].dailyCap, 100); assert.equal(acts().at(-1), "Settings changed");
+  seedForm(75, { service: "Roof Repair", city: "Memphis" }); await ingest(env); dana.fields["Last Offer"] = LD.at(-1).id + "|x";
+  assert.match(await sms("+19017771111", "YES"), /would pass your daily limit of \$100 \(\$75\.00 claimed today\)/); assert.equal(me.fields.Balance, bal0 - 75);
+  // turning it off is one step, takes effect at once, and is logged
+  assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: false }, c)).members[0].canPay, false); assert.equal(acts().at(-1), "Pay authority revoked"); assert.ok(dana.fields["Pay Revoked At"]);
+  assert.match(await sms("+19017771111", "YES"), /you cannot claim leads by text/);
+  // STOP from the member's phone stops their texts only
+  assert.match(await sms("+19017771111", "STOP"), /<Response><\/Response>/); assert.equal(dana.fields["Gets Texts"], false); assert.equal(acts().at(-1), "Opted out");
+  // signing in: only when the owner switched it on, and a member cannot reach money, settings or the team
+  await call("/api/pro/team/add", { name: "Sam", phone: "9015550177" }, c); const sam = T.at(-1);
+  assert.equal((await call("/api/pro/team/invite", { memberId: sam.id }, c)).status, 503); assert.equal((await call("/api/pro/team/test-optin", { memberId: sam.id }, c)).members.find((m) => m.id === sam.id).optedInAt !== "", true);
+  assert.equal((await call("/api/pro/sign-in", { phone: "9015550177" })).status, 404);
+  await call("/api/pro/team/update", { memberId: sam.id, getsTexts: true, portal: true, dailyCap: "" }, c);
+  assert.equal((await call("/api/pro/sign-in", { phone: "9015550177" })).status, 200); const sv = await call("/api/pro/verify-code", { phone: "9015550177", code: "424242" }); assert.equal(sv.status, 200); assert.equal(sv.pro.member.name, "Sam"); assert.equal(sv.pro.business, "Test Pro 91");
+  const sc = sv.cookie; assert.equal((await call("/api/pro/me", null, sc)).pro.member.canPay, false); assert.equal((await call(ALL, null, sc)).status, 200); assert.equal((await call("/api/pro/leads", null, sc)).status, 200);
+  for (const path of ["/api/pro/wallet", "/api/pro/team"]) assert.equal((await call(path, null, sc)).status, 403);
+  for (const [path, body] of [["/api/pro/card", { action: "save" }], ["/api/pro/add-funds", { amount: 150 }], ["/api/pro/team/authority", { memberId: sam.id, on: true, confirm: "yes", code: "424242" }], ["/api/pro/close", { confirm: "CLOSE" }], ["/api/pro/notifications", {}]]) assert.equal((await call(path, body, sc)).status, 403, path + " is owner only");
+  assert.equal((await call("/api/pro/buy", { leadId: LD.at(-1).id, kind: "shared" }, sc)).status, 403, "no pay authority, no claim in the portal either"); assert.equal(sam.fields["Can Pay"], false);
+  await call("/api/pro/team/update", { memberId: sam.id, getsTexts: true, portal: false, dailyCap: "" }, c); assert.equal((await call("/api/pro/me", null, sc)).status, 401, "switching sign-in off ends the member's session");
+  // five at most; removing frees the number and ends everything for that person
+  await call("/api/pro/team/add", { name: "Four", phone: "9017773333" }, c); await call("/api/pro/team/add", { name: "Five", phone: "9017774444" }, c);
+  assert.equal((await call("/api/pro/team/add", { name: "Six", phone: "9017775555" }, c)).status, 400);
+  const left = await call("/api/pro/team/remove", { memberId: dana.id }, c); assert.equal(left.members.length, 4); assert.ok(dana.fields["Removed At"]); assert.match(await sms("+19017771111", "YES"), /this number is not on a pro account/);
+  assert.ok((await call("/api/pro/team", null, c)).log.length >= 10);
 }
 
 // ---- insurance reminders and nudges ----

@@ -96,6 +96,8 @@
       section("Bad-lead reports", q.reports.length, q.reports.map(reportCard), "No reports are open."),
       section("Support tickets", q.tickets.length, q.tickets.map(ticketCard), "No tickets are open."),
       section("Declined cards", q.declinedCards.length, q.declinedCards.map(declinedCard), "No card has been declined in the last 48 hours."),
+      section("Pay authority changes", d.authority.length, [h("p", { class: "meta", text: "Every time an owner let a team member charge their account by text, or took that away. Newest first." }),
+        h("div", { class: "hq-table" }, [h("table", {}, [h("thead", {}, [h("tr", {}, ["Change", "Account", "Team member", "By", "When", "IP"].map(function (t) { return h("th", { text: t }); }))]), h("tbody", {}, d.authority.map(function (e) { return h("tr", {}, [h("td", { text: e.action.replace("Pay authority ", "") }), h("td", { text: e.account }), h("td", { text: e.member + " " + phone(e.mobile) }), h("td", { text: e.by }), h("td", { text: when(e.at) }), h("td", { text: e.ip })]); }))])])], "No owner has changed pay authority yet."),
       section("Where pros want more leads", d.marketRequests.length, [h("p", { class: "meta", text: "Each row is a market and trade where a pro found no open leads and pressed the button. Most-requested first." }),
         h("div", { class: "hq-table" }, [h("table", {}, [h("thead", {}, [h("tr", {}, ["Market", "Trade", "Pros asking", "Verified", "Open leads now", "Last asked"].map(function (t, i) { return h("th", { class: i > 1 && i < 5 ? "num" : null, text: t }); }))]), h("tbody", {}, rows)])])], "No pro has asked for more leads yet."),
     ]);

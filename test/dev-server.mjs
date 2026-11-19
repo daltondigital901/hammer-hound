@@ -11,7 +11,7 @@ const DIST = join(ROOT, "site", "dist");
 const TYPES = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".ico": "image/x-icon", ".json": "application/json", ".webmanifest": "application/manifest+json", ".xml": "application/xml", ".txt": "text/plain" };
 
 // ---- in-memory Airtable ----
-export const db = { tblW1A0iKDAd111iI: [], tblfA6ivDIlWVp4us: [], tbl9bEGuy8DPkkee7: [], tblJnYLq2aCiCVU1C: [], tbl9olHmI5p746DOe: [], tblFDXXEvvlb6F8vN: [], tblZ2EIWCgOb36JR2: [], tbl315ujQMh1PHOi8: [] };
+export const db = { tblW1A0iKDAd111iI: [], tblfA6ivDIlWVp4us: [], tbl9bEGuy8DPkkee7: [], tblJnYLq2aCiCVU1C: [], tbl9olHmI5p746DOe: [], tblFDXXEvvlb6F8vN: [], tblZ2EIWCgOb36JR2: [], tbl315ujQMh1PHOi8: [], tblAxauFF33UVS2gV: [], tblTYo9QOk8hTwQad: [] };
 let seq = 0;
 const rid = () => "rec" + String(++seq).padStart(14, "0");
 const NUM = "fldfJJYK166eGNfxw";
@@ -42,6 +42,10 @@ function matches(table, rec, formula) {
   if ((m = formula.match(/^\{EIN\}='(.*)'$/))) return f.EIN === m[1];
   if ((m = formula.match(/^\{Pro ID\}='(.*)'$/))) return f["Pro ID"] === m[1];
   if ((m = formula.match(/^\{Key\}='(.*)'$/))) return f.Key === m[1];
+  if ((m = formula.match(/^\{Account ID\}='(.*)'$/))) return f["Account ID"] === m[1];
+  if ((m = formula.match(/^AND\(\{Account ID\}='(.*)',\{Removed At\}=BLANK\(\)\)$/))) return f["Account ID"] === m[1] && !f["Removed At"];
+  if ((m = formula.match(/^AND\(\{Mobile\}='(.*)',\{Removed At\}=BLANK\(\)\)$/))) return f.Mobile === m[1] && !f["Removed At"];
+  if (formula === "AND({Gets Texts},NOT({Opted In At}=BLANK()),{Removed At}=BLANK())") return !!f["Gets Texts"] && !!f["Opted In At"] && !f["Removed At"];
 
   if ((m = formula.match(/^FIND\('(.*)',\{Purchase\}\)>0$/))) return String(f.Purchase).includes(m[1]);
   if ((m = formula.match(/^AND\(\{Pro ID\}='(.*?)',\{Month\}='(.*?)'(,\{Type\}='Top-up')?\)$/))) return f["Pro ID"] === m[1] && f.Month === m[2] && (!m[3] || f.Type === "Top-up");

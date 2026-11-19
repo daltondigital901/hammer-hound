@@ -203,3 +203,16 @@ A valid form or email, not assigned to a client, on a site with `Active Clients`
 ## Older leads need a card; welcome credit is for hot leads
 
 Older leads (3 to 7 days) are left out of `/api/pro/offers` until the pro has a card on file (`olderShown`), and `purchase()` refuses them without one. Welcome credit only pays for hot leads: an older lead is paid from the pro's own funds (balance minus welcome credit), reloading the card if those are short. Pro Agreement 5.3 says the same.
+
+## Team members
+
+Up to 5 people per account (`TEAM_MAX`), in the `Team` table (`tblAxauFF33UVS2gV`). Every change is a row in `Authority Log` (`tblTYo9QOk8hTwQad`), which is only ever added to.
+
+- **Three switches per person:** `Gets Texts`, `Can Pay`, `Portal`. Plus an optional `Daily Cap` in dollars of leads claimed per day.
+- **Opt-in.** Adding a person texts them an invite. No lead texts go to that number until it replies YES (`Opted In At`). STOP from their phone turns off their texts only.
+- **Pay authority.** `POST /api/pro/team/authority`. On needs `confirm: "yes"` (the on-screen confirmation) and then `code` (texted to the owner's phone, tied to that member). It records `Pay Granted At`, `Pay Granted By`, the IP address and the agreement version, and emails the owner. Off is one call and takes effect at once. Never tick `Can Pay` by hand in Airtable.
+- **Texts.** A member with pay authority who replies YES claims the lead from the account's wallet (reloading the card if short) and gets the full details. Without it, YES emails the owner. If the account already has the lead, the reply says who claimed it and gives the details, with no charge.
+- **Records.** Purchases `Claimed By` (`fld8YlscgF8DURZnv`) and Ledger `By` (`fldAiHF7HQGdyIIRh`). The owner is emailed on every claim a member makes.
+- **Sign-in.** A member with `Portal` on signs in with their own number and sees Open leads, My leads and Support. Wallet, card, documents, settings and the team return 403.
+- **API.** `GET /api/pro/team`, `POST /api/pro/team/add|update|invite|authority|remove|test-optin` (owner only).
+- Pro Agreement 5.2.5 covers it.

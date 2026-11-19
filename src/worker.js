@@ -16,7 +16,7 @@ const DD1 = {
 // Leads from these sites are never offered: GBP leads cannot be sold.
 const HAS_GBP = new Set(["Has One!", "Has One - Needs Final Owner Confirmed", "Has One - Needs Owner Transferred", "Has One, Doesn't Need Reviews", "First Suspension Appeal", "Second Suspension Appeal", "Suspended", "Soft Suspension", "Needs deletion"]);
 const RULE = "v3";
-const HH = { base: "app0PSwGlQyC6q7FW", leads: "tblfA6ivDIlWVp4us", pros: "tbl9bEGuy8DPkkee7", purchases: "tblJnYLq2aCiCVU1C", tickets: "tblFDXXEvvlb6F8vN", ledger: "tblZ2EIWCgOb36JR2", requests: "tbl315ujQMh1PHOi8" };
+const HH = { base: "app0PSwGlQyC6q7FW", leads: "tblfA6ivDIlWVp4us", pros: "tbl9bEGuy8DPkkee7", purchases: "tblJnYLq2aCiCVU1C", tickets: "tblFDXXEvvlb6F8vN", ledger: "tblZ2EIWCgOb36JR2", requests: "tbl315ujQMh1PHOi8", team: "tblAxauFF33UVS2gV", authLog: "tblTYo9QOk8hTwQad" };
 const NOT_OPEN = "Hammer Hound is not open yet, so nothing was sent. Check back soon.";
 
 const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers } });
@@ -154,10 +154,11 @@ async function sendCode(env, phone) {
 }
 // Five wrong codes, or five codes requested, locks an account for the rest of the hour.
 const guardOf = (f) => { const [h, fails, sends] = String(f["Sign-in Guard"] || "").split("|"), hour = new Date().toISOString().slice(0, 13); return h === hour ? { hour, fails: Number(fails) || 0, sends: Number(sends) || 0 } : { hour, fails: 0, sends: 0 }; };
-const guardSave = (env, id, g) => update(env, HH.pros, id, { "Sign-in Guard": `${g.hour}|${g.fails}|${g.sends}` });
+const guardSave = (env, id, g, table = HH.pros) => update(env, table, id, { "Sign-in Guard": `${g.hour}|${g.fails}|${g.sends}` });
 const LOCKED = "Too many attempts on this account. Try again in an hour.";
-async function sessionCookie(env, proId) {
-  const exp = Date.now() + 30 * 864e5, body = `${proId}.${exp}`;
+// A team member's session names both the account and the member: "<pro id>-<member id>".
+async function sessionCookie(env, proId, memberId) {
+  const exp = Date.now() + 30 * 864e5, body = `${proId}${memberId ? "-" + memberId : ""}.${exp}`;
   return `hh_s=${body}.${await hmac(env.SESSION_SECRET, body)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`;
 }
 async function currentPro(env, request) {
@@ -165,7 +166,13 @@ async function currentPro(env, request) {
   if (!m) return null;
   const [id, exp, sig] = m[1].split(".");
   if (!id || !exp || Number(exp) < Date.now() || sig !== (await hmac(env.SESSION_SECRET, `${id}.${exp}`))) return null;
-  try { const p = await at(env, HH.base, HH.pros, { id }); return p.fields["Closed At"] ? null : p; } catch { return null; }
+  const [proId, memberId] = id.split("-");
+  try {
+    const p = await at(env, HH.base, HH.pros, { id: proId });
+    if (p.fields["Closed At"]) return null;
+    if (memberId) { const m = await at(env, HH.base, HH.team, { id: memberId }); if (m.fields["Removed At"] || !m.fields.Portal || m.fields["Account ID"] !== proId) return null; p.member = m; }
+    return p;
+  } catch { return null; }
 }
 const proByPhone = async (env, phone) => (await list(env, HH.base, HH.pros, { filterByFormula: `{Mobile}='${esc(phone)}'`, maxRecords: 1 }))[0] || null;
 const internal = (env, phone) => isTestPhone(phone) || String(env.INTERNAL_PHONES || "").split(",").map(digits).includes(phone);
@@ -192,6 +199,7 @@ const sameCity = (a, b) => String(a || "").trim().toLowerCase() === String(b || 
 // Verified means documents passed and the insurance on file has not expired.
 const isVerified = (p) => p.fields.Verification === "Verified" && (!p.fields["Insurance Expires"] || p.fields["Insurance Expires"] >= today());
 const proView = (p) => ({
+  member: p.member ? { name: p.member.fields.Member, canPay: !!p.member.fields["Can Pay"] } : null,
   business: p.fields["Business Name"], mobile: p.fields.Mobile, trade: p.fields.Trade || "", zip: p.fields.ZIP || "", test: !!p.fields.Test,
   verified: isVerified(p), verification: p.fields.Verification === "Verified" && !isVerified(p) ? "Insurance expired" : p.fields.Verification || "Not started",
   legalName: p.fields["Legal Business Name"] || "", einLast4: (p.fields.EIN || "").slice(-4), insuranceExpires: p.fields["Insurance Expires"] || "", verifiedAt: p.fields["Verified At"] || "",
@@ -466,7 +474,7 @@ const RELOADS = [150, 300, 600];
 const reloadUnit = (f) => Math.max(75, Math.round(f["Reload Amount"] || 150));
 async function post(env, pro, e) {
   return create(env, HH.ledger, { Entry: String(e.entry).slice(0, 200), Pro: [pro.id], "Pro ID": pro.id, Type: e.type, Amount: cents(e.amount), "Credit Part": cents(e.creditPart || 0), "Balance After": cents(e.balanceAfter),
-    Month: monthOf(e.at), At: e.at || new Date().toISOString(), "Purchase ID": e.purchaseId || "", "Payment ID": e.paymentId || "", Via: e.via || "System", Test: !!pro.fields.Test });
+    Month: monthOf(e.at), At: e.at || new Date().toISOString(), "Purchase ID": e.purchaseId || "", "Payment ID": e.paymentId || "", Via: e.via || "System", By: e.by || "", Test: !!pro.fields.Test });
 }
 // Charges the card on file. PLACEHOLDER: the Square call goes here (SQUARE_ACCESS_TOKEN, SQUARE_LOCATION_ID, the customer
 // and card IDs kept in "Card Token", and an idempotency key). Until then only a test account's test card can be charged.
@@ -504,16 +512,122 @@ async function topUp(env, pro, amount, via, ctx = {}) {
   return { ok: true, pro: saved, paymentId: paid.id };
 }
 
+// ---------- team members ----------
+// People under one account, each with their own number. Three switches: gets lead texts, can claim and pay by text, can sign in.
+// Pay authority is only switched on by the owner, with a second confirmation by a code texted to the owner, and every change is logged.
+export const TEAM_MAX = 5;
+const fmtPhone = (p) => String(p || "").replace(/^(\d{3})(\d{3})(\d{4})$/, "($1) $2-$3");
+const teamOf = (env, proId) => list(env, HH.base, HH.team, { filterByFormula: `AND({Account ID}='${proId}',{Removed At}=BLANK())`, pageSize: 100, maxRecords: 50 });
+const memberByPhone = async (env, phone) => (await list(env, HH.base, HH.team, { filterByFormula: `AND({Mobile}='${esc(phone)}',{Removed At}=BLANK())`, maxRecords: 1 }))[0] || null;
+const memberView = (m) => ({ id: m.id, name: m.fields.Member || "", mobile: m.fields.Mobile || "", getsTexts: !!m.fields["Gets Texts"], canPay: !!m.fields["Can Pay"], portal: !!m.fields.Portal, dailyCap: m.fields["Daily Cap"] || 0,
+  invitedAt: m.fields["Invited At"] || "", optedInAt: m.fields["Opted In At"] || "", payGrantedAt: m.fields["Can Pay"] ? m.fields["Pay Granted At"] || "" : "" });
+const who = (m) => `${m.fields.Member} · ${fmtPhone(m.fields.Mobile)}`;
+const logTeam = (env, pro, m, action, by, extra = {}) => create(env, HH.authLog, { Entry: `${action}: ${m.fields.Member} ${fmtPhone(m.fields.Mobile)}`, Action: action, "Account ID": pro.id, Account: pro.fields["Business Name"] || "", "Member ID": m.id, Member: m.fields.Member || "", Mobile: m.fields.Mobile || "",
+  By: by, At: new Date().toISOString(), IP: extra.ip || "", Agreement: AGREEMENT_VERSION, Detail: String(extra.detail || "").slice(0, 300), Test: !!pro.fields.Test });
+const inviteText = (pro) => `Hammer Hound: ${pro.fields["Business Name"]} added you to their account to get lead texts. Reply YES to accept. Msg and data rates may apply. Reply STOP to opt out.`;
+async function sendInvite(env, pro, m) { return twilioReady(env) && !isTestPhone(m.fields.Mobile) ? sendText(env, m.fields.Mobile, inviteText(pro)) : false; }
+// The second confirmation: a code texted to the OWNER's phone, tied to this one member.
+const grantCode = (env, pro, m, step) => codeFor(env, `grant:${m.id}:${pro.fields.Mobile}`, step);
+async function sendGrantCode(env, pro, m) {
+  const phone = pro.fields.Mobile;
+  if (isTestPhone(phone)) return env.TEST_CODE ? { sent: "test" } : { error: "Test sign-in is off: the TEST_CODE secret is not set." };
+  if (!twilioReady(env)) return { error: "Texting is not set up yet, so the confirmation code cannot be sent." };
+  const code = await grantCode(env, pro, m, Math.floor(Date.now() / 600e3));
+  return (await sendText(env, phone, `Hammer Hound: ${code} is your code to let ${m.fields.Member} claim and pay for leads by text on your account. If you did not ask for this, do not share it.`)) ? { sent: "text" } : { error: "The code could not be texted. Try again." };
+}
+async function grantCodeOk(env, pro, m, code) {
+  if (isTestPhone(pro.fields.Mobile)) return !!env.TEST_CODE && code === env.TEST_CODE;
+  const step = Math.floor(Date.now() / 600e3);
+  return code === (await grantCode(env, pro, m, step)) || code === (await grantCode(env, pro, m, step - 1));
+}
+async function teamApi(request, env, pro, path, body) {
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown", owner = `Owner · ${fmtPhone(pro.fields.Mobile)}`;
+  const team = await teamOf(env, pro.id), out = async () => json({ members: (await teamOf(env, pro.id)).map(memberView), max: TEAM_MAX, card: pro.fields.Card || "", test: !!pro.fields.Test,
+    log: (await list(env, HH.base, HH.authLog, { filterByFormula: `{Account ID}='${pro.id}'`, "sort[0][field]": "At", "sort[0][direction]": "desc", pageSize: 20, maxRecords: 20 })).map((r) => ({ entry: r.fields.Entry, by: r.fields.By || "", at: r.fields.At })) });
+  if (path === "/api/pro/team" && request.method === "GET") return out();
+  if (request.method !== "POST") return fail(404, "Not found.");
+  if (path === "/api/pro/team/add") {
+    const name = String(body.name || "").trim().slice(0, 80), phone = digits(body.phone);
+    if (!name || phone.length !== 10) return fail(400, "Enter the person's name and a 10-digit mobile number.");
+    if (team.length >= TEAM_MAX) return fail(400, `An account can have up to ${TEAM_MAX} team members.`);
+    if (phone === pro.fields.Mobile || await proByPhone(env, phone) || await memberByPhone(env, phone)) return fail(409, "That number is already on a Hammer Hound account. Each number can be on one account.");
+    const m = await create(env, HH.team, { Member: name, Account: [pro.id], "Account ID": pro.id, Mobile: phone, "Gets Texts": true, "Can Pay": false, Portal: false, "Invited At": new Date().toISOString(), Test: !!pro.fields.Test });
+    await logTeam(env, pro, m, "Added", owner, { ip });
+    if (await sendInvite(env, pro, m)) await logTeam(env, pro, m, "Invited", "System", { detail: "Invite text sent" });
+    return out();
+  }
+  const m = team.find((x) => x.id === body.memberId);
+  if (!m) return fail(404, "That person is not on your team.");
+  if (path === "/api/pro/team/update") {
+    const cap = body.dailyCap === "" || body.dailyCap == null ? null : Math.round(Number(body.dailyCap));
+    if (cap !== null && !(cap >= 10 && cap <= 5000)) return fail(400, "Set a daily limit between $10 and $5,000, or leave it empty for none.");
+    const next = { "Gets Texts": !!body.getsTexts, Portal: !!body.portal, "Daily Cap": cap }, was = `texts ${m.fields["Gets Texts"] ? "on" : "off"}, sign-in ${m.fields.Portal ? "on" : "off"}, daily limit ${m.fields["Daily Cap"] ? "$" + m.fields["Daily Cap"] : "none"}`;
+    await update(env, HH.team, m.id, next);
+    await logTeam(env, pro, m, "Settings changed", owner, { ip, detail: `Now: texts ${next["Gets Texts"] ? "on" : "off"}, sign-in ${next.Portal ? "on" : "off"}, daily limit ${cap ? "$" + cap : "none"}. Was: ${was}` });
+    return out();
+  }
+  if (path === "/api/pro/team/invite") {
+    if (m.fields["Opted In At"]) return fail(409, "This person has already accepted.");
+    if (!(await sendInvite(env, pro, m))) return fail(503, isTestPhone(m.fields.Mobile) ? "Test numbers cannot be texted. Use the test button to mark them as accepted." : "The invite could not be texted. Texting is not set up yet.");
+    await update(env, HH.team, m.id, { "Invited At": new Date().toISOString() }); await logTeam(env, pro, m, "Invited", owner, { ip, detail: "Invite text sent again" });
+    return out();
+  }
+  // Test accounts only: stand in for the member replying YES to the invite, since test numbers cannot be texted.
+  if (path === "/api/pro/team/test-optin") {
+    if (!pro.fields.Test) return fail(403, "Only test accounts can do this.");
+    if (!m.fields["Opted In At"]) { await update(env, HH.team, m.id, { "Opted In At": new Date().toISOString() }); await logTeam(env, pro, m, "Opted in", "Test button", { ip }); }
+    return out();
+  }
+  if (path === "/api/pro/team/remove") {
+    await update(env, HH.team, m.id, { "Removed At": new Date().toISOString(), "Gets Texts": false, "Can Pay": false, Portal: false, ...(m.fields["Can Pay"] ? { "Pay Revoked At": new Date().toISOString() } : {}) });
+    if (m.fields["Can Pay"]) await logTeam(env, pro, m, "Pay authority revoked", owner, { ip, detail: "Removed from the team" });
+    await logTeam(env, pro, m, "Removed", owner, { ip });
+    return out();
+  }
+  if (path === "/api/pro/team/authority") {
+    // Off is one tap and takes effect at once.
+    if (!body.on) {
+      if (m.fields["Can Pay"]) { await update(env, HH.team, m.id, { "Can Pay": false, "Pay Revoked At": new Date().toISOString() }); await logTeam(env, pro, m, "Pay authority revoked", owner, { ip }); }
+      return out();
+    }
+    if (m.fields["Can Pay"]) return out();
+    if (!m.fields["Opted In At"]) return fail(409, `${m.fields.Member} has not accepted the invite text yet. They must reply YES first.`);
+    // First confirmation: the owner has read what this allows and said yes.
+    if (body.confirm !== "yes") return fail(400, "Confirm that you want this person to be able to charge your wallet and card.");
+    const g = guardOf(pro.fields);
+    if (g.fails >= 5 || g.sends >= 5) return fail(429, LOCKED);
+    // Second confirmation: a code texted to the owner's own phone.
+    if (!body.code) {
+      const sent = await sendGrantCode(env, pro, m);
+      if (sent.error) return fail(503, sent.error);
+      await guardSave(env, pro.id, { ...g, sends: g.sends + 1 });
+      return json({ next: "code", sent: sent.sent, to: fmtPhone(pro.fields.Mobile) });
+    }
+    if (!(await grantCodeOk(env, pro, m, String(body.code).trim()))) { await guardSave(env, pro.id, { ...g, fails: g.fails + 1 }); return fail(401, "That code is not right. Check it and try again."); }
+    const at = new Date().toISOString();
+    await update(env, HH.team, m.id, { "Can Pay": true, "Pay Granted At": at, "Pay Granted By": owner, "Pay Revoked At": null });
+    await logTeam(env, pro, m, "Pay authority granted", owner, { ip, detail: `Confirmed twice: on screen, then by a code texted to the owner. Card on file: ${pro.fields.Card || "none"}` });
+    await sendEmail(env, pro.fields.Email, `${m.fields.Member} can now claim and pay for leads by text`, [`Hi ${pro.fields["Business Name"]},`, `You gave ${m.fields.Member} at ${fmtPhone(m.fields.Mobile)} the authority to claim leads by text on your account.`,
+      `A YES from that number is an order for the lead. It is paid from your wallet, and if the wallet is short, ${pro.fields.Card || "your card on file"} is charged a reload.`, m.fields["Daily Cap"] ? `Their daily limit is $${m.fields["Daily Cap"]}.` : "They have no daily limit. You can set one on the Team screen.",
+      "You are responsible for every charge they make until you turn this off. You can turn it off at any time on the Team screen, and it takes effect at once.", `Recorded ${new Date(at).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "long", timeStyle: "short" })} Central.`],
+      { heading: "Pay authority is on", cta: ["Open my team", APP + "#team"] });
+    return out();
+  }
+  return fail(404, "Not found.");
+}
+
 // Claims a lead for a pro. Used by the portal and by a YES reply to a text.
 // reload: the pro agreed to have the card on file charged if the wallet is short (the button or the text said so).
-async function purchase(env, pro, { leadId, kind, reload = false, via = "Portal" }) {
+// by: the team member claiming, when it is not the owner.
+async function purchase(env, pro, { leadId, kind, reload = false, via = "Portal", by = null }) {
   const no = (status, error, extra = {}) => ({ status, error, ...extra });
   if (!isVerified(pro)) return no(403, "Verify your business to claim or buy leads.");
   if (!/^rec[A-Za-z0-9]{14}$/.test(leadId || "") || !["shared", "exclusive"].includes(kind)) return no(400, "That offer is not valid.");
   let lead;
   try { lead = await at(env, HH.base, HH.leads, { id: leadId }); } catch { return no(404, "That offer no longer exists."); }
   const bought = await purchasesFor(env, leadId);
-  if (bought.some((p) => p.fields.Purchase.endsWith(pro.id))) return no(409, "You already have this lead. It is in My leads.");
+  const mine = bought.find((p) => p.fields.Purchase.endsWith(pro.id));
+  if (mine) return no(409, "You already have this lead. It is in My leads.", { already: mine, lead });
   if (lead.fields.Status !== "Offered" || !isOpenAge(lead)) return no(410, "This lead has closed.");
   if (bought.some((p) => p.fields.Kind === "Exclusive")) return no(410, "Another pro took this lead exclusive.");
   if (kind === "exclusive" && bought.length) return no(409, "Exclusive is gone because another pro has already bought this lead.");
@@ -523,6 +637,9 @@ async function purchase(env, pro, { leadId, kind, reload = false, via = "Portal"
   // Welcome credit is for hot leads only. Older, marked-down leads need a card on file and are paid with the pro's own funds.
   const price = priceOf(env, lead, kind), hot = isHot(lead);
   if (!hot && !pro.fields.Card) return no(403, "Add a card to your wallet to claim older leads.", { needsCard: true });
+  // A team member's daily limit, set by the owner, counts the price of the leads they claim.
+  const [spentDay, spentAmt] = String((by && by.fields["Spent Today"]) || "").split("|"), spent = spentDay === today() ? Number(spentAmt) || 0 : 0;
+  if (by && by.fields["Daily Cap"] && spent + price > by.fields["Daily Cap"]) return no(403, `This lead is ${usd2(price)} and would pass your daily limit of ${usd(by.fields["Daily Cap"])} (${usd2(spent)} claimed today). Ask ${pro.fields["Business Name"]} to claim it or raise your limit.`, { capped: true });
   let balance = pro.fields.Balance || 0, reloaded = 0;
   const own = (f) => hot ? f.Balance || 0 : cents((f.Balance || 0) - Math.min(f["Welcome Credit"] || 0, f.Balance || 0));
   if (price > own(pro.fields)) {
@@ -535,9 +652,14 @@ async function purchase(env, pro, { leadId, kind, reload = false, via = "Portal"
     pro = t.pro; balance = pro.fields.Balance || 0; reloaded = need;
   }
   const credit = Math.min(pro.fields["Welcome Credit"] || 0, balance), creditUsed = hot ? Math.min(credit, price) : 0, after = cents(balance - price), creditAfter = cents(credit - creditUsed);
-  const made = await create(env, HH.purchases, { Purchase: `${leadId}:${pro.id}`, Lead: [leadId], Pro: [pro.id], Kind: kind === "exclusive" ? "Exclusive" : "Shared", Price: price, "Credit Used": creditUsed, "Bought At": new Date().toISOString(), Test: !!pro.fields.Test || !!lead.fields.Test, "Review Status": "None" });
+  const made = await create(env, HH.purchases, { Purchase: `${leadId}:${pro.id}`, Lead: [leadId], Pro: [pro.id], Kind: kind === "exclusive" ? "Exclusive" : "Shared", Price: price, "Credit Used": creditUsed, "Bought At": new Date().toISOString(), Test: !!pro.fields.Test || !!lead.fields.Test, "Review Status": "None", "Claimed By": by ? who(by) : "" });
   let saved = await update(env, HH.pros, pro.id, { Balance: after, "Welcome Credit": creditAfter });
-  await post(env, saved, { entry: `${kind === "exclusive" ? "Exclusive lead" : "Lead"}: ${lead.fields.Lead}`, type: "Lead", amount: -price, creditPart: -creditUsed, balanceAfter: after, purchaseId: made.id, via });
+  await post(env, saved, { entry: `${kind === "exclusive" ? "Exclusive lead" : "Lead"}: ${lead.fields.Lead}${by ? ` (claimed by ${by.fields.Member})` : ""}`, type: "Lead", amount: -price, creditPart: -creditUsed, balanceAfter: after, purchaseId: made.id, via, by: by ? who(by) : "" });
+  if (by) {
+    await update(env, HH.team, by.id, { "Spent Today": `${today()}|${cents(spent + price)}` });
+    // The owner hears about every claim someone else makes on their account.
+    await sendEmail(env, saved.fields.Email, `${by.fields.Member} claimed a lead`, [`Hi ${saved.fields["Business Name"]},`, `${by.fields.Member} (${fmtPhone(by.fields.Mobile)}) claimed ${lead.fields.Lead} ${via === "Text" ? "by text" : "in the portal"}.`, `${usd2(price)} came out of your wallet. Your balance is ${usd2(after)}.`, "The lead is in My leads. To change what this person can do, open your Team screen."], { heading: "A team member claimed a lead", cta: ["Open my leads", APP + "#leads"] });
+  }
   if (kind === "exclusive") await update(env, HH.leads, leadId, { Status: "Exclusive" });
   else if (bought.length + 1 >= lead.fields["Max Pros"]) await update(env, HH.leads, leadId, { Status: "Sold out" });
   // Auto-reload: keep at least one lead's worth in the wallet, if the pro turned it on.
@@ -545,7 +667,7 @@ async function purchase(env, pro, { leadId, kind, reload = false, via = "Portal"
   if (saved.fields["Auto Reload"] && saved.fields.Card && after < lead.fields["Shared Price"]) { const t = await topUp(env, saved, reloadUnit(saved.fields), "Auto-reload"); if (t.ok) { saved = t.pro; autoReloaded = reloadUnit(saved.fields); } }
   return { status: 200, data: { lead: leadView(lead), kind, price, creditUsed, paidUsed: cents(price - creditUsed), balanceBefore: cents(balance - reloaded), reloaded, autoReloaded, card: saved.fields.Card || "", balance: saved.fields.Balance || 0, credit: Math.min(saved.fields["Welcome Credit"] || 0, saved.fields.Balance || 0), nextPrice: lead.fields["Shared Price"], low: (saved.fields.Balance || 0) < lead.fields["Shared Price"] }, pro: saved };
 }
-const buy = async (env, pro, body) => { const r = await purchase(env, pro, { leadId: body.leadId, kind: body.kind, reload: body.reload === true }); if (r.status === 200 && r.data.low) await promptTopUp(env, r.pro); return r.status === 200 ? json(r.data) : json({ error: r.error, short: r.short, card: r.card, reloadAmount: r.reloadAmount, declined: r.declined }, r.status); };
+const buy = async (env, pro, body) => { const r = await purchase(env, pro, { leadId: body.leadId, kind: body.kind, reload: body.reload === true, by: pro.member || null }); if (r.status === 200 && r.data.low) await promptTopUp(env, r.pro); return r.status === 200 ? json(r.data) : json({ error: r.error, short: r.short, card: r.card, reloadAmount: r.reloadAmount, declined: r.declined }, r.status); };
 // After a card is saved: finish a reload that was declined, and claim the lead it was for if it is still open.
 async function finishPending(env, pro) {
   const [amount, leadId, kind, at] = String(pro.fields["Pending Reload"] || "").split("|");
@@ -596,11 +718,24 @@ async function sendText(env, phone, text) {
 const inQuiet = (q) => { const m = String(q || "").match(/^(\d\d):(\d\d)-(\d\d):(\d\d)$/); if (!m) return false; const now = new Date().toLocaleTimeString("en-GB", { timeZone: "America/Chicago", hour: "2-digit", minute: "2-digit" }), a = `${m[1]}:${m[2]}`, b = `${m[3]}:${m[4]}`; return a <= b ? now >= a && now < b : now >= a || now < b; };
 export const offerText = (l, f) => `Hammer Hound: New ${(TRADE_NAME[l.Trade] || "job").toUpperCase()} lead in ${placeOf(l) || "your area"}. ${l.Job || "Job"}. Size: ${l["Job Size"] || "Not stated"}. Timing: ${l.Timing || "Not stated"}. ${usd(l["Shared Price"])} from your wallet${f.Card ? `; if it is short we charge ${f.Card}` : ""}. Reply YES to claim, ONLY for exclusive (${usd(l["Exclusive Price"])}). Reply STOP to opt out.`;
 // Tells matching pros about leads that have just opened: same market, a trade they take, verified, not paused.
+const memberOfferText = (l, f, m) => m.fields["Can Pay"] ? offerText(l, f) : `Hammer Hound: New ${(TRADE_NAME[l.Trade] || "job").toUpperCase()} lead in ${placeOf(l) || "your area"}. ${l.Job || "Job"}. Size: ${l["Job Size"] || "Not stated"}. Timing: ${l.Timing || "Not stated"}. Reply YES to ask ${f["Business Name"]} to claim it. Reply STOP to opt out.`;
+// The whole lead in one text: the person should be able to call from it without opening anything.
+function leadText(o, headline) {
+  const facts = [["Timing", o.timing], ["Property", o.propertyType], ["Size", o.jobSize]].filter(([, v]) => v && v !== "Not stated").map(([k, v]) => `${k}: ${v}`).join(". ");
+  return [`Hammer Hound: ${headline} ${o.job}, ${o.place}.`,
+    `OWNER: ${o.ownerName || "name not given"}`, o.ownerPhone ? `PHONE: ${fmtPhone(o.ownerPhone)}` : "PHONE: not given", o.ownerEmail ? `EMAIL: ${o.ownerEmail}` : "", o.address ? `ADDRESS: ${o.address}` : "",
+    facts ? facts + "." : "", o.summary ? `JOB: ${o.summary}` : "", o.message ? `THEIR WORDS: ${o.message.replace(/\s+/g, " ").slice(0, 500)}${o.message.length > 500 ? "..." : ""}` : "",
+    "Call now."].filter(Boolean).join("\n").slice(0, 1550);
+}
+const alreadyText = (r, pro) => leadText(leadView(r.lead), `already claimed by ${String(r.already.fields["Claimed By"] || "").split(" · ")[0] || pro.fields["Business Name"]}. No charge. Here are the details.`);
 export async function alertPros(env) {
   const fresh = await list(env, HH.base, HH.leads, { filterByFormula: `AND({Status}='Offered',{Style}='${STYLE}',IS_AFTER({Received At},DATEADD(NOW(),-${ALERT_HOURS},'hours')),{Alerted}='')`, "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 5, maxRecords: 5 });
   if (!fresh.length) return { leads: 0, texts: 0, emails: 0 };
   const pros = await list(env, HH.base, HH.pros, { filterByFormula: "AND({Verification}='Verified',NOT({Paused}))", pageSize: 100, maxRecords: 5000 });
   const out = { leads: fresh.length, texts: 0, emails: 0 }, day = today();
+  // Team members who accepted the invite and have lead texts switched on, by account.
+  const crew = {};
+  for (const m of await list(env, HH.base, HH.team, { filterByFormula: "AND({Gets Texts},NOT({Opted In At}=BLANK()),{Removed At}=BLANK())", pageSize: 100, maxRecords: 5000 })) (crew[m.fields["Account ID"]] ||= []).push(m);
   for (const lead of fresh) {
     const l = lead.fields; let told = 0;
     for (const p of pros) {
@@ -611,6 +746,7 @@ export async function alertPros(env) {
       let reached = false;
       if (f["Text Offers"] && twilioReady(env) && !isTestPhone(f.Mobile) && await sendText(env, f.Mobile, offerText(l, f))) { out.texts++; reached = true; }
       if (f["Email Offers"] && f.Email && await sendEmail(env, f.Email, `New ${(TRADE_NAME[l.Trade] || "job").toLowerCase()} lead in ${placeOf(l) || "your market"}`, [`Hi ${f["Business Name"]},`, "A lead just opened in your market and trade."], { heading: "A lead just opened in your market", leads: [{ service: l.Job || "Job", city: placeOf(l), when: "" }], leadsTitle: `${usd(l["Shared Price"])} shared, or ${usd(l["Exclusive Price"])} exclusive`, cta: ["Claim this lead", APP + "#offers"], unsub: await unsubLink(env, p.id) })) { out.emails++; reached = true; }
+      for (const m of crew[p.id] || []) if (twilioReady(env) && !isTestPhone(m.fields.Mobile) && await sendText(env, m.fields.Mobile, memberOfferText(l, f, m))) { out.texts++; reached = true; await update(env, HH.team, m.id, { "Last Offer": `${lead.id}|${new Date().toISOString()}` }); }
       if (reached) { p.fields["Offers Today"] = `${day}|${sentToday + 1}`; await update(env, HH.pros, p.id, { "Last Offer": `${lead.id}|${new Date().toISOString()}`, "Offers Today": p.fields["Offers Today"] }); told++; }
     }
     await update(env, HH.leads, lead.id, { Alerted: `${new Date().toISOString()} | ${told}` });
@@ -635,14 +771,45 @@ async function twilioSigned(env, request, params) {
   const sig = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data)))));
   return sig === request.headers.get("X-Twilio-Signature");
 }
+// A text from a team member's number. They can accept the invite, opt out, and claim a lead if the owner gave them pay authority.
+async function memberText(env, pro, m, word, reply) {
+  const f = m.fields, biz = pro.fields["Business Name"];
+  if (["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"].includes(word)) { await update(env, HH.team, m.id, { "Gets Texts": false }); await logTeam(env, pro, m, "Opted out", "Member, by text"); return reply(""); }
+  const yes = ["YES", "Y", "CLAIM", "ACCEPT", "JOIN"].includes(word);
+  if (!f["Opted In At"]) {
+    if (!yes) return reply(`Hammer Hound: ${biz} added you to their account. Reply YES to get lead texts, or STOP to opt out.`);
+    await update(env, HH.team, m.id, { "Opted In At": new Date().toISOString() }); await logTeam(env, pro, m, "Opted in", "Member, by text");
+    return reply(`Hammer Hound: you're in. You'll get lead texts for ${biz}. Msg and data rates may apply. Reply STOP to opt out.`);
+  }
+  const kind = yes ? "shared" : ["ONLY", "EXCLUSIVE"].includes(word) ? "exclusive" : null;
+  if (!kind) return reply(`Hammer Hound: reply YES to ${f["Can Pay"] ? "claim" : "ask for"} the last lead we sent, or STOP to opt out. Wallet and card questions go to ${biz}.`);
+  const leadId = String(f["Last Offer"] || pro.fields["Last Offer"] || "").split("|")[0];
+  if (!leadId) return reply("Hammer Hound: there is no open lead to claim right now.");
+  // Someone on the account already has it: show who, and the details, with no charge.
+  const have = (await purchasesFor(env, leadId)).find((p) => p.fields.Purchase.endsWith(pro.id));
+  if (have) { const lead = await at(env, HH.base, HH.leads, { id: leadId }).catch(() => null); return reply(lead ? alreadyText({ already: have, lead }, pro) : "Hammer Hound: that lead is already claimed on your account."); }
+  if (!f["Can Pay"]) {
+    const lead = await at(env, HH.base, HH.leads, { id: leadId }).catch(() => null);
+    await sendEmail(env, pro.fields.Email, `${f.Member} wants a lead`, [`Hi ${biz},`, `${f.Member} (${fmtPhone(f.Mobile)}) replied YES to ${lead ? lead.fields.Lead : "a lead"}, but cannot claim by text on your account.`, "Claim it yourself in Open leads, or give them pay authority on the Team screen."], { heading: "A team member wants a lead", cta: ["See open leads", APP + "#offers"] });
+    return reply(`Hammer Hound: you cannot claim leads by text on this account. We told ${biz} you want this one.`);
+  }
+  const r = await purchase(env, pro, { leadId, kind, reload: true, via: "Text", by: m });
+  if (r.already) return reply(alreadyText(r, pro));
+  if (r.status !== 200) return reply(r.declined ? `Hammer Hound: the card on file for ${biz} was declined, so that lead is not claimed. We told them.` : `Hammer Hound: not claimed. ${r.error}`);
+  if (r.data.low) await promptTopUp(env, r.pro);
+  return reply(leadText(r.data.lead, kind === "exclusive" ? "it's all yours." : "claimed."));
+}
 // A pro's reply to a lead text. YES claims it, ONLY takes it exclusive. The card on file covers a short wallet.
 async function inboundText(request, env) {
   const reply = (t) => new Response(`<?xml version="1.0" encoding="UTF-8"?><Response>${t ? `<Message>${hx(t)}</Message>` : ""}</Response>`, { headers: { "Content-Type": "text/xml" } });
   if (!twilioReady(env)) return new Response("Texting is not set up.", { status: 503 });
   const params = new URLSearchParams(await request.text());
   if (!(await twilioSigned(env, request, params))) return new Response("Bad signature.", { status: 403 });
-  const phone = digits(params.get("From")), word = String(params.get("Body") || "").trim().toUpperCase().replace(/[^A-Z]/g, ""), pro = phone.length === 10 ? await proByPhone(env, phone) : null;
+  const phone = digits(params.get("From")), word = String(params.get("Body") || "").trim().toUpperCase().replace(/[^A-Z]/g, ""), owner = phone.length === 10 ? await proByPhone(env, phone) : null;
+  const member = !owner && phone.length === 10 ? await memberByPhone(env, phone) : null;
+  const pro = owner || (member ? await at(env, HH.base, HH.pros, { id: member.fields["Account ID"] }).catch(() => null) : null);
   if (!pro || pro.fields["Closed At"]) return reply("Hammer Hound: this number is not on a pro account. Join at hammerhound.com/pros/");
+  if (member) return memberText(env, pro, member, word, reply);
   if (["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"].includes(word)) { await update(env, HH.pros, pro.id, { "Text Offers": false }); return reply(""); }
   if (word === "BALANCE") return reply(`Hammer Hound: your wallet has ${usd2(pro.fields.Balance)}.`);
   // Top up by text: TOPUP sends the menu, then 1, 2 or 3 picks the amount. "TOPUP 300" does it in one message.
@@ -666,18 +833,13 @@ async function inboundText(request, env) {
   const leadId = String(pro.fields["Last Offer"] || "").split("|")[0];
   if (!leadId) return reply("Hammer Hound: there is no open offer to claim. See open leads at hammerhound.com/pros/app/");
   const r = await purchase(env, pro, { leadId, kind, reload: true, via: "Text" });
+  if (r.already) return reply(alreadyText(r, pro));
   if (r.status !== 200) return reply(r.declined ? `Hammer Hound: your card was declined, so that lead is not yours yet. Update it here and we reload and claim it for you: ${r.link}` : `Hammer Hound: not claimed. ${r.error}${r.status === 402 ? " hammerhound.com/pros/app/#wallet" : ""}`);
-  const d = r.data, o = d.lead;
-  // The whole lead, at once: the pro should be able to call from this text without opening anything.
-  const facts = [["Timing", o.timing], ["Property", o.propertyType], ["Size", o.jobSize]].filter(([, v]) => v && v !== "Not stated").map(([k, v]) => `${k}: ${v}`).join(". ");
-  const text = [`Hammer Hound: ${kind === "exclusive" ? "it's all yours" : "claimed"}. ${o.job}, ${o.place}.`,
-    `OWNER: ${o.ownerName || "name not given"}`, o.ownerPhone ? `PHONE: ${o.ownerPhone.replace(/^(\d{3})(\d{3})(\d{4})$/, "($1) $2-$3")}` : "PHONE: not given", o.ownerEmail ? `EMAIL: ${o.ownerEmail}` : "", o.address ? `ADDRESS: ${o.address}` : "",
-    facts ? facts + "." : "", o.summary ? `JOB: ${o.summary}` : "", o.message ? `THEIR WORDS: ${o.message.replace(/\s+/g, " ").slice(0, 500)}${o.message.length > 500 ? "..." : ""}` : "",
-    "Call now."].filter(Boolean).join("\n");
+  const d = r.data, text = leadText(d.lead, kind === "exclusive" ? "it's all yours." : "claimed.");
   // The lead text carries no amounts. If the wallet is now low, a second text offers a top-up.
   let extra = "";
   if (d.low && !r.pro.fields["Auto Reload"]) { extra = `<Message>${hx(topUpMenu(r.pro.fields))}</Message>`; if (r.pro.fields.Card) await update(env, HH.pros, pro.id, { "Text State": `topup|${new Date().toISOString()}` }); }
-  return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${hx(text.slice(0, 1550))}</Message>${extra}</Response>`, { headers: { "Content-Type": "text/xml" } });
+  return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${hx(text)}</Message>${extra}</Response>`, { headers: { "Content-Type": "text/xml" } });
 }
 
 // ---------- monthly invoices ----------
@@ -902,13 +1064,14 @@ async function adminUser(env, request) {
 const dayCT = (iso) => (iso ? new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Chicago" }) : "");
 const sum = (rows, f) => cents(rows.reduce((n, r) => n + (Number(f(r)) || 0), 0));
 async function adminOverview(env, realOnly) {
-  const [prosAll, leads, buysAll, ledgerAll, ticketsAll, requestsAll] = await Promise.all([
+  const [prosAll, leads, buysAll, ledgerAll, ticketsAll, requestsAll, authAll] = await Promise.all([
     list(env, HH.base, HH.pros, { pageSize: 100, maxRecords: 5000 }),
     list(env, HH.base, HH.leads, { "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 2000, "fields[]": ["Lead", "Job", "Trade", "City", "State", "Status", "Style", "Qualified", "Received At"] }),
     list(env, HH.base, HH.purchases, { "sort[0][field]": "Bought At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 2000 }),
     list(env, HH.base, HH.ledger, { "sort[0][field]": "At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 2000 }),
     list(env, HH.base, HH.tickets, { "sort[0][field]": "Created At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 200 }),
     list(env, HH.base, HH.requests, { "sort[0][field]": "At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 500 }),
+    list(env, HH.base, HH.authLog, { "sort[0][field]": "At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 200 }),
   ]);
   const keep = (r) => !realOnly || !r.fields.Test, pros = prosAll.filter(keep), byId = Object.fromEntries(prosAll.map((p) => [p.id, p]));
   const proOf = (id) => byId[id] || { fields: {} }, name = (id) => proOf(id).fields["Business Name"] || "Unknown pro";
@@ -942,6 +1105,7 @@ async function adminOverview(env, realOnly) {
       tickets: tickets.filter((t) => (selectName(t.fields.Status) || "Open") === "Open").map((t) => ({ id: t.id, pro: name(t.fields["Pro ID"]), email: proOf(t.fields["Pro ID"]).fields.Email || "", topic: t.fields.Topic || "", subject: t.fields.Subject || "", message: t.fields.Message || "", createdAt: t.fields["Created At"] })),
       declinedCards: pros.filter((p) => pendingOf(p.fields)).map((p) => ({ ...proCard(p), card: p.fields.Card || "", amount: pendingOf(p.fields).amount, forLead: pendingOf(p.fields).lead, at: String(p.fields["Pending Reload"]).split("|")[3] })),
     },
+    authority: authAll.filter(keep).filter((r) => /^Pay authority/.test(selectName(r.fields.Action))).slice(0, 30).map((r) => ({ action: selectName(r.fields.Action), account: r.fields.Account || "", member: r.fields.Member || "", mobile: r.fields.Mobile || "", by: r.fields.By || "", at: r.fields.At, ip: r.fields.IP || "" })),
     marketRequests: Object.values(groups).sort((a, b) => b.pros - a.pros || String(b.last).localeCompare(String(a.last))),
   };
 }
@@ -1066,29 +1230,38 @@ async function api(request, env, path) {
   if (path === "/api/pro/sign-in" && request.method === "POST") {
     const phone = digits(body.phone);
     if (phone.length !== 10) return fail(400, "Enter a 10-digit mobile number.");
-    const known = await proByPhone(env, phone);
-    if (!known) return fail(404, "No account uses that number. Join as a pro first.");
+    // An owner's number, or a team member's number with sign-in switched on.
+    const tm = (await proByPhone(env, phone)) ? null : await memberByPhone(env, phone), known = tm ? (tm.fields.Portal ? tm : null) : await proByPhone(env, phone);
+    if (!known) return fail(404, tm ? "Sign-in is not switched on for this number. Ask the account owner to turn it on." : "No account uses that number. Join as a pro first.");
     if (known.fields["Closed At"]) return fail(403, "This account is closed. Contact support to reopen it.");
     const g = guardOf(known.fields);
     if (g.sends >= 5 || g.fails >= 5) return fail(429, LOCKED);
-    await guardSave(env, known.id, { ...g, sends: g.sends + 1 });
+    await guardSave(env, known.id, { ...g, sends: g.sends + 1 }, tm ? HH.team : HH.pros);
     const sent = await sendCode(env, phone);
     return sent.error ? fail(503, sent.error) : json({ next: "code", phone, sent: sent.sent });
   }
   if (path === "/api/pro/verify-code" && request.method === "POST") {
-    const phone = digits(body.phone), pro = phone.length === 10 ? await proByPhone(env, phone) : null;
-    if (!pro) return fail(401, "That code is not right. Check it and try again.");
-    const g = guardOf(pro.fields);
+    const phone = digits(body.phone), ownerPro = phone.length === 10 ? await proByPhone(env, phone) : null;
+    const tm = !ownerPro && phone.length === 10 ? await memberByPhone(env, phone) : null, who = ownerPro || (tm && tm.fields.Portal ? tm : null), table = ownerPro ? HH.pros : HH.team;
+    if (!who) return fail(401, "That code is not right. Check it and try again.");
+    const g = guardOf(who.fields);
     if (g.fails >= 5) return fail(429, LOCKED);
-    if (!(await codeOk(env, phone, String(body.code || "").trim()))) { await guardSave(env, pro.id, { ...g, fails: g.fails + 1 }); return fail(401, "That code is not right. Check it and try again."); }
-    if (g.fails) await guardSave(env, pro.id, { ...g, fails: 0 });
-    return json({ ok: true, pro: proView(pro) }, 200, { "Set-Cookie": await sessionCookie(env, pro.id) });
+    if (!(await codeOk(env, phone, String(body.code || "").trim()))) { await guardSave(env, who.id, { ...g, fails: g.fails + 1 }, table); return fail(401, "That code is not right. Check it and try again."); }
+    if (g.fails) await guardSave(env, who.id, { ...g, fails: 0 }, table);
+    const pro = ownerPro || await at(env, HH.base, HH.pros, { id: tm.fields["Account ID"] });
+    if (pro.fields["Closed At"]) return fail(403, "This account is closed. Contact support to reopen it.");
+    if (tm) pro.member = tm;
+    return json({ ok: true, pro: proView(pro) }, 200, { "Set-Cookie": await sessionCookie(env, pro.id, tm ? tm.id : "") });
   }
   if (path === "/api/pro/sign-out" && request.method === "POST") return json({ ok: true }, 200, { "Set-Cookie": "hh_s=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0" });
 
   const pro = await currentPro(env, request);
   if (!pro) return fail(401, "Sign in to continue.");
 
+  // A team member sees leads and works them. Money, documents, settings and the team belong to the owner.
+  if (pro.member && (path.startsWith("/api/pro/team") || ["/api/pro/documents", "/api/pro/review", "/api/pro/profile", "/api/pro/notifications", "/api/pro/wallet", "/api/pro/card", "/api/pro/add-funds", "/api/pro/reload-settings", "/api/pro/invoice", "/api/pro/close"].includes(path))) return fail(403, "Only the account owner can do that.");
+  if (pro.member && path === "/api/pro/buy" && !pro.member.fields["Can Pay"]) return fail(403, `You cannot claim leads on this account. Ask ${pro.fields["Business Name"]} to claim it or to give you pay authority.`);
+  if (path.startsWith("/api/pro/team")) return teamApi(request, env, pro, path, body);
   if (path === "/api/pro/me") return json({ pro: proView(pro) });
   if (path === "/api/pro/documents" && request.method === "POST") return submitDocuments(request, env, pro);
   if (path === "/api/pro/review" && request.method === "POST") {
@@ -1133,7 +1306,7 @@ async function api(request, env, path) {
     const out = [];
     for (const p of mine.sort((a, b) => String(b.fields["Bought At"]).localeCompare(String(a.fields["Bought At"]))).slice(0, 40)) {
       const lead = await at(env, HH.base, HH.leads, { id: p.fields.Purchase.split(":")[0] }).catch(() => null);
-      if (lead) out.push({ purchaseId: p.id, kind: p.fields.Kind, price: p.fields.Price || 0, creditUsed: p.fields["Credit Used"] || 0, boughtAt: p.fields["Bought At"], review: p.fields["Review Status"] || "None", pipeline: p.fields.Pipeline || "New", notes: p.fields.Notes || "", ...leadView(lead), id: lead.id });
+      if (lead) out.push({ purchaseId: p.id, kind: p.fields.Kind, price: p.fields.Price || 0, creditUsed: p.fields["Credit Used"] || 0, boughtAt: p.fields["Bought At"], review: p.fields["Review Status"] || "None", pipeline: p.fields.Pipeline || "New", notes: p.fields.Notes || "", claimedBy: String(p.fields["Claimed By"] || "").split(" · ")[0], ...leadView(lead), id: lead.id });
     }
     return json({ leads: out, pro: proView(pro) });
   }
