@@ -67,7 +67,8 @@ no pro outside the team can join, no card is charged, and Retell is not used.
 
 | What | How it works in shadow mode |
 | --- | --- |
-| Source | Call Tracker rows where Form/Call is Form and Valid/Spam is Valid. First run copies the last 30 days, then every minute copies anything newer |
+| Source | Call Tracker rows that are a Form or an Email, marked Valid, with no Client Portfolio, from a site whose `Needs GBP?` is not a has-GBP value and whose `Active Clients` is 0. First run copies the last 30 days, then every minute copies anything newer |
+| Never offered | Leads from sites with a GBP (live or suspended), leads assigned to a client, calls, spam |
 | Who can join | Test numbers in the form (xxx) 555-01xx, plus any real numbers listed in `INTERNAL_PHONES` |
 | Sign-in code | Test numbers use the `TEST_CODE` secret. Real numbers need the Twilio secrets |
 | Verification | Test accounts pass as soon as two documents are chosen. Files are not stored and the AI check is not built |

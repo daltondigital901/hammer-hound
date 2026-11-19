@@ -5,8 +5,14 @@
 const DD1 = {
   base: "appJk4lKvNbCgCS51",
   callTracker: "tblW1A0iKDAd111iI",
-  f: { number: "fldfJJYK166eGNfxw", site: "fldqadMmvag7tK3U7", details: "fldDI13VDK04kQnYK", created: "fldZ3OCAkOMlzbwec", source: "fldw8MWCtjotaU9Tw" },
+  siteList: "tbl9olHmI5p746DOe",
+  f: { number: "fldfJJYK166eGNfxw", kind: "fldJmHzvV9WlWbPUH", site: "fldqadMmvag7tK3U7", siteLink: "fldiLbdgf1efaCUOf", details: "fldDI13VDK04kQnYK", created: "fldZ3OCAkOMlzbwec", source: "fldw8MWCtjotaU9Tw" },
+  s: { gbp: "fldxjMNAdLglWFBLl", activeClients: "fldVIdJR2dkmKXRf0" },
 };
+// "Needs GBP?" values that mean the site has a Google Business Profile, live or suspended.
+// Leads from these sites are never offered: GBP leads cannot be sold.
+const HAS_GBP = new Set(["Has One!", "Has One - Needs Final Owner Confirmed", "Has One - Needs Owner Transferred", "Has One, Doesn't Need Reviews", "First Suspension Appeal", "Second Suspension Appeal", "Suspended", "Soft Suspension", "Needs deletion"]);
+const RULE = "v2";
 const HH = { base: "app0PSwGlQyC6q7FW", leads: "tblfA6ivDIlWVp4us", pros: "tbl9bEGuy8DPkkee7", purchases: "tblJnYLq2aCiCVU1C" };
 const NOT_OPEN = "Hammer Hound is not open yet, so nothing was sent. Check back soon.";
 
@@ -37,37 +43,78 @@ export function parseForm(details) {
   const msg = text.match(/^Message:\s*([\s\S]*)$/m);
   if (msg) out.Message = msg[1].trim();
   for (const line of text.split("\n")) {
-    const m = line.match(/^(Name|Phone|Email|City|Service|Services):\s*(.*)$/);
+    const m = line.match(/^(Name|Phone|Email|City|Service|Services|Subject):\s*(.*)$/);
     if (m && !(m[1] in out)) out[m[1] === "Services" ? "Service" : m[1]] = m[2].trim();
   }
   return out;
 }
 
+const selectName = (v) => (v && v.name) || v || "";
+
+// Removes shadow leads copied under an older rule, unless a pro has already bought them.
+async function purgeOldRule(env) {
+  const old = await list(env, HH.base, HH.leads, { filterByFormula: `AND({Source}='DD1 form (shadow)',NOT({Rule}='${RULE}'))`, pageSize: 100, maxRecords: 200, "fields[]": ["Lead"] });
+  if (!old.length) return 0;
+  const bought = new Set((await list(env, HH.base, HH.purchases, { pageSize: 100, maxRecords: 1000, "fields[]": ["Purchase"] })).map((p) => String(p.fields.Purchase).split(":")[0]));
+  const ids = old.map((r) => r.id).filter((id) => !bought.has(id));
+  for (let i = 0; i < ids.length; i += 10) await at(env, HH.base, HH.leads, { method: "DELETE", query: { "records[]": ids.slice(i, i + 10) } });
+  // Kept because bought: stamp them so they are not looked at again.
+  for (const r of old.filter((x) => bought.has(x.id))) await update(env, HH.leads, r.id, { Rule: "kept-bought" });
+  return ids.length;
+}
+
+// Copies Dalton Digital leads that are free to offer: a valid form or email, on a site with
+// no GBP and no active client, that was not assigned to a client.
 export async function ingest(env) {
-  const newest = await list(env, HH.base, HH.leads, { "sort[0][field]": "DD1 Call Number", "sort[0][direction]": "desc", maxRecords: 1, "fields[]": ["DD1 Call Number"], filterByFormula: "{DD1 Call Number}>0" });
+  const purged = await purgeOldRule(env);
+  if (purged) return { purged, copied: 0 };
+
+  const newest = await list(env, HH.base, HH.leads, { "sort[0][field]": "DD1 Call Number", "sort[0][direction]": "desc", maxRecords: 1, "fields[]": ["DD1 Call Number"], filterByFormula: `AND({DD1 Call Number}>0,{Rule}='${RULE}')` });
   const last = newest.length ? newest[0].fields["DD1 Call Number"] : 0;
-  // First run copies the last BACKFILL_DAYS days; after that, only forms newer than the last one copied.
+  // First run copies the last BACKFILL_DAYS days; after that, only rows newer than the last one copied.
   const window = last ? `{Call Number}>${last}` : `IS_AFTER({Created Time},DATEADD(NOW(),-${num(env.BACKFILL_DAYS, 30)},'days'))`;
-  const rows = await list(env, DD1.base, DD1.callTracker, {
-    filterByFormula: `AND({Form/Call}='Form',{Valid/Spam}='✅ Valid',${window})`,
-    "sort[0][field]": "Call Number", "sort[0][direction]": "asc", pageSize: 100, maxRecords: 100, returnFieldsByFieldId: "true",
-    "fields[]": Object.values(DD1.f),
+  const query = {
+    filterByFormula: `AND(OR({Form/Call}='Form',{Form/Call}='Email'),{Valid/Spam}='✅ Valid',{Client Portfolio}=BLANK(),${window})`,
+    "sort[0][field]": "Call Number", "sort[0][direction]": "asc", pageSize: 100, returnFieldsByFieldId: "true", "fields[]": Object.values(DD1.f),
+  };
+  const rows = [];
+  for (let page = 0, offset; page < 8; page++) {
+    const r = await at(env, DD1.base, DD1.callTracker, { query: offset ? { ...query, offset } : query });
+    rows.push(...r.records);
+    if (!(offset = r.offset)) break;
+  }
+
+  // Look up each row's site once: GBP status and whether it has an active client.
+  const siteIds = [...new Set(rows.map((r) => (r.fields[DD1.f.siteLink] || [])[0]).filter(Boolean))];
+  const sites = {};
+  for (let i = 0; i < siteIds.length; i += 40) {
+    const found = await list(env, DD1.base, DD1.siteList, { filterByFormula: `OR(${siteIds.slice(i, i + 40).map((id) => `RECORD_ID()='${id}'`).join(",")})`, pageSize: 100, returnFieldsByFieldId: "true", "fields[]": Object.values(DD1.s) });
+    for (const x of found) sites[x.id] = x.fields;
+  }
+  const skipped = { noSite: 0, gbp: 0, client: 0 };
+  const eligible = rows.filter((r) => {
+    const site = sites[(r.fields[DD1.f.siteLink] || [])[0]];
+    if (!site) { skipped.noSite++; return false; }
+    if (HAS_GBP.has(selectName(site[DD1.s.gbp]))) { skipped.gbp++; return false; }
+    if ((site[DD1.s.activeClients] || 0) > 0) { skipped.client++; return false; }
+    return true;
   });
+
   const ends = new Date(Date.now() + num(env.SHADOW_OFFER_HOURS, 24) * 3600e3).toISOString();
-  const records = rows.map((r) => {
-    const c = r.fields, f = parseForm(c[DD1.f.details]);
-    const src = c[DD1.f.source];
+  const records = eligible.map((r) => {
+    const c = r.fields, f = parseForm(c[DD1.f.details]), email = selectName(c[DD1.f.kind]) === "Email";
+    const what = f.Service || (email ? f.Subject : "") || "Job";
     return { fields: {
-      Lead: `${f.Service || "Job"} · ${f.City || c[DD1.f.site] || "Unknown area"}`,
-      "DD1 Call Number": Number(c[DD1.f.number]), Source: "DD1 form (shadow)", Test: true, Status: "Offered",
-      "Owner Name": f.Name || "", "Owner Phone": digits(f.Phone), "Owner Email": f.Email || "", City: f.City || "", Service: f.Service || "",
-      Message: f.Message || "", "Site Name": c[DD1.f.site] || "", "Lead Source": (src && src.name) || src || "",
+      Lead: `${what} · ${f.City || c[DD1.f.site] || "Unknown area"}`.slice(0, 200),
+      "DD1 Call Number": Number(c[DD1.f.number]), Source: "DD1 form (shadow)", Rule: RULE, Test: true, Status: "Offered",
+      "Owner Name": f.Name || "", "Owner Phone": digits(f.Phone), "Owner Email": f.Email || "", City: f.City || "", Service: what.slice(0, 200),
+      Message: (f.Message || "").slice(0, 5000), "Site Name": c[DD1.f.site] || "", "Lead Source": `${email ? "Email" : "Form"} · ${selectName(c[DD1.f.source]) || "Unknown"}`,
       "Received At": c[DD1.f.created], "Max Pros": num(env.SHADOW_MAX_PROS, 5),
       "Shared Price": num(env.SHADOW_SHARED_PRICE, 75), "Exclusive Price": num(env.SHADOW_EXCLUSIVE_PRICE, 225), "Offer Ends At": ends,
     } };
   });
   for (let i = 0; i < records.length; i += 10) await at(env, HH.base, HH.leads, { method: "POST", body: { records: records.slice(i, i + 10), typecast: true } });
-  return { copied: records.length, after: last };
+  return { copied: records.length, scanned: rows.length, skipped, after: last };
 }
 
 // ---------- sessions and sign-in codes ----------

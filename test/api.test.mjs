@@ -1,6 +1,6 @@
 // Rule checks for the pro API. Run: node test/api.test.mjs
 import assert from "node:assert/strict";
-import { worker, env, db, seedForm, ingest } from "./dev-server.mjs";
+import { worker, env, db, seedForm, ingest, SITE_GBP, SITE_CLIENT } from "./dev-server.mjs";
 import { parseForm } from "../src/worker.js";
 
 const call = async (path, body, cookie) => {
@@ -17,11 +17,21 @@ const signUp = async (n) => {
 
 // form parsing and ingest
 assert.deepEqual(parseForm("New website lead:\nName: A B\nPhone: 9015550100\nEmail: a@example.com\nCity: Memphis\nService: Roof Repair\nMessage: line one\nline two"), { Message: "line one\nline two", Name: "A B", Phone: "9015550100", Email: "a@example.com", City: "Memphis", Service: "Roof Repair" });
-for (let n = 1; n <= 3; n++) seedForm(n); seedForm(4, { valid: false });
-assert.equal((await ingest(env)).copied, 3, "copies valid forms only");
-assert.equal((await ingest(env)).copied, 0, "does not copy the same form twice");
-seedForm(5); assert.equal((await ingest(env)).copied, 1, "picks up a new form");
-const leads = db.tblfA6ivDIlWVp4us; assert.ok(leads.every((l) => l.fields.Test === true && l.fields.Source === "DD1 form (shadow)"));
+// an old-rule lead is removed before anything is copied
+db.tblfA6ivDIlWVp4us.push({ id: "recOLDRULE00000001", fields: { Lead: "old", Source: "DD1 form (shadow)", "DD1 Call Number": 999, Status: "Offered", "Offer Ends At": new Date(Date.now() + 1e7).toISOString() } });
+assert.deepEqual(await ingest(env), { purged: 1, copied: 0 }, "old-rule leads are purged first");
+assert.equal(db.tblfA6ivDIlWVp4us.length, 0);
+
+// only valid forms and emails from sites with no GBP and no client are copied
+for (let n = 1; n <= 2; n++) seedForm(n);
+seedForm(3, { kind: "Email", subject: "Quote for a retaining wall" });
+seedForm(4, { valid: false }); seedForm(5, { site: SITE_GBP }); seedForm(6, { site: SITE_CLIENT }); seedForm(7, { client: true }); seedForm(8, { site: null });
+const first1 = await ingest(env);
+assert.equal(first1.copied, 3); assert.deepEqual(first1.skipped, { noSite: 1, gbp: 1, client: 1 });
+assert.equal((await ingest(env)).copied, 0, "does not copy the same lead twice");
+seedForm(9); assert.equal((await ingest(env)).copied, 1, "picks up a new form");
+const leads = db.tblfA6ivDIlWVp4us; assert.ok(leads.every((l) => l.fields.Test === true && l.fields.Rule === "v2"));
+const mail = leads.find((l) => l.fields["Lead Source"].startsWith("Email")); assert.equal(mail.fields.Service, "Quote for a retaining wall"); assert.equal(mail.fields["Owner Phone"], "");
 
 // gates
 assert.equal((await call("/api/pro/join", { business: "Outsider", phone: "9012223333" })).status, 403, "shadow mode blocks non-internal numbers");
@@ -57,7 +67,7 @@ assert.equal((await call("/api/pro/buy", { leadId: L, kind: "shared" }, others[3
 assert.equal(leads.find((l) => l.id === L).fields.Status, "Sold out");
 
 // paid purchase after free leads run out, my leads, bad-lead report
-seedForm(6); seedForm(7); seedForm(8); await ingest(env);
+seedForm(20); seedForm(21); seedForm(22); await ingest(env);
 const open = (await call("/api/pro/offers", null, a)).offers;
 await call("/api/pro/buy", { leadId: open[0].id, kind: "shared" }, a); await call("/api/pro/buy", { leadId: open[1].id, kind: "shared" }, a);
 const paid = await call("/api/pro/buy", { leadId: open[2].id, kind: "shared" }, a); assert.equal(paid.free, false); assert.equal(paid.balance, 165);
