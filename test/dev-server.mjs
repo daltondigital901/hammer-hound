@@ -100,10 +100,11 @@ globalThis.fetch = async (input, init = {}) => {
 };
 
 export const env = {
-  AIRTABLE_TOKEN: "test", SESSION_SECRET: "local-test-secret", TEST_CODE: "424242", ADMIN_KEY: "admin", SHADOW_MODE: "true",
+  AIRTABLE_TOKEN: "test", SESSION_SECRET: "local-test-secret", TEST_CODE: "424242", SHADOW_MODE: "true",
   SHADOW_SHARED_PRICE: "75", SHADOW_EXCLUSIVE_PRICE: "225", SHADOW_MAX_PROS: "5", TEST_BALANCE: "240",
   ANTHROPIC_API_KEY: "test-key", ANTHROPIC_API: "https://ai.test/v1/messages", STYLE_BATCH: "50",
-  DOCS: { put: async (k, v, o) => { stored.set(k, { size: v.byteLength, ...o }); } },
+  DOCS: { put: async (k, v, o) => { stored.set(k, { size: v.byteLength, body: v, ...o }); }, get: async (k) => (stored.has(k) ? stored.get(k) : null) },
+  ADMIN_KEY: "test-admin-key-0123456789", ADMIN_DELAY: "0",
   EMAIL: { send: async (msg) => { sent.push(msg); return { messageId: "m" + sent.length }; } },
   ASSETS: { fetch: async (req) => {
     let p = decodeURIComponent(new URL(req.url).pathname); let file = join(DIST, p);

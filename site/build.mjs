@@ -850,6 +850,16 @@ page({
   ),
 });
 
+// ---------- admin panel (private; drawn by admin.js from /api/admin/*) ----------
+page({
+  path: "/admin/",
+  title: `Admin | ${site.name}`,
+  noindex: true,
+  chrome: `<header class="site-header site-header--dark"><div class="wrap header-row">${logo(true, true)}<div class="header-actions"><span class="chip chip--black">Admin</span></div></div></header>${hazard}`,
+  footer: "none", bodyClass: "flow portal", script: "admin.js",
+  body: `<div class="wrap ad-wrap" data-admin><p class="meta">Loading.</p></div>`,
+});
+
 // ---------- pro portal (app shell; everything inside is drawn by portal.js from the API) ----------
 page({
   path: "/pros/app/",
@@ -897,7 +907,7 @@ for (const p of pages) {
   writeFileSync(file, p.html);
 }
 mkdirSync(join(OUT, "assets"), { recursive: true });
-for (const f of ["styles.css", "app.js", "portal.js"]) cpSync(join(SRC, f), join(OUT, "assets", f));
+for (const f of ["styles.css", "app.js", "portal.js", "admin.js"]) cpSync(join(SRC, f), join(OUT, "assets", f));
 cpSync(join(SRC, "img"), join(OUT, "assets", "img"), { recursive: true });
 cpSync(join(SRC, "fonts"), join(OUT, "assets", "fonts"), { recursive: true });
 for (const f of readdirSync(join(SRC, "static"))) cpSync(join(SRC, "static", f), join(OUT, f));

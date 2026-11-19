@@ -406,6 +406,63 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   assert.equal(LD.find((l) => l.id === "recREJWRITER00001").fields.Status, "Offered"); assert.match(LD.find((l) => l.id === "recREJWRITER00001").fields.Job, /Park Restroom Bid Invitation$/); assert.equal(LD.find((l) => l.id === "recREJPERSON00001").fields.Status, "Rejected");
 }
 
+// ---- admin panel ----
+{
+  const P = db.tbl9bEGuy8DPkkee7, PU = db.tblJnYLq2aCiCVU1C, T = db.tblFDXXEvvlb6F8vN;
+  const adm = async (path, body, cookie, headers = {}) => { const r = await worker.fetch(new Request("https://hammerhound.com" + path, { method: body ? "POST" : "GET", headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}), ...headers }, body: body ? JSON.stringify(body) : undefined }), env); const ct = r.headers.get("Content-Type") || ""; return { status: r.status, cookie: (r.headers.get("Set-Cookie") || "").split(";")[0], type: ct, ...(ct.includes("json") ? await r.json() : {}) }; };
+  // closed without a sign-in; a wrong key is refused; a forged cookie is refused
+  assert.equal((await adm("/api/admin/overview")).status, 401); assert.equal((await adm("/api/admin/verify", { proId: P[0].id, decision: "approve" })).status, 401);
+  assert.equal((await adm("/api/admin/sign-in", { key: "nope" })).status, 401);
+  assert.equal((await adm("/api/admin/overview", null, `hh_a=${Date.now() + 1e6}.${"a".repeat(64)}`)).status, 401);
+  const A = (await adm("/api/admin/sign-in", { key: env.ADMIN_KEY })).cookie; assert.match(A, /^hh_a=\d+\.[a-f0-9]{64}$/);
+  // set up one of each queue item
+  const c = await signUp(86), me = P.find((p) => p.fields.Mobile === "9015550186"), other = (await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "rev@example.com", business: "Needs Review LLC", phone: "9015550187" }), P.find((p) => p.fields.Mobile === "9015550187"));
+  Object.assign(other.fields, { Verification: "In review", "Verification Reason": "Both documents were unreadable.", "Proof of Business File": `pros/${other.id}/1-business.pdf`, "Insurance File": `pros/${other.id}/1-insurance.pdf`, EIN: "123456789" });
+  await env.DOCS.put(`pros/${other.id}/1-business.pdf`, new TextEncoder().encode("%PDF-test"), { httpMetadata: { contentType: "application/pdf" } });
+  seedForm(73, { service: "Roof Repair", city: "Memphis" }); await ingest(env);
+  const lead = (await call(ALL, null, c)).offers.find((o) => o.hot); const got = await call("/api/pro/buy", { leadId: lead.id, kind: "shared" }, c); assert.equal(got.status, 200);
+  const mineP = PU.find((p) => p.fields.Purchase === `${lead.id}:${me.id}`); await call("/api/pro/report", { purchaseId: mineP.id, reason: "Number is disconnected." }, c);
+  await call("/api/pro/tickets", { subject: "Card question", message: "When can I add a card?", topic: "Billing" }, c);
+  await call("/api/pro/market-request", { market: "Olive Branch", trade: "roofing" }, c);
+  const o = await adm("/api/admin/overview", null, A);
+  assert.equal(o.status, 200); assert.equal(o.who, "key");
+  assert.ok(o.stats.pros.today >= 2); assert.ok(o.stats.claims.today >= 1); assert.ok(o.stats.leadSales.today >= 75); assert.equal(o.stats.leadsOpen.hot + o.stats.leadsOpen.older > 0, true);
+  const v = o.queues.verifications.find((q) => q.id === other.id); assert.ok(v); assert.equal(v.files.length, 2); assert.equal(v.reason, "Both documents were unreadable.");
+  const rp = o.queues.reports.find((q) => q.purchaseId === mineP.id); assert.equal(rp.reason, "Number is disconnected."); assert.equal(rp.price, 75);
+  const tk = o.queues.tickets.find((q) => q.subject === "Card question"); assert.ok(tk);
+  assert.ok(o.marketRequests.find((g) => g.market === "Olive Branch" && g.trade === "Roofing" && g.pros === 1 && g.openNow === 0)); assert.ok(o.marketRequests.find((g) => g.market === "Tupelo"));
+  assert.doesNotMatch(JSON.stringify(o), /Owner Phone|owner\d+@example\.com/, "no property owner details in the overview");
+  assert.equal((await adm("/api/admin/overview?real=1", null, A)).stats.pros.total, P.filter((p) => !p.fields.Test).length, "hiding test accounts leaves only real ones");
+  // documents: only a signed-in admin, only keys under pros/
+  const doc = await worker.fetch(new Request("https://hammerhound.com/api/admin/doc?key=" + encodeURIComponent(v.files[0].key), { headers: { Cookie: A } }), env); assert.equal(doc.status, 200); assert.equal(doc.headers.get("Content-Type"), "application/pdf");
+  assert.equal((await adm("/api/admin/doc?key=" + encodeURIComponent(v.files[0].key))).status, 401); assert.equal((await adm("/api/admin/doc?key=invoices/x/2026-11.pdf", null, A)).status, 404);
+  // verification: approve needs a future expiry; decline needs a reason; both email the pro
+  assert.equal((await adm("/api/admin/verify", { proId: other.id, decision: "approve" }, A)).status, 400);
+  assert.equal((await adm("/api/admin/verify", { proId: other.id, decision: "decline" }, A)).status, 400);
+  let n = sent.length; assert.equal((await adm("/api/admin/verify", { proId: other.id, decision: "approve", expires: "2027-12-01" }, A)).status, 200);
+  assert.equal(other.fields.Verification, "Verified"); assert.equal(other.fields["Insurance Expires"], "2027-12-01"); assert.match(other.fields["Verification Detail"], /^Approved by a person \(key\)/); assert.ok(sent.length > n);
+  assert.equal((await adm("/api/admin/verify", { proId: other.id, decision: "decline", reason: "Certificate is cut off." }, A)).status, 200); assert.equal(other.fields.Verification, "Declined"); assert.equal(other.fields["Verification Reason"], "Certificate is cut off.");
+  // bad-lead report: approving puts the price back at once, and it cannot be handled twice
+  const bal = me.fields.Balance; assert.equal((await adm("/api/admin/report", { purchaseId: mineP.id, decision: "approve" }, A)).status, 200);
+  assert.equal(me.fields.Balance, bal + 75); assert.equal(mineP.fields.Credited, true); assert.equal((await adm("/api/admin/report", { purchaseId: mineP.id, decision: "deny" }, A)).status, 409);
+  // ticket: the reply is saved, the ticket closes, and the pro sees it
+  assert.equal((await adm("/api/admin/ticket", { ticketId: tk.id, reply: "" }, A)).status, 400); assert.equal((await adm("/api/admin/ticket", { ticketId: tk.id, reply: "Cards open with Square soon." }, A)).status, 200);
+  assert.equal((await call("/api/pro/tickets", null, c)).tickets.find((t) => t.id === tk.id).reply, "Cards open with Square soon.");
+  const after = await adm("/api/admin/overview", null, A); assert.equal(after.queues.reports.filter((q) => q.purchaseId === mineP.id).length + after.queues.tickets.filter((q) => q.id === tk.id).length + after.queues.verifications.filter((q) => q.id === other.id).length, 0);
+  assert.equal((await adm("/api/admin/sign-out", {}, A)).cookie, "hh_a=");
+  // Cloudflare Access: once configured, only a token signed by the team's key gets in, and the admin key no longer does
+  const { generateKeyPairSync, createSign } = await import("node:crypto"), { publicKey, privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const jwk = { ...publicKey.export({ format: "jwk" }), kid: "k1", alg: "RS256", use: "sig" }, enc = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const token = (claims, key = privateKey) => { const body = enc({ alg: "RS256", kid: "k1" }) + "." + enc(claims); return body + "." + createSign("RSA-SHA256").update(body).sign(key).toString("base64url"); };
+  Object.assign(env, { ACCESS_TEAM: "daltontest", ACCESS_AUD: "aud123", ACCESS_CERTS: "data:application/json," + encodeURIComponent(JSON.stringify({ keys: [jwk] })) });
+  const good = { iss: "https://daltontest.cloudflareaccess.com", aud: ["aud123"], exp: Math.floor(Date.now() / 1000) + 600, email: "owner@example.com" }, hdr = (t) => ({ "Cf-Access-Jwt-Assertion": t });
+  assert.equal((await adm("/api/admin/overview", null, null, hdr(token(good)))).who, "owner@example.com");
+  assert.equal((await adm("/api/admin/overview", null, A)).status, 401, "the key cookie stops working once Access is on"); assert.equal((await adm("/api/admin/sign-in", { key: env.ADMIN_KEY })).status, 400);
+  assert.equal((await adm("/api/admin/overview", null, null, hdr(token({ ...good, aud: ["other"] })))).status, 401); assert.equal((await adm("/api/admin/overview", null, null, hdr(token({ ...good, exp: 1 })))).status, 401);
+  assert.equal((await adm("/api/admin/overview", null, null, hdr(token(good, generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey)))).status, 401, "a token signed by another key is refused");
+  delete env.ACCESS_TEAM; delete env.ACCESS_AUD; delete env.ACCESS_CERTS;
+}
+
 // ---- insurance reminders and nudges ----
 const R = (f, now) => (reminderFor({ Email: "a@b.co", Verification: "Verified", ...f }, now) || {}).stage;
 assert.equal(R({ "Insurance Expires": "2027-03-31" }, "2027-02-01"), undefined, "nothing more than 30 days out");

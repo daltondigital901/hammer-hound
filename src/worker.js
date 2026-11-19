@@ -857,6 +857,134 @@ export async function sendReminders(env, { dry = false, now = today() } = {}) {
   return out;
 }
 
+// ---------- admin panel ----------
+// Two ways in. With ACCESS_TEAM and ACCESS_AUD set, only a request that Cloudflare Access has signed is accepted.
+// Without them, the ADMIN_KEY signs in and a 12-hour cookie is set.
+const b64u = (t) => Uint8Array.from(atob(t.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+let accessKeys = { at: 0, keys: [] };
+export async function accessUser(env, request) {
+  try {
+    const [h, p, sig] = (request.headers.get("Cf-Access-Jwt-Assertion") || "").split(".");
+    if (!sig) return null;
+    const head = JSON.parse(new TextDecoder().decode(b64u(h))), claims = JSON.parse(new TextDecoder().decode(b64u(p))), iss = `https://${env.ACCESS_TEAM}.cloudflareaccess.com`;
+    if (head.alg !== "RS256" || claims.iss !== iss || !(claims.exp * 1000 > Date.now()) || ![].concat(claims.aud || []).includes(env.ACCESS_AUD)) return null;
+    if (Date.now() - accessKeys.at > 3600e3 || !accessKeys.keys.some((k) => k.kid === head.kid)) accessKeys = { at: Date.now(), keys: (await (await fetch(env.ACCESS_CERTS || `${iss}/cdn-cgi/access/certs`)).json()).keys || [] };
+    const jwk = accessKeys.keys.find((k) => k.kid === head.kid);
+    if (!jwk) return null;
+    const key = await crypto.subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+    return (await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64u(sig), new TextEncoder().encode(`${h}.${p}`))) ? claims.email || "admin" : null;
+  } catch { return null; }
+}
+const sameText = async (env, a, b) => (await hmac(env.SESSION_SECRET, "cmp:" + a)) === (await hmac(env.SESSION_SECRET, "cmp:" + b));
+async function adminUser(env, request) {
+  if (env.ACCESS_TEAM && env.ACCESS_AUD) return accessUser(env, request);
+  const m = (request.headers.get("Cookie") || "").match(/(?:^|;\s*)hh_a=(\d+)\.([a-f0-9]+)/);
+  return m && Number(m[1]) > Date.now() && m[2] === (await hmac(env.SESSION_SECRET, "admin:" + m[1])) ? "key" : null;
+}
+const dayCT = (iso) => (iso ? new Date(iso).toLocaleDateString("en-CA", { timeZone: "America/Chicago" }) : "");
+const sum = (rows, f) => cents(rows.reduce((n, r) => n + (Number(f(r)) || 0), 0));
+async function adminOverview(env, realOnly) {
+  const [prosAll, leads, buysAll, ledgerAll, ticketsAll, requestsAll] = await Promise.all([
+    list(env, HH.base, HH.pros, { pageSize: 100, maxRecords: 500 }),
+    list(env, HH.base, HH.leads, { "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 400, "fields[]": ["Lead", "Job", "Trade", "City", "State", "Status", "Style", "Qualified", "Received At"] }),
+    list(env, HH.base, HH.purchases, { "sort[0][field]": "Bought At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 500 }),
+    list(env, HH.base, HH.ledger, { "sort[0][field]": "At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 500 }),
+    list(env, HH.base, HH.tickets, { "sort[0][field]": "Created At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 200 }),
+    list(env, HH.base, HH.requests, { "sort[0][field]": "At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 500 }),
+  ]);
+  const keep = (r) => !realOnly || !r.fields.Test, pros = prosAll.filter(keep), byId = Object.fromEntries(prosAll.map((p) => [p.id, p]));
+  const proOf = (id) => byId[id] || { fields: {} }, name = (id) => proOf(id).fields["Business Name"] || "Unknown pro";
+  const buys = buysAll.filter((b) => keep(proOf(String(b.fields.Purchase).split(":")[1]))), ledger = ledgerAll.filter(keep), tickets = ticketsAll.filter(keep), requests = requestsAll.filter(keep);
+  const now = new Date().toISOString(), t0 = dayCT(now), wk = Date.now() - 7 * 864e5, isToday = (d) => dayCT(d) === t0, inWeek = (d) => Date.parse(d) > wk;
+  const span = (fn) => ({ today: fn(isToday), week: fn(inWeek) });
+  const open = leads.filter((l) => l.fields.Status === "Offered" && l.fields.Style === STYLE && isOpenAge(l));
+  const leadName = {}; for (const l of leads) leadName[l.id] = l.fields.Lead || l.fields.Job || "Lead";
+  const proCard = (p) => ({ id: p.id, business: p.fields["Business Name"] || "", legalName: p.fields["Legal Business Name"] || "", phone: p.fields.Mobile || "", email: p.fields.Email || "", city: p.fields.City || "", trade: TRADE_NAME[p.fields.Trade] || "", test: !!p.fields.Test });
+  // Market requests, grouped: where pros asked for leads and found none.
+  const groups = {};
+  for (const r of requests) { const k = `${String(r.fields.Market || "").toLowerCase()}|${r.fields.Trade}`, g = (groups[k] ||= { market: r.fields.Market || "", trade: TRADE_NAME[r.fields.Trade] || "All trades", tradeSlug: r.fields.Trade || "all", pros: 0, verified: 0, last: "" }); g.pros++; if (r.fields.Verified) g.verified++; if (String(r.fields.At) > g.last) g.last = r.fields.At; }
+  for (const g of Object.values(groups)) g.openNow = open.filter((l) => sameCity(l.fields.City || "", g.market) && (g.tradeSlug === "all" || l.fields.Trade === g.tradeSlug)).length;
+  return {
+    asOf: now, realOnly,
+    stats: {
+      pros: { total: pros.length, verified: pros.filter((p) => isVerified(p)).length, ...span((w) => pros.filter((p) => w(p.fields["Created At"])).length) },
+      leadsIn: span((w) => leads.filter((l) => w(l.fields["Received At"])).length),
+      leadsOpen: { hot: open.filter(isHot).length, older: open.filter((l) => !isHot(l)).length, rejectedWeek: leads.filter((l) => l.fields.Status === "Rejected" && inWeek(l.fields["Received At"])).length, writerStuck: leads.filter((l) => String(l.fields.Style || "").startsWith("failed")).length },
+      claims: span((w) => buys.filter((b) => w(b.fields["Bought At"])).length),
+      leadSales: span((w) => sum(buys.filter((b) => w(b.fields["Bought At"])), (b) => b.fields.Price)),
+      paidFromCards: span((w) => sum(buys.filter((b) => w(b.fields["Bought At"])), (b) => (b.fields.Price || 0) - (b.fields["Credit Used"] || 0))),
+      cardCharges: span((w) => sum(ledger.filter((e) => e.fields.Type === "Top-up" && w(e.fields.At)), (e) => e.fields.Amount)),
+      welcomeCreditOut: sum(pros, (p) => Math.min(p.fields["Welcome Credit"] || 0, p.fields.Balance || 0)),
+      walletBalances: sum(pros, (p) => p.fields.Balance),
+    },
+    queues: {
+      verifications: pros.filter((p) => p.fields.Verification === "In review").map((p) => ({ ...proCard(p), ein: p.fields.EIN || "", docType: p.fields["Proof of Business Type"] || "", expires: p.fields["Insurance Expires"] || "", reason: p.fields["Verification Reason"] || "", detail: String(p.fields["Verification Detail"] || "").slice(0, 3000),
+        files: [["Proof of business", p.fields["Proof of Business File"]], ["Insurance", p.fields["Insurance File"]]].filter((x) => String(x[1] || "").startsWith("pros/")).map(([label, key]) => ({ label, key })) })),
+      reports: buys.filter((b) => b.fields["Review Status"] === "Reported").map((b) => { const [leadId, proId] = String(b.fields.Purchase).split(":"); return { purchaseId: b.id, pro: name(proId), lead: leadName[leadId] || "Lead", kind: b.fields.Kind || "", price: b.fields.Price || 0, boughtAt: b.fields["Bought At"], reason: b.fields["Review Reason"] || "" }; }),
+      tickets: tickets.filter((t) => (selectName(t.fields.Status) || "Open") === "Open").map((t) => ({ id: t.id, pro: name(t.fields["Pro ID"]), email: proOf(t.fields["Pro ID"]).fields.Email || "", topic: t.fields.Topic || "", subject: t.fields.Subject || "", message: t.fields.Message || "", createdAt: t.fields["Created At"] })),
+      declinedCards: pros.filter((p) => pendingOf(p.fields)).map((p) => ({ ...proCard(p), card: p.fields.Card || "", amount: pendingOf(p.fields).amount, forLead: pendingOf(p.fields).lead, at: String(p.fields["Pending Reload"]).split("|")[3] })),
+    },
+    marketRequests: Object.values(groups).sort((a, b) => b.pros - a.pros || String(b.last).localeCompare(String(a.last))),
+  };
+}
+async function adminApi(request, env, path, body) {
+  if (path === "/api/admin/sign-in" && request.method === "POST") {
+    if (env.ACCESS_TEAM && env.ACCESS_AUD) return fail(400, "This panel signs in through Cloudflare Access.");
+    if (!env.ADMIN_KEY || env.ADMIN_KEY.length < 20) return fail(503, "Set an ADMIN_KEY of 20 characters or more before using the panel.");
+    if (!(await sameText(env, String(body.key || ""), env.ADMIN_KEY))) { await new Promise((r) => setTimeout(r, env.ADMIN_DELAY === "0" ? 0 : 1500)); return fail(401, "That key is not right."); }
+    const exp = Date.now() + 12 * 3600e3;
+    return json({ ok: true }, 200, { "Set-Cookie": `hh_a=${exp}.${await hmac(env.SESSION_SECRET, "admin:" + exp)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=43200` });
+  }
+  if (path === "/api/admin/sign-out" && request.method === "POST") return json({ ok: true }, 200, { "Set-Cookie": "hh_a=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0" });
+  const who = await adminUser(env, request);
+  if (!who) return json({ error: "Sign in to the admin panel.", access: !!(env.ACCESS_TEAM && env.ACCESS_AUD) }, 401);
+  if (path === "/api/admin/overview") return json({ who, ...(await adminOverview(env, new URL(request.url).searchParams.get("real") === "1")) });
+  // A pro's uploaded document, straight from storage. Only keys under pros/ are served.
+  if (path === "/api/admin/doc") {
+    const key = new URL(request.url).searchParams.get("key") || "";
+    if (!/^pros\/rec[A-Za-z0-9]{14}\/[A-Za-z0-9._-]+$/.test(key) || !env.DOCS) return fail(404, "Not found.");
+    const o = await env.DOCS.get(key);
+    return o ? new Response(o.body, { headers: { "Content-Type": (o.httpMetadata && o.httpMetadata.contentType) || "application/octet-stream", "Content-Disposition": "inline", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } }) : fail(404, "Not found.");
+  }
+  if (request.method !== "POST") return fail(404, "Not found.");
+  const okId = (v) => /^rec[A-Za-z0-9]{14}$/.test(v || "");
+  if (path === "/api/admin/verify") {
+    if (!okId(body.proId) || !["approve", "decline"].includes(body.decision)) return fail(400, "Pick a pro and a decision.");
+    const pro = await at(env, HH.base, HH.pros, { id: body.proId });
+    if (body.decision === "approve") {
+      const expires = /^\d{4}-\d\d-\d\d$/.test(body.expires || "") ? body.expires : pro.fields["Insurance Expires"] || "";
+      if (!expires || expires < today()) return fail(400, "Enter the date the insurance expires. It must be in the future.");
+      const saved = await update(env, HH.pros, pro.id, { Verification: "Verified", "Verification Reason": "", "Insurance Expires": expires, "Verified At": new Date().toISOString(), "Verification Detail": `Approved by a person (${who}) on ${today()}. ` + String(pro.fields["Verification Detail"] || "").slice(0, 15000) });
+      // The automated check tells the pro on screen. A person's approval comes later, so it goes by email.
+      await sendEmail(env, saved.fields.Email, "You are a Verified Pro", [`Hi ${saved.fields["Business Name"]},`, "A person reviewed your documents and you are verified.", `You now have ${prize(saved.fields)}.`, `Your badge runs until your insurance expires on ${niceDate(expires)}. We will remind you before then.`], { heading: "You are verified", cta: ["Claim my first lead", APP + "#offers"] });
+      return json({ ok: true });
+    }
+    const reason = String(body.reason || "").trim().slice(0, 500);
+    if (!reason) return fail(400, "Say why, in words the pro will read.");
+    const saved = await update(env, HH.pros, pro.id, { Verification: "Declined", "Verification Reason": reason, "Checks Day": today(), "Verification Detail": `Declined by a person (${who}) on ${today()}. ` + String(pro.fields["Verification Detail"] || "").slice(0, 15000) });
+    await resultEmail(env, saved, "Declined", reason);
+    return json({ ok: true });
+  }
+  if (path === "/api/admin/report") {
+    if (!okId(body.purchaseId) || !["approve", "deny"].includes(body.decision)) return fail(400, "Pick a report and a decision.");
+    const p = await at(env, HH.base, HH.purchases, { id: body.purchaseId });
+    if (p.fields["Review Status"] !== "Reported") return fail(409, "This report has already been handled.");
+    await update(env, HH.purchases, p.id, { "Review Status": body.decision === "approve" ? "Approved" : "Denied" });
+    if (body.decision === "approve") return json({ ok: true, credited: await creditBacks(env) });
+    const [leadId, proId] = String(p.fields.Purchase).split(":"), pro = await at(env, HH.base, HH.pros, { id: proId }).catch(() => null), note = String(body.reason || "").trim().slice(0, 500);
+    if (pro) await sendEmail(env, pro.fields.Email, "About your bad-lead report", [`Hi ${pro.fields["Business Name"]},`, "We looked at your bad-lead report and could not approve a credit for it.", note ? `Why: ${note}` : "", "If you think we got it wrong, reply to this email."].filter(Boolean), { cta: ["Open my leads", APP + "#leads"] });
+    return json({ ok: true, leadId });
+  }
+  if (path === "/api/admin/ticket") {
+    const reply = String(body.reply || "").trim().slice(0, 4000);
+    if (!okId(body.ticketId) || !reply) return fail(400, "Write a reply.");
+    const t = await update(env, HH.tickets, body.ticketId, { Reply: reply, Status: "Answered" }), pro = okId(t.fields["Pro ID"]) ? await at(env, HH.base, HH.pros, { id: t.fields["Pro ID"] }).catch(() => null) : null;
+    const emailed = pro ? await sendEmail(env, pro.fields.Email, `Re: ${t.fields.Subject || "your support ticket"}`, [`Hi ${pro.fields["Business Name"]},`, reply, "You can see this reply in Support in your portal, and reply to this email if you need more."], { cta: ["Open support", APP + "#support"] }) : false;
+    return json({ ok: true, emailed: !!emailed });
+  }
+  return fail(404, "Not found.");
+}
+
 // ---------- API ----------
 async function api(request, env, path) {
   if (!env.AIRTABLE_TOKEN || !env.SESSION_SECRET) return fail(503, NOT_OPEN);
@@ -878,6 +1006,7 @@ async function api(request, env, path) {
     if (!env.ADMIN_KEY || request.headers.get("X-Admin-Key") !== env.ADMIN_KEY) return fail(401, "Not allowed.");
     try { return json(await sendInvoices(env, { month: body.month, dry: !!body.dry })); } catch (e) { return json({ error: String(e && e.message || e) }, 500); }
   }
+  if (["/api/admin/sign-in", "/api/admin/sign-out", "/api/admin/overview", "/api/admin/doc", "/api/admin/verify", "/api/admin/report", "/api/admin/ticket"].includes(path)) return adminApi(request, env, path, body);
   if (path === "/api/pro/link") {
     const [id, exp, sig] = (new URL(request.url).searchParams.get("t") || "").split(".");
     const good = /^rec[A-Za-z0-9]{14}$/.test(id || "") && Number(exp) > Date.now() && sig === (await hmac(env.SESSION_SECRET, `link:${id}.${exp}`)).slice(0, 40);
