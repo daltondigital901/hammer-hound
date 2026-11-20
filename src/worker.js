@@ -152,6 +152,68 @@ async function sendCode(env, phone) {
   });
   return r.ok ? { sent: "text" } : { error: "The code could not be texted. Try again." };
 }
+// ---------- two-step sign-in (an authenticator app, on top of the texted code) ----------
+// Optional for an account on its own. Required for an owner before they add team members, and for any
+// team member before they can be given authority to pay for leads.
+const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+const b32enc = (bytes) => { let bits = "", out = ""; for (const b of bytes) bits += b.toString(2).padStart(8, "0"); for (let i = 0; i + 5 <= bits.length; i += 5) out += B32[parseInt(bits.slice(i, i + 5), 2)]; return out; };
+const b32dec = (t) => { let bits = ""; for (const ch of String(t).toUpperCase()) { const v = B32.indexOf(ch); if (v >= 0) bits += v.toString(2).padStart(5, "0"); } const out = []; for (let i = 0; i + 8 <= bits.length; i += 8) out.push(parseInt(bits.slice(i, i + 8), 2)); return new Uint8Array(out); };
+// The standard 6-digit, 30-second code (RFC 6238), as every authenticator app computes it.
+export async function totp(secret, at = Date.now()) {
+  const key = await crypto.subtle.importKey("raw", b32dec(secret), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]), msg = new Uint8Array(8);
+  for (let i = 7, c = Math.floor(at / 30000); i >= 0; i--) { msg[i] = c % 256; c = Math.floor(c / 256); }
+  const h = new Uint8Array(await crypto.subtle.sign("HMAC", key, msg)), o = h[19] & 15;
+  return String((((h[o] & 127) * 16777216) + (h[o + 1] << 16) + (h[o + 2] << 8) + h[o + 3]) % 1e6).padStart(6, "0");
+}
+async function totpOk(secret, code) {
+  const c = String(code || "").replace(/\D/g, "");
+  if (c.length !== 6 || !secret) return false;
+  for (const d of [0, -30000, 30000]) if (c === await totp(secret, Date.now() + d)) return true;   // one step of clock drift either way
+  return false;
+}
+// The key is stored encrypted, so a copy of the table alone cannot produce codes.
+const toHex = (u) => [...u].map((b) => b.toString(16).padStart(2, "0")).join(""), fromHex = (t) => new Uint8Array((String(t).match(/../g) || []).map((x) => parseInt(x, 16)));
+const sealKey = async (env) => crypto.subtle.importKey("raw", await crypto.subtle.digest("SHA-256", new TextEncoder().encode("2fa:" + env.SESSION_SECRET)), "AES-GCM", false, ["encrypt", "decrypt"]);
+const seal = async (env, text) => { const iv = crypto.getRandomValues(new Uint8Array(12)); return toHex(iv) + "." + toHex(new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await sealKey(env), new TextEncoder().encode(text)))); };
+const unseal = async (env, sealed) => { try { const [iv, ct] = String(sealed || "").replace(/^pending:/, "").split("."); return new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromHex(iv) }, await sealKey(env), fromHex(ct))); } catch { return ""; } };
+const has2fa = (rec) => !!(rec && rec.fields["2FA On At"]);
+// The person signed in: the team member if there is one, otherwise the owner.
+const selfOf = (pro) => (pro.member ? { rec: pro.member, table: HH.team } : { rec: pro, table: HH.pros });
+async function twoStepApi(request, env, pro, path, body) {
+  const { rec, table } = selfOf(pro), g = guardOf(rec.fields), label = pro.fields["Business Name"] || "Hammer Hound";
+  if (request.method !== "POST") return fail(404, "Not found.");
+  if (g.fails >= 5) return fail(429, LOCKED);
+  const wrong = async () => { await guardSave(env, rec.id, { ...g, fails: g.fails + 1 }, table); return fail(401, "That code is not right. Check the app and try again."); };
+  if (path === "/api/pro/2fa/start") {
+    if (has2fa(rec)) return fail(409, "Two-step sign-in is already on.");
+    const secret = b32enc(crypto.getRandomValues(new Uint8Array(20)));
+    await update(env, table, rec.id, { "2FA Secret": "pending:" + (await seal(env, secret)) });
+    return json({ secret, uri: `otpauth://totp/${encodeURIComponent("Hammer Hound:" + (pro.member ? pro.member.fields.Member + " at " : "") + label)}?secret=${secret}&issuer=${encodeURIComponent("Hammer Hound")}` });
+  }
+  if (path === "/api/pro/2fa/confirm") {
+    const stored = String(rec.fields["2FA Secret"] || "");
+    if (has2fa(rec)) return fail(409, "Two-step sign-in is already on.");
+    if (!stored.startsWith("pending:")) return fail(409, "Start the setup first.");
+    if (!(await totpOk(await unseal(env, stored), body.code))) return wrong();
+    const saved = await update(env, table, rec.id, { "2FA Secret": stored.replace(/^pending:/, ""), "2FA On At": new Date().toISOString() });
+    if (pro.member) pro.member = saved;
+    await sendEmail(env, pro.member ? "" : pro.fields.Email, "Two-step sign-in is on", [`Hi ${label},`, "Two-step sign-in is now on for your Hammer Hound account. Signing in takes the code we text you and the code from your authenticator app.", "If you did not do this, reply to this email right away."], { heading: "Two-step sign-in is on" });
+    return json({ pro: proView(pro.member ? pro : saved) });
+  }
+  if (path === "/api/pro/2fa/off") {
+    if (!has2fa(rec)) return fail(409, "Two-step sign-in is not on.");
+    if (pro.member && rec.fields["Can Pay"]) return fail(409, `You can claim and pay for leads on this account, so two-step sign-in has to stay on. Ask ${label} to turn off your pay authority first.`);
+    if (!pro.member && (await teamOf(env, pro.id)).length) return fail(409, "Your account has team members, so two-step sign-in has to stay on. Remove your team members first.");
+    if (!(await totpOk(await unseal(env, rec.fields["2FA Secret"]), body.code))) return wrong();
+    const saved = await update(env, table, rec.id, { "2FA Secret": "", "2FA On At": null });
+    if (pro.member) pro.member = saved;
+    return json({ pro: proView(pro.member ? pro : saved) });
+  }
+  return fail(404, "Not found.");
+}
+// Between the texted code and the app code: a ten-minute ticket that is not a session.
+const stepTicket = async (env, id) => { const body = `${id}.${Date.now() + 600e3}`; return `hh_2=${body}.${await hmac(env.SESSION_SECRET, "2fa:" + body)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`; };
+
 // Five wrong codes, or five codes requested, locks an account for the rest of the hour.
 const guardOf = (f) => { const [h, fails, sends] = String(f["Sign-in Guard"] || "").split("|"), hour = new Date().toISOString().slice(0, 13); return h === hour ? { hour, fails: Number(fails) || 0, sends: Number(sends) || 0 } : { hour, fails: 0, sends: 0 }; };
 const guardSave = (env, id, g, table = HH.pros) => update(env, table, id, { "Sign-in Guard": `${g.hour}|${g.fails}|${g.sends}` });
@@ -199,7 +261,7 @@ const sameCity = (a, b) => String(a || "").trim().toLowerCase() === String(b || 
 // Verified means documents passed and the insurance on file has not expired.
 const isVerified = (p) => p.fields.Verification === "Verified" && (!p.fields["Insurance Expires"] || p.fields["Insurance Expires"] >= today());
 const proView = (p) => ({
-  member: p.member ? { name: p.member.fields.Member, canPay: !!p.member.fields["Can Pay"] } : null,
+  member: p.member ? { name: p.member.fields.Member, canPay: !!p.member.fields["Can Pay"] } : null, twoStep: has2fa(p.member || p),
   business: p.fields["Business Name"], mobile: p.fields.Mobile, trade: p.fields.Trade || "", zip: p.fields.ZIP || "", test: !!p.fields.Test,
   verified: isVerified(p), verification: p.fields.Verification === "Verified" && !isVerified(p) ? "Insurance expired" : p.fields.Verification || "Not started",
   legalName: p.fields["Legal Business Name"] || "", einLast4: (p.fields.EIN || "").slice(-4), insuranceExpires: p.fields["Insurance Expires"] || "", verifiedAt: p.fields["Verified At"] || "",
@@ -520,33 +582,30 @@ const fmtPhone = (p) => String(p || "").replace(/^(\d{3})(\d{3})(\d{4})$/, "($1)
 const teamOf = (env, proId) => list(env, HH.base, HH.team, { filterByFormula: `AND({Account ID}='${proId}',{Removed At}=BLANK())`, pageSize: 100, maxRecords: 50 });
 const memberByPhone = async (env, phone) => (await list(env, HH.base, HH.team, { filterByFormula: `AND({Mobile}='${esc(phone)}',{Removed At}=BLANK())`, maxRecords: 1 }))[0] || null;
 const memberView = (m) => ({ id: m.id, name: m.fields.Member || "", mobile: m.fields.Mobile || "", getsTexts: !!m.fields["Gets Texts"], canPay: !!m.fields["Can Pay"], portal: !!m.fields.Portal, dailyCap: m.fields["Daily Cap"] || 0,
-  invitedAt: m.fields["Invited At"] || "", optedInAt: m.fields["Opted In At"] || "", payGrantedAt: m.fields["Can Pay"] ? m.fields["Pay Granted At"] || "" : "" });
+  twoStep: has2fa(m), invitedAt: m.fields["Invited At"] || "", optedInAt: m.fields["Opted In At"] || "", payGrantedAt: m.fields["Can Pay"] ? m.fields["Pay Granted At"] || "" : "" });
 const who = (m) => `${m.fields.Member} · ${fmtPhone(m.fields.Mobile)}`;
 const logTeam = (env, pro, m, action, by, extra = {}) => create(env, HH.authLog, { Entry: `${action}: ${m.fields.Member} ${fmtPhone(m.fields.Mobile)}`, Action: action, "Account ID": pro.id, Account: pro.fields["Business Name"] || "", "Member ID": m.id, Member: m.fields.Member || "", Mobile: m.fields.Mobile || "",
   By: by, At: new Date().toISOString(), IP: extra.ip || "", Agreement: AGREEMENT_VERSION, Detail: String(extra.detail || "").slice(0, 300), Test: !!pro.fields.Test });
 const inviteText = (pro) => `Hammer Hound: ${pro.fields["Business Name"]} added you to their account to get lead texts. Reply YES to accept. Msg and data rates may apply. Reply STOP to opt out.`;
 async function sendInvite(env, pro, m) { return twilioReady(env) && !isTestPhone(m.fields.Mobile) ? sendText(env, m.fields.Mobile, inviteText(pro)) : false; }
-// The second confirmation: a code texted to the OWNER's phone, tied to this one member.
-const grantCode = (env, pro, m, step) => codeFor(env, `grant:${m.id}:${pro.fields.Mobile}`, step);
-async function sendGrantCode(env, pro, m) {
-  const phone = pro.fields.Mobile;
-  if (isTestPhone(phone)) return env.TEST_CODE ? { sent: "test" } : { error: "Test sign-in is off: the TEST_CODE secret is not set." };
-  if (!twilioReady(env)) return { error: "Texting is not set up yet, so the confirmation code cannot be sent." };
-  const code = await grantCode(env, pro, m, Math.floor(Date.now() / 600e3));
-  return (await sendText(env, phone, `Hammer Hound: ${code} is your code to let ${m.fields.Member} claim and pay for leads by text on your account. If you did not ask for this, do not share it.`)) ? { sent: "text" } : { error: "The code could not be texted. Try again." };
-}
-async function grantCodeOk(env, pro, m, code) {
-  if (isTestPhone(pro.fields.Mobile)) return !!env.TEST_CODE && code === env.TEST_CODE;
-  const step = Math.floor(Date.now() / 600e3);
-  return code === (await grantCode(env, pro, m, step)) || code === (await grantCode(env, pro, m, step - 1));
-}
 async function teamApi(request, env, pro, path, body) {
   const ip = request.headers.get("CF-Connecting-IP") || "unknown", owner = `Owner · ${fmtPhone(pro.fields.Mobile)}`;
-  const team = await teamOf(env, pro.id), out = async () => json({ members: (await teamOf(env, pro.id)).map(memberView), max: TEAM_MAX, card: pro.fields.Card || "", test: !!pro.fields.Test,
+  const team = await teamOf(env, pro.id), out = async (p = pro) => json({ members: (await teamOf(env, pro.id)).map(memberView), max: TEAM_MAX, card: pro.fields.Card || "", test: !!pro.fields.Test, twoStep: has2fa(p), ack: !!p.fields["Team Ack"],
     log: (await list(env, HH.base, HH.authLog, { filterByFormula: `{Account ID}='${pro.id}'`, "sort[0][field]": "At", "sort[0][direction]": "desc", pageSize: 20, maxRecords: 20 })).map((r) => ({ entry: r.fields.Entry, by: r.fields.By || "", at: r.fields.At })) });
   if (path === "/api/pro/team" && request.method === "GET") return out();
   if (request.method !== "POST") return fail(404, "Not found.");
+  // Before the first team member: the owner acknowledges what adding people makes possible. Recorded with the time and IP address.
+  if (path === "/api/pro/team/ack") {
+    if (!has2fa(pro)) return fail(403, "Turn on two-step sign-in first.");
+    if (body.agree !== "yes") return fail(400, "Tick the box to continue.");
+    if (pro.fields["Team Ack"]) return out();
+    const saved = await update(env, HH.pros, pro.id, { "Team Ack": `${AGREEMENT_VERSION} | ${new Date().toISOString()} | ${ip}` });
+    await create(env, HH.authLog, { Entry: "Team turned on: owner acknowledged that team members can be given authority to pay for leads", Action: "Team turned on", "Account ID": pro.id, Account: pro.fields["Business Name"] || "", By: owner, At: new Date().toISOString(), IP: ip, Agreement: AGREEMENT_VERSION, Test: !!pro.fields.Test });
+    return out(saved);
+  }
   if (path === "/api/pro/team/add") {
+    if (!has2fa(pro)) return fail(403, "Turn on two-step sign-in before adding team members.");
+    if (!pro.fields["Team Ack"]) return fail(403, "Read and accept the team notice before adding team members.");
     const name = String(body.name || "").trim().slice(0, 80), phone = digits(body.phone);
     if (!name || phone.length !== 10) return fail(400, "Enter the person's name and a 10-digit mobile number.");
     if (team.length >= TEAM_MAX) return fail(400, `An account can have up to ${TEAM_MAX} team members.`);
@@ -592,21 +651,19 @@ async function teamApi(request, env, pro, path, body) {
     }
     if (m.fields["Can Pay"]) return out();
     if (!m.fields["Opted In At"]) return fail(409, `${m.fields.Member} has not accepted the invite text yet. They must reply YES first.`);
+    // Anyone who can pay for leads must have two-step sign-in on. So must the owner giving the authority.
+    if (!has2fa(pro)) return fail(403, "Turn on two-step sign-in before giving anyone pay authority.");
+    if (!has2fa(m)) return fail(409, `${m.fields.Member} has to turn on two-step sign-in first. Switch on "Can sign in" for them, then they sign in and set it up under Security.`);
     // First confirmation: the owner has read what this allows and said yes.
     if (body.confirm !== "yes") return fail(400, "Confirm that you want this person to be able to charge your wallet and card.");
     const g = guardOf(pro.fields);
-    if (g.fails >= 5 || g.sends >= 5) return fail(429, LOCKED);
-    // Second confirmation: a code texted to the owner's own phone.
-    if (!body.code) {
-      const sent = await sendGrantCode(env, pro, m);
-      if (sent.error) return fail(503, sent.error);
-      await guardSave(env, pro.id, { ...g, sends: g.sends + 1 });
-      return json({ next: "code", sent: sent.sent, to: fmtPhone(pro.fields.Mobile) });
-    }
-    if (!(await grantCodeOk(env, pro, m, String(body.code).trim()))) { await guardSave(env, pro.id, { ...g, fails: g.fails + 1 }); return fail(401, "That code is not right. Check it and try again."); }
+    if (g.fails >= 5) return fail(429, LOCKED);
+    // Second confirmation: the code from the owner's authenticator app.
+    if (!body.code) return json({ next: "code" });
+    if (!(await totpOk(await unseal(env, pro.fields["2FA Secret"]), body.code))) { await guardSave(env, pro.id, { ...g, fails: g.fails + 1 }); return fail(401, "That code is not right. Check your authenticator app and try again."); }
     const at = new Date().toISOString();
     await update(env, HH.team, m.id, { "Can Pay": true, "Pay Granted At": at, "Pay Granted By": owner, "Pay Revoked At": null });
-    await logTeam(env, pro, m, "Pay authority granted", owner, { ip, detail: `Confirmed twice: on screen, then by a code texted to the owner. Card on file: ${pro.fields.Card || "none"}` });
+    await logTeam(env, pro, m, "Pay authority granted", owner, { ip, detail: `Confirmed twice: on screen, then by the owner's authenticator app code. Two-step sign-in is on for both. Card on file: ${pro.fields.Card || "none"}` });
     await sendEmail(env, pro.fields.Email, `${m.fields.Member} can now claim and pay for leads by text`, [`Hi ${pro.fields["Business Name"]},`, `You gave ${m.fields.Member} at ${fmtPhone(m.fields.Mobile)} the authority to claim leads by text on your account.`,
       `A YES from that number is an order for the lead. It is paid from your wallet, and if the wallet is short, ${pro.fields.Card || "your card on file"} is charged a reload.`, m.fields["Daily Cap"] ? `Their daily limit is $${m.fields["Daily Cap"]}.` : "They have no daily limit. You can set one on the Team screen.",
       "You are responsible for every charge they make until you turn this off. You can turn it off at any time on the Team screen, and it takes effect at once.", `Recorded ${new Date(at).toLocaleString("en-US", { timeZone: "America/Chicago", dateStyle: "long", timeStyle: "short" })} Central.`],
@@ -1191,7 +1248,9 @@ async function api(request, env, path) {
   if (["/api/admin/sign-in", "/api/admin/sign-out", "/api/admin/overview", "/api/admin/doc", "/api/admin/verify", "/api/admin/report", "/api/admin/ticket"].includes(path)) return adminApi(request, env, path, body);
   if (path === "/api/pro/link") {
     const [id, exp, sig] = (new URL(request.url).searchParams.get("t") || "").split(".");
-    const good = /^rec[A-Za-z0-9]{14}$/.test(id || "") && Number(exp) > Date.now() && sig === (await hmac(env.SESSION_SECRET, `link:${id}.${exp}`)).slice(0, 40);
+    let good = /^rec[A-Za-z0-9]{14}$/.test(id || "") && Number(exp) > Date.now() && sig === (await hmac(env.SESSION_SECRET, `link:${id}.${exp}`)).slice(0, 40);
+    // A link is one factor. An account with two-step sign-in on signs in the normal way and lands on the wallet.
+    if (good && has2fa(await at(env, HH.base, HH.pros, { id }).catch(() => null))) good = false;
     return new Response(null, { status: 302, headers: good ? { Location: "/pros/app/#wallet", "Set-Cookie": await sessionCookie(env, id), "Cache-Control": "no-store" } : { Location: "/pros/sign-in/", "Cache-Control": "no-store" } });
   }
   if (path === "/api/unsubscribe") {
@@ -1251,6 +1310,21 @@ async function api(request, env, path) {
     const pro = ownerPro || await at(env, HH.base, HH.pros, { id: tm.fields["Account ID"] });
     if (pro.fields["Closed At"]) return fail(403, "This account is closed. Contact support to reopen it.");
     if (tm) pro.member = tm;
+    // Two-step sign-in: the texted code was right, now the authenticator app code. No session yet.
+    if (has2fa(who)) return json({ next: "2fa" }, 200, { "Set-Cookie": await stepTicket(env, pro.id + (tm ? "-" + tm.id : "")) });
+    return json({ ok: true, pro: proView(pro) }, 200, { "Set-Cookie": await sessionCookie(env, pro.id, tm ? tm.id : "") });
+  }
+  if (path === "/api/pro/verify-2fa" && request.method === "POST") {
+    const mt = (request.headers.get("Cookie") || "").match(/(?:^|;\s*)hh_2=([^;]+)/), [id, exp, sig] = mt ? mt[1].split(".") : [];
+    if (!id || !(Number(exp) > Date.now()) || sig !== (await hmac(env.SESSION_SECRET, `2fa:${id}.${exp}`))) return fail(401, "That sign-in has expired. Start again.");
+    const [proId, memberId] = id.split("-"), pro = await at(env, HH.base, HH.pros, { id: proId }).catch(() => null), tm = pro && memberId ? await at(env, HH.base, HH.team, { id: memberId }).catch(() => null) : null;
+    if (!pro || pro.fields["Closed At"] || (memberId && (!tm || tm.fields["Removed At"] || !tm.fields.Portal))) return fail(401, "That sign-in has expired. Start again.");
+    const who = tm || pro, table = tm ? HH.team : HH.pros, g = guardOf(who.fields);
+    if (g.fails >= 5) return fail(429, LOCKED);
+    if (!(await totpOk(await unseal(env, who.fields["2FA Secret"]), body.code))) { await guardSave(env, who.id, { ...g, fails: g.fails + 1 }, table); return fail(401, "That code is not right. Check your authenticator app and try again."); }
+    if (g.fails) await guardSave(env, who.id, { ...g, fails: 0 }, table);
+    if (tm) pro.member = tm;
+    // The ten-minute ticket is left to expire: it is useless without the app code.
     return json({ ok: true, pro: proView(pro) }, 200, { "Set-Cookie": await sessionCookie(env, pro.id, tm ? tm.id : "") });
   }
   if (path === "/api/pro/sign-out" && request.method === "POST") return json({ ok: true }, 200, { "Set-Cookie": "hh_s=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0" });
@@ -1262,6 +1336,7 @@ async function api(request, env, path) {
   if (pro.member && (path.startsWith("/api/pro/team") || ["/api/pro/documents", "/api/pro/review", "/api/pro/profile", "/api/pro/notifications", "/api/pro/wallet", "/api/pro/card", "/api/pro/add-funds", "/api/pro/reload-settings", "/api/pro/invoice", "/api/pro/close"].includes(path))) return fail(403, "Only the account owner can do that.");
   if (pro.member && path === "/api/pro/buy" && !pro.member.fields["Can Pay"]) return fail(403, `You cannot claim leads on this account. Ask ${pro.fields["Business Name"]} to claim it or to give you pay authority.`);
   if (path.startsWith("/api/pro/team")) return teamApi(request, env, pro, path, body);
+  if (path.startsWith("/api/pro/2fa/")) return twoStepApi(request, env, pro, path, body);
   if (path === "/api/pro/me") return json({ pro: proView(pro) });
   if (path === "/api/pro/documents" && request.method === "POST") return submitDocuments(request, env, pro);
   if (path === "/api/pro/review" && request.method === "POST") {

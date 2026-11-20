@@ -654,3 +654,6 @@ legend + .option-grid { margin-top: 0; }
 .tm-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .tm-log li { display: grid; gap: 2px; padding-bottom: 8px; border-bottom: 1px solid var(--concrete-2); }
 .tm-log small { color: var(--steel); font-size: 13px; }
+.tm-done { border-color: var(--green); background: var(--green-tint); }
+.tm-chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.sec-key { font: 600 16px/1.6 ui-monospace, Menlo, Consolas, monospace; letter-spacing: .04em; background: var(--white); border: 1.5px dashed var(--asphalt); border-radius: 8px; padding: 10px 12px; overflow-wrap: anywhere; user-select: all; }

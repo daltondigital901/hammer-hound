@@ -504,11 +504,20 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   const P = db.tbl9bEGuy8DPkkee7, T = db.tblAxauFF33UVS2gV, LOG = db.tblTYo9QOk8hTwQad, LD = db.tblfA6ivDIlWVp4us, PU = db.tblJnYLq2aCiCVU1C, { alertPros } = await import("../src/worker.js");
   const sms = async (from, body) => { const url = "https://hammerhound.com/api/sms/inbound", p = { Body: body, From: from }; const r = await worker.fetch(new Request(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Twilio-Signature": createHmac("sha1", "tok").update(url + Object.keys(p).sort().map((k) => k + p[k]).join("")).digest("base64") }, body: new URLSearchParams(p) }), env); return r.text(); };
   const c = await signUp(91), me = P.find((p) => p.fields.Mobile === "9015550191"), acts = () => LOG.filter((r) => r.fields["Account ID"] === me.id).map((r) => r.fields.Action);
+  // before anyone can be added: two-step sign-in on, then the owner's acknowledgment, recorded
+  const { totp } = await import("../src/worker.js");
+  const twoStepOn = async (cookie) => { const k = await call("/api/pro/2fa/start", {}, cookie); assert.match(k.uri, /^otpauth:\/\/totp\/Hammer%20Hound.*secret=[A-Z2-7]{32}&issuer=Hammer%20Hound$/); assert.equal((await call("/api/pro/2fa/confirm", { code: "000000" }, cookie)).status, 401); assert.equal((await call("/api/pro/2fa/confirm", { code: await totp(k.secret) }, cookie)).pro.twoStep, true); return k.secret; };
+  const smsCode = (phone) => String(parseInt(createHmac("sha256", env.SESSION_SECRET).update(`code:${phone}:${Math.floor(Date.now() / 600e3)}`).digest("hex").slice(0, 8), 16) % 1e6).padStart(6, "0");
+  assert.equal((await call("/api/pro/team", null, c)).twoStep, false);
+  assert.equal((await call("/api/pro/team/add", { name: "Dana", phone: "9017771111" }, c)).status, 403, "no team without two-step sign-in"); assert.equal((await call("/api/pro/team/ack", { agree: "yes" }, c)).status, 403);
+  const ownerKey = await twoStepOn(c); assert.ok(me.fields["2FA On At"]); assert.ok(!me.fields["2FA Secret"].includes(ownerKey), "the key is stored encrypted");
+  assert.equal((await call("/api/pro/team/add", { name: "Dana", phone: "9017771111" }, c)).status, 403, "and not before the acknowledgment"); assert.equal((await call("/api/pro/team/ack", {}, c)).status, 400);
+  const acked = await call("/api/pro/team/ack", { agree: "yes" }, c); assert.equal(acked.ack, true); assert.match(me.fields["Team Ack"], /^November 19, 2026 \| 20\d\d-.* \| /); assert.equal(acts().at(-1), "Team turned on");
   // adding: a name and a number nobody else uses; the invite goes out by text
   assert.equal((await call("/api/pro/team/add", { name: "", phone: "9017771111" }, c)).status, 400); assert.equal((await call("/api/pro/team/add", { name: "Me", phone: "9015550191" }, c)).status, 409);
   const t0 = texts.length, added = await call("/api/pro/team/add", { name: "Dana", phone: "(901) 777-1111" }, c); assert.equal(added.members.length, 1); assert.equal(added.max, 5);
   const dana = T.at(-1); assert.deepEqual([dana.fields["Gets Texts"], dana.fields["Can Pay"], dana.fields.Portal], [true, false, false]);
-  assert.equal(texts[t0].to, "+19017771111"); assert.match(texts[t0].body, /Test Pro 91 added you to their account to get lead texts\. Reply YES to accept/); assert.deepEqual(acts(), ["Added", "Invited"]);
+  assert.equal(texts[t0].to, "+19017771111"); assert.match(texts[t0].body, /Test Pro 91 added you to their account to get lead texts\. Reply YES to accept/); assert.deepEqual(acts().slice(-2), ["Added", "Invited"]);
   assert.equal((await call("/api/pro/team/add", { name: "Dana again", phone: "9017771111" }, c)).status, 409, "one number, one account");
   // pay authority cannot be given before the person accepts, and the invite is accepted from their own phone
   assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes" }, c)).status, 409);
@@ -517,12 +526,26 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   for (const l of LD) l.fields.Alerted = "x"; seedForm(74, { service: "Roof Repair", city: "Memphis" }); await ingest(env); const lead = LD.at(-1), t1 = texts.length; await alertPros(env);
   const toDana = texts.slice(t1).find((m) => m.to === "+19017771111"); assert.match(toDana.body, /New ROOFING lead in Memphis, TN.*Reply YES to ask Test Pro 91 to claim it/); assert.ok(!/\$75/.test(toDana.body)); assert.equal(dana.fields["Last Offer"].split("|")[0], lead.id);
   const m0 = sent.length, bal0 = me.fields.Balance; assert.match(await sms("+19017771111", "YES"), /you cannot claim leads by text on this account\. We told Test Pro 91/); assert.equal(me.fields.Balance, bal0); assert.ok(sent.slice(m0).some((e) => e.subject === "Dana wants a lead"));
-  // the double confirm: on screen, then a code texted to the owner. Both are needed, and a wrong code grants nothing
+  // anyone who can pay must have two-step sign-in on: Dana signs in with her own number and sets it up
+  assert.match((await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes" }, c)).error, /Dana has to turn on two-step sign-in first/); assert.equal(dana.fields["Can Pay"], false);
+  await call("/api/pro/team/update", { memberId: dana.id, getsTexts: true, portal: true, dailyCap: "" }, c); assert.equal((await call("/api/pro/sign-in", { phone: "9017771111" })).status, 200);
+  const dv = await call("/api/pro/verify-code", { phone: "9017771111", code: smsCode("9017771111") }); assert.equal(dv.pro.member.name, "Dana"); const danaKey = await twoStepOn(dv.cookie); assert.ok(dana.fields["2FA On At"]);
+  assert.equal((await call("/api/pro/team", null, c)).members[0].twoStep, true);
+  // the double confirm: on screen, then the code from the owner's authenticator app. Both are needed, and a wrong code grants nothing
   assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true }, c)).status, 400, "the first confirmation is required");
   const step = await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes" }, c); assert.equal(step.next, "code"); assert.equal(dana.fields["Can Pay"], false);
   assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes", code: "111111" }, c)).status, 401); assert.equal(dana.fields["Can Pay"], false);
-  assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true, code: "424242" }, c)).status, 400, "a code alone is not enough");
-  const m1 = sent.length, granted = await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes", code: "424242" }, c);
+  assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true, code: await totp(ownerKey) }, c)).status, 400, "a code alone is not enough");
+  assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes", code: "424242" }, c)).status, 401, "the texted sign-in code is not the app code");
+  const m1 = sent.length, granted = await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes", code: await totp(ownerKey) }, c);
+  // with pay authority on, Dana cannot turn two-step sign-in off; and with a team, neither can the owner
+  assert.equal((await call("/api/pro/2fa/off", { code: await totp(danaKey) }, dv.cookie)).status, 409); assert.equal((await call("/api/pro/2fa/off", { code: await totp(ownerKey) }, c)).status, 409);
+  // signing in now takes both codes, for the owner and for Dana
+  { const s1 = await call("/api/pro/verify-code", { phone: "9015550191", code: "424242" }); assert.equal(s1.next, "2fa"); assert.equal(s1.pro, undefined); assert.match(s1.cookie, /^hh_2=/); assert.equal((await call("/api/pro/me", null, s1.cookie)).status, 401, "the texted code alone is not a session");
+    assert.equal((await call("/api/pro/verify-2fa", { code: "000000" }, s1.cookie)).status, 401); assert.equal((await call("/api/pro/verify-2fa", { code: await totp(ownerKey) })).status, 401, "no ticket, no sign-in");
+    const s2 = await call("/api/pro/verify-2fa", { code: await totp(ownerKey) }, s1.cookie); assert.equal(s2.status, 200); assert.match(s2.cookie, /^hh_s=/); assert.equal((await call("/api/pro/me", null, s2.cookie)).pro.twoStep, true);
+    const d1 = await call("/api/pro/verify-code", { phone: "9017771111", code: smsCode("9017771111") }); assert.equal(d1.next, "2fa"); assert.equal((await call("/api/pro/verify-2fa", { code: await totp(ownerKey) }, d1.cookie)).status, 401, "the owner's app code does not sign Dana in");
+    assert.equal((await call("/api/pro/verify-2fa", { code: await totp(danaKey) }, d1.cookie)).pro.member.name, "Dana"); }
   assert.equal(granted.members[0].canPay, true); assert.ok(granted.members[0].payGrantedAt); assert.match(dana.fields["Pay Granted By"], /^Owner · \(901\) 555-0191$/);
   const grantRow = LOG.at(-1).fields; assert.equal(grantRow.Action, "Pay authority granted"); assert.ok(grantRow.At && grantRow.IP && grantRow.Agreement); assert.match(grantRow.Detail, /Confirmed twice/);
   assert.ok(sent.slice(m1).some((e) => /Dana can now claim and pay for leads by text/.test(e.subject) && /responsible for every charge/.test(e.html)));

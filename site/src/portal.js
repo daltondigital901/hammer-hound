@@ -52,11 +52,37 @@
   var NAV = [["home", "Home", "M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"], ["offers", "Open leads", "M4 5h16M4 12h16M4 19h10"], ["leads", "My leads", "M5 4h14v17l-7-4-7 4z"], ["wallet", "Wallet", "M3 7h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm0 0l12-4v4m2 6h.01"],
     ["verify", "Verification", "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zm-3 9l2 2 4-4"], ["profile", "Business profile", "M4 21V8l8-5 8 5v13M9 21v-6h6v6"], ["notifications", "Notifications", "M6 17V11a6 6 0 0 1 12 0v6l2 2H4zm4 4h4"],
     ["team", "Team", "M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm8 1a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM3 20a6 6 0 0 1 12 0m2 0a5 5 0 0 0-2.5-4.3"],
+    ["security", "Security", "M6 11V8a6 6 0 0 1 12 0v3m-13 0h14v10H5zm7 4v2"],
     ["support", "Support", "M4 5h16v11H9l-5 4z"], ["account", "Account", "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-8 9a8 8 0 0 1 16 0"]];
   var PRIMARY = ["home", "offers", "leads", "wallet"];
   // A team member works leads. Money, documents, settings and the team belong to the owner.
-  var MEMBER_TABS = ["offers", "leads", "support"];
+  var MEMBER_TABS = ["offers", "leads", "security", "support"];
   function asMember() { NAV = NAV.filter(function (n) { return MEMBER_TABS.indexOf(n[0]) >= 0; }); PRIMARY = MEMBER_TABS; }
+  // ---------- security: two-step sign-in ----------
+  function securityView() {
+    var status = h("div"), box = h("div");
+    var why = pro.member ? "Needed before " + pro.business + " can let you claim and pay for leads." : "Needed before you add team members. Optional if you are the only person on the account.";
+    function setup(k) {
+      var code = input("s-code", "text", "", { inputmode: "numeric", autocomplete: "one-time-code", maxlength: "6", placeholder: "6-digit code" }), err = h("div");
+      box.innerHTML = "";
+      box.appendChild(h("div", { class: "tm-confirm" }, [
+        h("strong", { text: "1. Add Hammer Hound to an authenticator app" }), h("p", { text: "Use Google Authenticator, Microsoft Authenticator, 1Password or any app like them. On this phone, tap the button. On another device, add an account by hand with this key." }),
+        h("a", { class: "btn btn--black", href: k.uri, text: "Open my authenticator app" }),
+        h("p", { class: "sec-key", text: k.secret.replace(/(.{4})/g, "$1 ").trim() }),
+        h("strong", { text: "2. Enter the code it shows" }), field("s-code", "Code from the app", code), err,
+        h("button", { class: "btn btn--yellow btn--block", type: "button", text: "Turn on two-step sign-in", on: { click: function () { call("/api/pro/2fa/confirm", { code: code.value.trim() }).then(function (res) { if (res.error) { err.innerHTML = ""; err.appendChild(note(res.error, "bad")); return; } pro = res.pro; securityView(); }); } } })]));
+    }
+    var offCode = input("s-off", "text", "", { inputmode: "numeric", maxlength: "6", placeholder: "6-digit code" });
+    shell([head("Security", "Two-step sign-in."),
+      pro.twoStep
+        ? card([h("div", { class: "tm-head" }, [h("h2", { text: "Two-step sign-in is on" }), h("span", { class: "chip chip--green", text: "On" })]), h("p", { class: "sub", text: "Signing in takes the code we text you and the code from your authenticator app." }),
+            field("s-off", "To turn it off, enter a code from the app", offCode), status,
+            h("button", { class: "btn btn--outline btn--block", type: "button", text: "Turn off two-step sign-in", on: { click: function () { call("/api/pro/2fa/off", { code: offCode.value.trim() }).then(function (res) { if (res.error) { status.innerHTML = ""; status.appendChild(note(res.error, "bad")); return; } pro = res.pro; securityView(); }); } } }),
+            h("p", { class: "hint", text: "Lost the app? Email support. We verify you and reset it." })], "verify")
+        : card([h("div", { class: "tm-head" }, [h("h2", { text: "Two-step sign-in is off" }), h("span", { class: "chip", text: "Off" })]), h("p", { class: "sub", text: "Adds a second code, from an app on your phone, each time you sign in. " + why }), status, box,
+            h("button", { class: "btn btn--yellow btn--block", type: "button", text: "Set up two-step sign-in", on: { click: function (e) { e.target.hidden = true; call("/api/pro/2fa/start", {}).then(function (res) { if (res.error) { e.target.hidden = false; status.innerHTML = ""; status.appendChild(note(res.error, "bad")); return; } setup(res); }); } } })], "verify"),
+    ]);
+  }
   var icon = function (d) { var s = h("span", { class: "pp-ico", "aria-hidden": "true" }); s.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="' + d + '"/></svg>'; return s; };
   function go(t) { tab = t; if (location.hash !== "#" + t) { try { history.pushState(null, "", "#" + t); } catch (e) {} } window.scrollTo(0, 0); render(); }
   function navLink(n, cls) {
@@ -547,14 +573,14 @@
             h("p", { text: "A YES from " + phoneFmt(m.mobile) + " will order the lead. It is paid from your wallet" + (r.card ? ", and if the wallet is short " + r.card + " is charged a reload." : ", and from any card you add later if the wallet is short.") }),
             h("p", { text: "You are responsible for every charge " + m.name + " makes until you turn this off." + (m.dailyCap ? " Their daily limit is " + money0(m.dailyCap) + "." : " They have no daily limit.") }),
             h("div", { class: "offer-actions" }, [
-              h("button", { class: "btn btn--black", type: "button", text: "Yes, text me a code to confirm", on: { click: function () { call("/api/pro/team/authority", { memberId: id, on: true, confirm: "yes" }).then(function (res) { if (res.error) { grant.appendChild(note(res.error, "bad")); return; } if (res.next === "code") askCode(res); else done(res, grant); }); } } }),
+              h("button", { class: "btn btn--black", type: "button", text: "Yes, continue", on: { click: function () { call("/api/pro/team/authority", { memberId: id, on: true, confirm: "yes" }).then(function (res) { if (res.error) { grant.appendChild(note(res.error, "bad")); return; } if (res.next === "code") askCode(res); else done(res, grant); }); } } }),
               h("button", { class: "btn btn--text", type: "button", text: "Cancel", on: { click: function () { grant.innerHTML = ""; } } })])]));
         }
         function askCode(sent) {
           var code = input("t-code-" + id, "text", "", { inputmode: "numeric", autocomplete: "one-time-code", maxlength: "6", placeholder: "6-digit code" }), err = h("div");
           grant.innerHTML = "";
           grant.appendChild(h("div", { class: "tm-confirm" }, [
-            h("strong", { text: "Confirm on your phone" }), h("p", { text: sent.sent === "test" ? "Test account: enter your test code." : "We texted a code to " + sent.to + ". Enter it to give " + m.name + " pay authority." }),
+            h("strong", { text: "Confirm with your authenticator app" }), h("p", { text: "Enter the 6-digit code for Hammer Hound from your authenticator app to give " + m.name + " pay authority." }),
             field("t-code-" + id, "Code", code), err,
             h("div", { class: "offer-actions" }, [
               h("button", { class: "btn btn--yellow", type: "button", text: "Confirm pay authority", on: { click: function () { call("/api/pro/team/authority", { memberId: id, on: true, confirm: "yes", code: code.value.trim() }).then(function (res) { done(res, err); }); } } }),
@@ -563,14 +589,28 @@
         }
         var pay = m.canPay
           ? h("div", { class: "tm-pay tm-pay--on" }, [h("div", {}, [h("strong", { text: "Can claim and pay by text" }), h("small", { text: "On since " + when(m.payGrantedAt) + "." })]), h("button", { class: "btn btn--black btn--sm", type: "button", text: "Turn off", on: { click: function () { call("/api/pro/team/authority", { memberId: id, on: false }).then(function (res) { done(res, status); }); } } })])
-          : h("div", { class: "tm-pay" }, [h("div", {}, [h("strong", { text: "Cannot claim or pay" }), h("small", { text: m.optedInAt ? "A YES from this number only asks you to claim the lead." : "Available once they accept the invite." })]), m.optedInAt ? h("button", { class: "btn btn--outline btn--sm", type: "button", text: "Give pay authority", on: { click: askGrant } }) : null]);
+          : h("div", { class: "tm-pay" }, [h("div", {}, [h("strong", { text: "Cannot claim or pay" }), h("small", { text: !m.optedInAt ? "Available once they accept the invite." : !m.twoStep ? m.name + " must turn on two-step sign-in first. Switch on \"Can sign in\" below, then they sign in and set it up under Security." : "A YES from this number only asks you to claim the lead." })]), m.optedInAt && m.twoStep ? h("button", { class: "btn btn--outline btn--sm", type: "button", text: "Give pay authority", on: { click: askGrant } }) : m.optedInAt ? h("span", { class: "chip chip--yellow", text: "Needs two-step" }) : null]);
         return card([
-          h("div", { class: "tm-head" }, [h("div", {}, [h("h2", { text: m.name }), h("p", { class: "meta", text: phoneFmt(m.mobile) })]), h("span", { class: "chip " + (m.optedInAt ? "chip--green" : "chip--yellow"), text: m.optedInAt ? "Accepted" : "Invite sent" })]),
+          h("div", { class: "tm-head" }, [h("div", {}, [h("h2", { text: m.name }), h("p", { class: "meta", text: phoneFmt(m.mobile) })]), h("div", { class: "tm-chips" }, [h("span", { class: "chip " + (m.optedInAt ? "chip--green" : "chip--yellow"), text: m.optedInAt ? "Accepted" : "Invite sent" }), m.twoStep ? h("span", { class: "chip chip--green", text: "Two-step on" }) : null])]),
           !m.optedInAt ? h("div", { class: "offer-actions" }, [h("button", { class: "btn btn--outline btn--sm", type: "button", text: "Text the invite again", on: { click: function () { call("/api/pro/team/invite", { memberId: id }).then(function (res) { if (done(res, status)) { status.innerHTML = ""; status.appendChild(note("Invite sent.", "good")); } }); } } }),
             r.test ? h("button", { class: "btn btn--text btn--sm", type: "button", text: "Mark as accepted (test)", on: { click: function () { call("/api/pro/team/test-optin", { memberId: id }).then(function (res) { done(res, status); }); } } }) : null]) : null,
           pay, grant, texts.el, portal.el, field("t-cap-" + id, "Daily limit for leads they claim ($)", cap, "Leave empty for no limit."), status, save,
           h("button", { class: "btn btn--text btn--block", type: "button", text: "Remove " + m.name, on: { click: function () { call("/api/pro/team/remove", { memberId: id }).then(function (res) { done(res, status); }); } } })], "verify");
       });
+      if (!r.twoStep || !r.ack) {
+        var agree = toggle("t-ack", "I understand", "", false), gs = h("div");
+        shell([head("Team", "Add up to " + r.max + " people to this account."),
+          card([h("h2", { text: "Before you add anyone" }),
+            h("div", { class: "tm-pay" + (r.twoStep ? " tm-done" : "") }, [h("div", {}, [h("strong", { text: "1. Turn on two-step sign-in" }), h("small", { text: r.twoStep ? "Done." : "An account with team members must have it on." })]), r.twoStep ? h("span", { class: "chip chip--green", text: "On" }) : h("button", { class: "btn btn--black btn--sm", type: "button", text: "Set it up", on: { click: function () { go("security"); } } })]),
+            h("div", { class: "tm-confirm" }, [h("strong", { text: "2. Read this" }),
+              h("p", { text: "People you add get lead texts on their own phone once they accept." }),
+              h("p", { text: "If you choose, you can also give a person the authority to claim leads. A YES from their number then orders the lead and it is paid from your wallet and your card on file. That is off for everyone until you turn it on for a person, and you confirm it each time." }),
+              h("p", { text: "Anyone you give that authority must have two-step sign-in on. You are responsible for the charges they make." }), agree.el]),
+            gs, h("button", { class: "btn btn--yellow btn--block", type: "button", text: "Turn on my team", on: { click: function () {
+              if (!r.twoStep) { gs.innerHTML = ""; gs.appendChild(note("Turn on two-step sign-in first.", "bad")); return; }
+              call("/api/pro/team/ack", { agree: agree.box.checked ? "yes" : "" }).then(function (res) { done(res, gs); }); } } })], "verify")]);
+        return;
+      }
       var name = input("t-name", "text", "", { autocomplete: "off" }), phone = input("t-phone", "tel", "", { autocomplete: "off", placeholder: "(901) 555-0100" });
       var add = r.members.length < r.max ? card([h("h2", { text: "Add a person" }), field("t-name", "Name", name), field("t-phone", "Their mobile number", phone, "We text them an invite. They get lead texts only after they reply YES."), top,
         h("button", { class: "btn btn--yellow btn--block", type: "button", text: "Add and text the invite", on: { click: function () { call("/api/pro/team/add", { name: name.value, phone: phone.value }).then(function (res) { done(res, top); }); } } })], "verify")
@@ -580,7 +620,7 @@
     }
   }
 
-  var VIEWS = { team: teamView, home: homeView, offers: offersView, leads: leadsView, wallet: walletView, verify: verifyView, profile: profileView, notifications: notificationsView, support: supportView, account: accountView, more: moreView };
+  var VIEWS = { security: securityView, team: teamView, home: homeView, offers: offersView, leads: leadsView, wallet: walletView, verify: verifyView, profile: profileView, notifications: notificationsView, support: supportView, account: accountView, more: moreView };
   function render() {
     if (!VIEWS[tab]) tab = pro && pro.member ? "offers" : "home";
     VIEWS[tab]();

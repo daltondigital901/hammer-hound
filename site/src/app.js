@@ -67,7 +67,21 @@
     form.setAttribute("data-form", "proCode");
     form.onsubmit = function (e) {
       e.preventDefault(); e.stopImmediatePropagation();
-      send("proCode", { phone: phone, code: form.elements.code.value.trim() }, $("[data-status]", form), $("button", form)).then(function (ok) { if (ok) location.href = "/pros/app/"; });
+      send("proCode", { phone: phone, code: form.elements.code.value.trim() }, $("[data-status]", form), $("button", form)).then(function (ok) { if (ok && ok.next === "2fa") appStep(form); else if (ok) location.href = "/pros/app/"; });
+    };
+    form.elements.code.focus();
+  }
+  // Two-step sign-in: after the texted code, the 6-digit code from the authenticator app.
+  function appStep(form) {
+    form.innerHTML = '<h2 class="h1">One more step</h2><p class="sub">Open your authenticator app and enter the 6-digit code for Hammer Hound.</p>' +
+      '<label class="label" for="app-input">Authenticator app code</label><input class="input" id="app-input" name="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required>' +
+      '<p class="form-status" data-status role="status" hidden></p><button class="btn btn--yellow btn--block" type="submit">Sign in</button><p class="meta">Lost your phone or the app? Email support and we will verify you and reset it.</p>';
+    form.onsubmit = function (e) {
+      e.preventDefault(); e.stopImmediatePropagation();
+      var st = $("[data-status]", form), btn = $("button", form); btn.disabled = true;
+      fetch("/api/pro/verify-2fa", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin", body: JSON.stringify({ code: form.elements.code.value.trim() }) })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (r.ok) { location.href = "/pros/app/"; return; } status(st, j.error || "That did not go through. Try again.", "bad"); btn.disabled = false; }); })
+        .catch(function () { status(st, "That did not go through. Check your connection and try again.", "bad"); btn.disabled = false; });
     };
     form.elements.code.focus();
   }

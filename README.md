@@ -216,3 +216,14 @@ Up to 5 people per account (`TEAM_MAX`), in the `Team` table (`tblAxauFF33UVS2gV
 - **Sign-in.** A member with `Portal` on signs in with their own number and sees Open leads, My leads and Support. Wallet, card, documents, settings and the team return 403.
 - **API.** `GET /api/pro/team`, `POST /api/pro/team/add|update|invite|authority|remove|test-optin` (owner only).
 - Pro Agreement 5.2.5 covers it.
+
+## Two-step sign-in
+
+An authenticator app (the standard 6-digit, 30-second code) on top of the texted code. The Security screen in the portal sets it up.
+
+- **When it is required.** Never for an account with one person. An owner must have it on, and accept the team notice (`Team Ack`, fld8qH14mVrf5rcKS: version, time, IP), before adding a team member. A team member must have it on before they can be given pay authority. It cannot be turned off while it is required.
+- **Sign-in.** `POST /api/pro/verify-code` returns `{ next: "2fa" }` and a ten-minute ticket instead of a session; `POST /api/pro/verify-2fa { code }` then signs in. The emailed "update your card" link does not sign in an account with two-step on.
+- **Pay authority.** The second confirmation is now the owner's app code, not a texted code.
+- **Storage.** `2FA Secret` (encrypted with a key derived from `SESSION_SECRET`) and `2FA On At`, on Pros (fldiVmyaSqRrmkVVH, fldjLoJy0mr8cMkSZ) and Team (fld4NRBPfaslc0CQu, fldJHxIvfGez3n7Tf). Changing `SESSION_SECRET` invalidates every key.
+- **Reset.** Clear both fields on the record in Airtable after verifying the person. There are no backup codes yet.
+- **API.** `POST /api/pro/2fa/start|confirm|off`, `POST /api/pro/team/ack`.
