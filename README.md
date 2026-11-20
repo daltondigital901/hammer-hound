@@ -229,3 +229,38 @@ A card at the bottom of the portal walks a new person through it once: Open lead
 - **Numbers come from settings.** `GET /api/pro/me` returns `tour` (prices, pros per lead, welcome credit, hot hours, whether texting is live), so the copy follows `wrangler.jsonc`.
 - **Variants.** Team members get four cards (no wallet or texts card). The texts card says texting is not live until Twilio is connected. An owner with a card on file is told about the Older leads tab.
 - The copy lives in `tourSteps()` in `site/src/portal.js`.
+
+## Pricing engine
+
+`src/pricing.js` is the engine: pure functions, no network or clock, every decision returned with its reasons. `worker.js` only feeds it and stores what it decides.
+
+```
+shared price = job value x rate                      Pricing Trades (default: $2,500 x 3%)
+             x size x timing x property x contact    the request, from the lead writer's facts
+             x address                               a street address was given
+             x market                                Pricing Markets: manual, else demand
+             never under the cost floor, inside the minimum and maximum, to the nearest $5
+exclusive    = shared x 3
+```
+
+| Input | Values |
+| --- | --- |
+| Job value | Per trade, from the DD1 Niche List "Major Job Floor ($)". Trades with no niche use $2,500. |
+| Size | Small 0.7, Medium 1, Large 1.5 |
+| Timing | Emergency 1.25, Within a week 1.15, Within a month 1, Flexible 0.85 |
+| Property | Business 1.2, Home or Rental 1 |
+| Bid invitation | 0.6, in place of the property multiplier |
+| Contact | Phone 1, email only 0.6, neither 0.4 |
+| Address given | 1.05 |
+| Market | 0.75 to 1.5. Moves one step (0.1) a day toward `1 + (sell-through - 40%)`. Stays at 1 with no real verified pro or fewer than 10 leads in 30 days. |
+| Cost floor | `Cost Per Lead x 1.5`. Beats the maximum. |
+| Limits | $15 to $400 shared, or the trade row's Min Price and Max Price |
+
+"Not stated" is always neutral. All of the numbers above are `PRICING` in `src/pricing.js`.
+
+- **Where you change things without a deploy.** `Pricing Trades` (tbl6J7aYXbhEZjrVw): Job Value, Rate %, Min Price, Max Price per trade; the engine fills the table on its first run. `Pricing Markets` (tbl4QFgPCQk4QL27B): Cost Per Lead and Manual Multiplier per market and trade. A lead's `Price Locked` checkbox (fldNN7E2zjwEOA3bs) keeps a hand-set price.
+- **When a lead is priced.** As the lead writer writes it. The price, every input and every multiplier are stored in `Price Basis` (fldhpmZFnOxmPXeX7) with `Price Version` (fldBmlK0ttyTwVUdP). Open leads from an older version are re-priced a few a minute.
+- **One price per lead.** The first sale sets `Price Version` to `sold` and the price never changes after that. The age markdown for older leads still applies on top.
+- **Sell-through** is claims by real pros divided by the sales that were possible: leads x the smaller of spots per lead and real verified pros in that market and trade. Test accounts never count. `refreshMarkets()` runs daily at 5am Central; `POST /api/admin/pricing` runs it now.
+- **Kill switch.** `PRICING_ENGINE` = `"off"` in `wrangler.jsonc` returns every new lead to `SHADOW_SHARED_PRICE` / `SHADOW_EXCLUSIVE_PRICE`.
+- **Welcome credit** is now described in dollars everywhere ("$240 in free leads"), since a lead no longer has one price. The site copy has the $240 written in; change it there if `WELCOME_CREDIT` changes.

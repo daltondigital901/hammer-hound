@@ -44,7 +44,7 @@ A Pro also accepts the Pro Agreement when creating an account. Where the Pro Agr
 
 **5.5 Buying by text.** If you opt in to text offers, replying YES (or the exclusive keyword) to an offer is your order and your authorization to deduct the stated price from your balance. Offers expire at the time stated or when all places are taken.
 
-**5.6 Welcome credit.** A new pro account starts with $240 of welcome credit, which is enough for 3 shared leads at the standard price of $75. Welcome credit can be spent only on leads, only after you pass verification, and is spent before money you add. It has no cash value, cannot be withdrawn, transferred or refunded, and may be changed or ended for new accounts at any time. If a lead paid for with welcome credit qualifies under the Lead Credit Policy, the welcome credit is returned to your balance; it is not paid out.
+**5.6 Welcome credit.** A new pro account starts with $240 of welcome credit. Welcome credit can be spent only on leads, only after you pass verification, and is spent before money you add. It has no cash value, cannot be withdrawn, transferred or refunded, and may be changed or ended for new accounts at any time. If a lead paid for with welcome credit qualifies under the Lead Credit Policy, the welcome credit is returned to your balance; it is not paid out.
 
 **5.7 All purchases are final** except as stated in the Lead Credit Policy in section 6.
 

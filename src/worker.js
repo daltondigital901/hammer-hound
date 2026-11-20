@@ -1,4 +1,5 @@
 import { invoicePdf } from "./pdf.js";
+import { PRICING, PRICING_VERSION, priceLead, demandMultiplier, priceReasons } from "./pricing.js";
 
 // Hammer Hound engine: serves the static site and the pro API, and copies
 // Dalton Digital form leads into the Hammer Hound base for shadow testing.
@@ -16,7 +17,7 @@ const DD1 = {
 // Leads from these sites are never offered: GBP leads cannot be sold.
 const HAS_GBP = new Set(["Has One!", "Has One - Needs Final Owner Confirmed", "Has One - Needs Owner Transferred", "Has One, Doesn't Need Reviews", "First Suspension Appeal", "Second Suspension Appeal", "Suspended", "Soft Suspension", "Needs deletion"]);
 const RULE = "v3";
-const HH = { base: "app0PSwGlQyC6q7FW", leads: "tblfA6ivDIlWVp4us", pros: "tbl9bEGuy8DPkkee7", purchases: "tblJnYLq2aCiCVU1C", tickets: "tblFDXXEvvlb6F8vN", ledger: "tblZ2EIWCgOb36JR2", requests: "tbl315ujQMh1PHOi8", team: "tblAxauFF33UVS2gV", authLog: "tblTYo9QOk8hTwQad" };
+const HH = { base: "app0PSwGlQyC6q7FW", leads: "tblfA6ivDIlWVp4us", pros: "tbl9bEGuy8DPkkee7", purchases: "tblJnYLq2aCiCVU1C", tickets: "tblFDXXEvvlb6F8vN", ledger: "tblZ2EIWCgOb36JR2", requests: "tbl315ujQMh1PHOi8", team: "tblAxauFF33UVS2gV", authLog: "tblTYo9QOk8hTwQad", pricingTrades: "tbl6J7aYXbhEZjrVw", pricingMarkets: "tbl4QFgPCQk4QL27B" };
 const NOT_OPEN = "Hammer Hound is not open yet, so nothing was sent. Check back soon.";
 
 const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...headers } });
@@ -459,9 +460,10 @@ const jobView = (l) => ({
   city: l.fields.City || "", state: l.fields.State || "", place: placeOf(l.fields) || "Area not stated", summary: noFiller(l.fields.Summary),
   timing: l.fields.Timing || "Not stated", propertyType: l.fields["Property Type"] || "Not stated", jobSize: l.fields["Job Size"] || "Not stated", receivedAt: l.fields["Received At"], bid: /Bid Invitation$/.test(l.fields.Job || ""),
 });
+const priceWhy = (l) => { try { return priceReasons(JSON.parse(l.fields["Price Basis"] || "null")); } catch { return []; } };
 const offerView = (env, l, taken, exclusiveTaken) => ({
   ...jobView(l), hot: isHot(l), hotUntil: new Date(Date.parse(l.fields["Received At"]) + HOT_HOURS * 3600e3).toISOString(), endsAt: new Date(Date.parse(l.fields["Received At"]) + LEAD_DAYS * 864e5).toISOString(),
-  sharedPrice: priceOf(env, l, "shared"), exclusivePrice: priceOf(env, l, "exclusive"), fullPrice: l.fields["Shared Price"], percentOff: 100 - agedPercent(env, l), maxPros: l.fields["Max Pros"], spotsTaken: taken, exclusiveAvailable: taken === 0 && !exclusiveTaken,
+  sharedPrice: priceOf(env, l, "shared"), exclusivePrice: priceOf(env, l, "exclusive"), fullPrice: l.fields["Shared Price"], percentOff: 100 - agedPercent(env, l), priceWhy: priceWhy(l), maxPros: l.fields["Max Pros"], spotsTaken: taken, exclusiveAvailable: taken === 0 && !exclusiveTaken,
 });
 // A bought lead: the uniform part, then the owner's details and their own words.
 const leadView = (l) => ({ ...jobView(l), ownerName: l.fields["Owner Name"] || "", ownerPhone: l.fields["Owner Phone"] || "", ownerEmail: l.fields["Owner Email"] || "", address: l.fields["Job Address"] || "", message: l.fields.Message || "" });
@@ -670,7 +672,8 @@ async function purchase(env, pro, { leadId, kind, reload = false, via = "Portal"
     await sendEmail(env, saved.fields.Email, `${by.fields.Member} claimed a lead`, [`Hi ${saved.fields["Business Name"]},`, `${by.fields.Member} (${fmtPhone(by.fields.Mobile)}) claimed ${lead.fields.Lead} ${via === "Text" ? "by text" : "in the portal"}.`, `${usd2(price)} came out of your wallet. Your balance is ${usd2(after)}.`, "The lead is in My leads. To change what this person can do, open your Team screen."], { heading: "A team member claimed a lead", cta: ["Open my leads", APP + "#leads"] });
   }
   if (kind === "exclusive") await update(env, HH.leads, leadId, { Status: "Exclusive" });
-  else if (bought.length + 1 >= lead.fields["Max Pros"]) await update(env, HH.leads, leadId, { Status: "Sold out" });
+  else if (bought.length + 1 >= lead.fields["Max Pros"]) await update(env, HH.leads, leadId, { Status: "Sold out", "Price Version": "sold" });
+  else if (lead.fields["Price Version"] !== "sold") await update(env, HH.leads, leadId, { "Price Version": "sold" });
   // Auto-reload: keep at least one lead's worth in the wallet, if the pro turned it on.
   let autoReloaded = 0;
   if (saved.fields["Auto Reload"] && saved.fields.Card && after < lead.fields["Shared Price"]) { const t = await topUp(env, saved, reloadUnit(saved.fields), "Auto-reload"); if (t.ok) { saved = t.pro; autoReloaded = reloadUnit(saved.fields); } }
@@ -934,6 +937,84 @@ export function scrub(text, f) {
 // Sentences that only list what the owner did not say add nothing: the facts row already shows "Not stated".
 const noFiller = (t) => String(t || "").replace(/\s*\bNo [^.]{0,90}\b(?:was|were|is|are) (?:given|stated|provided|mentioned|specified|included)\.?/g, "").trim();
 const placeOf = (f) => [f.City, f.State].filter(Boolean).join(", ");
+// ---------- pricing: the glue between Airtable and src/pricing.js ----------
+// The engine itself is pure. This part loads its inputs (the trade row, the market row), stores what it decides
+// on the lead with the reasons, re-prices open leads when the engine version changes, and refreshes market demand daily.
+let tradeCache = { at: 0, rows: null };
+async function pricingTrades(env) {
+  if (tradeCache.rows && Date.now() - tradeCache.at < 300e3) return tradeCache.rows;
+  let rows = await list(env, HH.base, HH.pricingTrades, { pageSize: 100, maxRecords: 300 });
+  // First run: fill the table so every trade's settings are visible and editable in one place.
+  if (!rows.length) {
+    const seed = [...TRADES.map(([slug, name]) => [slug, name]), ["other", "Other"]].map(([slug, name]) => ({ fields: { Trade: slug, "Trade Name": name, ...(PRICING.jobValue[slug] ? { "Job Value": PRICING.jobValue[slug], Source: "DD1 Niche List: Major Job Floor ($)" } : { Source: `No matching niche. Uses the default of $${PRICING.defaultJobValue} until you set a Job Value.` }) } }));
+    for (let i = 0; i < seed.length; i += 10) await at(env, HH.base, HH.pricingTrades, { method: "POST", body: { records: seed.slice(i, i + 10), typecast: true } });
+    rows = await list(env, HH.base, HH.pricingTrades, { pageSize: 100, maxRecords: 300 });
+  }
+  tradeCache = { at: Date.now(), rows: Object.fromEntries(rows.map((r) => [r.fields.Trade, r])) };
+  return tradeCache.rows;
+}
+const segmentOf = (city, trade) => `${String(city || "").trim().toLowerCase()}|${trade || "other"}`;
+const isBid = (job) => /Bid Invitation$/.test(job || "");
+// Prices one lead from its facts as they stand in `f` (the stored fields, with the writer's new values laid over them).
+// PRICING_ENGINE = "off" is the kill switch: every lead goes back to the flat SHADOW_SHARED_PRICE and SHADOW_EXCLUSIVE_PRICE.
+const engineOff = (env) => env.PRICING_ENGINE === "off";
+async function priceFor(env, f, marketRows = null) {
+  if (engineOff(env)) { const shared = num(env.SHADOW_SHARED_PRICE, 75), exclusive = num(env.SHADOW_EXCLUSIVE_PRICE, 225); return { shared, exclusive, basis: { v: PRICING_VERSION, flat: true, shared, exclusive } }; }
+  const tr = (await pricingTrades(env))[f.Trade], seg = segmentOf(f.City, f.Trade);
+  const mk = !f.City ? null : marketRows ? marketRows[seg] : (await list(env, HH.base, HH.pricingMarkets, { filterByFormula: `{Segment}='${esc(seg)}'`, maxRecords: 1 }))[0];
+  return priceLead(
+    { trade: f.Trade || "other", size: f["Job Size"], timing: f.Timing, property: f["Property Type"], bid: isBid(f.Job), hasPhone: digits(f["Owner Phone"]).length >= 10, hasEmail: /@/.test(f["Owner Email"] || ""), hasAddress: !!f["Job Address"] },
+    tr ? { jobValue: tr.fields["Job Value"], ratePct: tr.fields["Rate %"], min: tr.fields["Min Price"], max: tr.fields["Max Price"] } : null,
+    mk ? { manual: mk.fields["Manual Multiplier"], demand: mk.fields["Demand Multiplier"], costPerLead: mk.fields["Cost Per Lead"] } : null);
+}
+const priceFields = (p) => ({ "Shared Price": p.shared, "Exclusive Price": p.exclusive, "Price Basis": JSON.stringify(p.basis), "Price Version": PRICING_VERSION });
+// A lead's price is fixed once a pro has bought it (every pro pays the same for the same lead), or when a person locked it.
+const priceFixed = (f) => !!f["Price Locked"] || f["Price Version"] === "sold";
+// Open leads priced by an older engine version (or never priced) are brought up to date, a few each minute.
+export async function repriceLeads(env) {
+  if (engineOff(env)) return { repriced: 0, sold: 0 };
+  const todo = await list(env, HH.base, HH.leads, { filterByFormula: `AND({Status}='Offered',{Style}='${STYLE}',NOT({Price Version}='${PRICING_VERSION}'),NOT({Price Version}='sold'),NOT({Price Locked}),IS_AFTER({Received At},DATEADD(NOW(),-${LEAD_DAYS},'days')))`, pageSize: 25, maxRecords: 25 });
+  if (!todo.length) return { repriced: 0, sold: 0 };
+  const boughtIds = new Set((await list(env, HH.base, HH.purchases, { pageSize: 100, "fields[]": ["Purchase"] })).map((p) => String(p.fields.Purchase).split(":")[0]));
+  const out = { repriced: 0, sold: 0 };
+  for (const l of todo) {
+    if (boughtIds.has(l.id)) { await update(env, HH.leads, l.id, { "Price Version": "sold" }); out.sold++; continue; }
+    await update(env, HH.leads, l.id, priceFields(await priceFor(env, l.fields))); out.repriced++;
+  }
+  return out;
+}
+// Once a day: 30 days of leads, real sales, real verified pros and requests, per market and trade.
+// Writes the numbers and the demand multiplier to Pricing Markets. Test accounts never count.
+export async function refreshMarkets(env) {
+  const [leads, buys, pros, requests, rows] = await Promise.all([
+    list(env, HH.base, HH.leads, { filterByFormula: `AND({Style}='${STYLE}',{Qualified}='Yes',IS_AFTER({Received At},DATEADD(NOW(),-30,'days')))`, pageSize: 100, "fields[]": ["Trade", "City", "Max Pros"] }),
+    list(env, HH.base, HH.purchases, { filterByFormula: "IS_AFTER({Bought At},DATEADD(NOW(),-30,'days'))", pageSize: 100, "fields[]": ["Purchase", "Kind"] }),
+    list(env, HH.base, HH.pros, { pageSize: 100, maxRecords: 5000 }),
+    list(env, HH.base, HH.requests, { pageSize: 100, maxRecords: 5000 }),
+    list(env, HH.base, HH.pricingMarkets, { pageSize: 100, maxRecords: 5000 }),
+  ]);
+  const seg = {}, S = (key, market, trade) => (seg[key] ||= { market, trade, leads: 0, claims: 0, pros: 0, requests: 0, spots: 0 });
+  const leadSeg = {}, real = Object.fromEntries(pros.filter((p) => !p.fields.Test).map((p) => [p.id, p]));
+  for (const l of leads) { if (!l.fields.City) continue; const k = segmentOf(l.fields.City, l.fields.Trade), s = S(k, l.fields.City, l.fields.Trade || "other"); s.leads++; s.spots += l.fields["Max Pros"] || num(env.SHADOW_MAX_PROS, 5); leadSeg[l.id] = { k, max: l.fields["Max Pros"] || num(env.SHADOW_MAX_PROS, 5) }; }
+  for (const b of buys) { const [leadId, proId] = String(b.fields.Purchase).split(":"), ls = leadSeg[leadId]; if (ls && real[proId]) seg[ls.k].claims += selectName(b.fields.Kind) === "Exclusive" ? ls.max : 1; }
+  for (const p of Object.values(real)) if (isVerified(p) && p.fields.City) for (const t of new Set([p.fields.Trade, ...String(p.fields["Extra Trades"] || "").split(",").map((x) => x.trim())].filter(Boolean))) S(segmentOf(p.fields.City, t), p.fields.City, t).pros++;
+  for (const r of requests) if (!r.fields.Test && r.fields.Market && r.fields.Trade && r.fields.Trade !== "all") S(segmentOf(r.fields.Market, r.fields.Trade), r.fields.Market, r.fields.Trade).requests++;
+  const have = Object.fromEntries(rows.map((r) => [r.fields.Segment, r])), out = { segments: 0, written: 0, moved: 0 }, now = new Date().toISOString();
+  for (const r of rows) S(r.fields.Segment, r.fields.Market, r.fields.Trade);          // a row a person made keeps getting numbers
+  for (const [key, s] of Object.entries(seg)) {
+    const row = have[key];
+    // Rows are only kept where there is something to act on: enough leads to measure, a real pro, a request, or a row already there.
+    if (!row && !(s.leads >= PRICING.market.minLeads || s.pros >= 1 || s.requests >= 1)) continue;
+    out.segments++;
+    if (out.written >= 80) continue;
+    const d = demandMultiplier({ leads: s.leads, claims: s.claims, pros: s.pros, spots: s.leads ? s.spots / s.leads : num(env.SHADOW_MAX_PROS, 5) }, row ? row.fields["Demand Multiplier"] : 1);
+    const fields = { "Demand Multiplier": d.multiplier, "Demand Note": d.note, "Leads 30d": s.leads, "Claims 30d": s.claims, "Sell Through": d.sellThrough, "Verified Pros": s.pros, Requests: s.requests, "Updated At": now };
+    if (row) await update(env, HH.pricingMarkets, row.id, fields); else await create(env, HH.pricingMarkets, { Segment: key, Market: s.market, Trade: s.trade, ...fields });
+    out.written++; if (row && row.fields["Demand Multiplier"] !== d.multiplier) out.moved++;
+  }
+  return out;
+}
+
 // Rejected by the lead writer (not by a person or an ingest rule). These are looked at again when the rules change.
 const writerRejected = (f) => f.Status === "Rejected" && String(f.Qualified || "").startsWith("No:");
 async function styleOne(env, lead) {
@@ -945,10 +1026,13 @@ async function styleOne(env, lead) {
   let job = String(w.job || "").replace(/^(fwd?|re):\s*/i, "").trim().slice(0, 60) || (TRADE_NAME[trade] ? TRADE_NAME[trade] + " Job" : "Job");
   // Every bid invitation gets the same title shape, whatever the model wrote: "<Scope> Bid Invitation".
   if (w.request_type === "bid") job = (job.replace(/\b(sub-?contractors?|subs?|bids?|bidding|proposals?|requests?|invitations?|rfp|itb|addend(?:um|a)|for|to)\b/gi, " ").replace(/[^A-Za-z0-9&' ]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 44) || (TRADE_NAME[trade] && trade !== "other" ? TRADE_NAME[trade] : "Project")) + " Bid Invitation";
-  return update(env, HH.leads, lead.id, {
+  const next = {
     Style: STYLE, Qualified: "Yes", Status: writerRejected(f) ? "Offered" : f.Status, Job: job, Trade: trade, City: city, State: state, Lead: `${job} · ${[city, state].filter(Boolean).join(", ") || "Area not stated"}`,
     Summary: noFiller(scrub(w.summary, f)), Timing: pickFrom(w.timing, TIMINGS), "Property Type": w.request_type === "bid" ? "Business" : pickFrom(w.property_type, PROPERTY), "Job Size": pickFrom(w.job_size, SIZES), "Job Address": String(w.address || "").slice(0, 160),
-  });
+  };
+  // Now that the trade, size, timing and property are known, the engine sets the price.
+  if (!priceFixed(f)) Object.assign(next, priceFields(await priceFor(env, { ...f, ...next })));
+  return update(env, HH.leads, lead.id, next);
 }
 // Rewrites leads that are not yet in the current format, newest first, a few per run.
 export async function styleLeads(env) {
@@ -1156,6 +1240,8 @@ async function adminApi(request, env, path, body) {
     await resultEmail(env, saved, "Declined", reason);
     return json({ ok: true });
   }
+  // Run the daily market refresh and a re-pricing pass now, instead of waiting for the schedule.
+  if (path === "/api/admin/pricing") return json({ ok: true, markets: await refreshMarkets(env), leads: await repriceLeads(env) });
   if (path === "/api/admin/report") {
     if (!okId(body.purchaseId) || !["approve", "deny"].includes(body.decision)) return fail(400, "Pick a report and a decision.");
     const p = await at(env, HH.base, HH.purchases, { id: body.purchaseId });
@@ -1197,7 +1283,7 @@ async function api(request, env, path) {
     if (!env.ADMIN_KEY || request.headers.get("X-Admin-Key") !== env.ADMIN_KEY) return fail(401, "Not allowed.");
     try { return json(await sendInvoices(env, { month: body.month, dry: !!body.dry })); } catch (e) { return json({ error: String(e && e.message || e) }, 500); }
   }
-  if (["/api/admin/sign-in", "/api/admin/sign-out", "/api/admin/overview", "/api/admin/doc", "/api/admin/verify", "/api/admin/report", "/api/admin/ticket"].includes(path)) return adminApi(request, env, path, body);
+  if (["/api/admin/sign-in", "/api/admin/sign-out", "/api/admin/overview", "/api/admin/doc", "/api/admin/verify", "/api/admin/report", "/api/admin/ticket", "/api/admin/pricing"].includes(path)) return adminApi(request, env, path, body);
   if (path === "/api/pro/link") {
     const [id, exp, sig] = (new URL(request.url).searchParams.get("t") || "").split(".");
     const good = /^rec[A-Za-z0-9]{14}$/.test(id || "") && Number(exp) > Date.now() && sig === (await hmac(env.SESSION_SECRET, `link:${id}.${exp}`)).slice(0, 40);
@@ -1272,7 +1358,7 @@ async function api(request, env, path) {
   if (pro.member && path === "/api/pro/buy" && !pro.member.fields["Can Pay"]) return fail(403, `You cannot claim leads on this account. Ask ${pro.fields["Business Name"]} to claim it or to give you pay authority.`);
   if (path.startsWith("/api/pro/team")) return teamApi(request, env, pro, path, body);
   // The numbers the first-time tour quotes come from the live settings, so the tour cannot drift from the prices.
-  if (path === "/api/pro/me") return json({ pro: proView(pro), tour: { shared: num(env.SHADOW_SHARED_PRICE, 75), exclusive: num(env.SHADOW_EXCLUSIVE_PRICE, 225), maxPros: num(env.SHADOW_MAX_PROS, 5), welcome: num(env.WELCOME_CREDIT, 240), hotHours: HOT_HOURS, leadDays: LEAD_DAYS, textsLive: twilioReady(env) } });
+  if (path === "/api/pro/me") return json({ pro: proView(pro), tour: { exclusiveMultiple: PRICING.exclusiveMultiple, maxPros: num(env.SHADOW_MAX_PROS, 5), welcome: num(env.WELCOME_CREDIT, 240), hotHours: HOT_HOURS, leadDays: LEAD_DAYS, textsLive: twilioReady(env) } });
   // The tour was finished or skipped. Stored on the person, so it shows once on any device.
   if (path === "/api/pro/tour" && request.method === "POST") {
     const self = pro.member || pro;
@@ -1434,6 +1520,8 @@ export default {
     // Reminders: once an hour, 8am to 6pm Central, so nobody gets one at night.
     if (event.cron === "7 * * * *") {
       const hour = Number(new Date().toLocaleString("en-US", { hour: "numeric", hour12: false, timeZone: "America/Chicago" }));
+      // Market demand: once a day, early, so the day's leads are priced on yesterday's sales.
+      if (hour === 5) ctx.waitUntil(refreshMarkets(env).then((r) => console.log("markets", JSON.stringify(r)), (e) => console.error("markets failed:", String(e && e.message || e))));
       if (hour >= 8 && hour < 18) ctx.waitUntil(sendReminders(env).then((r) => console.log("reminders", JSON.stringify({ due: r.due, sent: r.sent, held: r.held })), (e) => console.error("reminders failed:", String(e && e.message || e))));
       return;
     }
@@ -1444,6 +1532,7 @@ export default {
     const step = (name, fn) => fn().catch((e) => console.error(`${name} failed:`, String(e && e.message || e)));
     const run = async () => {
       if (env.SHADOW_MODE === "true") await step("ingest", async () => console.log("ingest", JSON.stringify(await ingest(env))));
+      await step("pricing", async () => { const r = await repriceLeads(env); if (r.repriced || r.sold) console.log("pricing", JSON.stringify(r)); });
       await step("alerts", async () => { const alerts = await alertPros(env); if (alerts.leads) console.log("alerts", JSON.stringify(alerts)); });
       await step("credit backs", async () => { const back = await creditBacks(env); if (back) console.log("credit backs", back); });
     };
