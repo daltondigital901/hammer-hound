@@ -567,6 +567,21 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   assert.ok((await call("/api/pro/team", null, c)).log.length >= 10);
 }
 
+// ---- first-time tour: shown until the person finishes or skips it, per person ----
+{
+  const c = await signUp(92), me0 = await call("/api/pro/me", null, c);
+  assert.equal(me0.pro.tourSeen, false); assert.deepEqual([me0.tour.shared, me0.tour.exclusive, me0.tour.maxPros, me0.tour.welcome, me0.tour.hotHours, me0.tour.leadDays], [75, 225, 5, 240, 72, 7]); assert.equal(typeof me0.tour.textsLive, "boolean");
+  assert.equal((await call("/api/pro/tour", {}, c)).ok, true); assert.equal((await call("/api/pro/me", null, c)).pro.tourSeen, true);
+  const first = db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550192").fields["Tour Seen At"]; await call("/api/pro/tour", {}, c);
+  assert.equal(db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550192").fields["Tour Seen At"], first, "the first time is kept");
+  assert.equal((await call("/api/pro/tour", {}, null)).status, 401);
+  // a team member has their own tour, separate from the owner's
+  await call("/api/pro/team/ack", { agree: "yes" }, c); await call("/api/pro/team/add", { name: "Tess", phone: "9015550178" }, c); const tess = db.tblAxauFF33UVS2gV.at(-1);
+  await call("/api/pro/team/update", { memberId: tess.id, getsTexts: true, portal: true, dailyCap: "" }, c); await call("/api/pro/sign-in", { phone: "9015550178" });
+  const tv = await call("/api/pro/verify-code", { phone: "9015550178", code: "424242" }); assert.equal(tv.pro.tourSeen, false, "the owner finishing the tour does not finish it for the member");
+  await call("/api/pro/tour", {}, tv.cookie); assert.ok(tess.fields["Tour Seen At"]); assert.equal((await call("/api/pro/me", null, tv.cookie)).pro.tourSeen, true);
+}
+
 // ---- insurance reminders and nudges ----
 const R = (f, now) => (reminderFor({ Email: "a@b.co", Verification: "Verified", ...f }, now) || {}).stage;
 assert.equal(R({ "Insurance Expires": "2027-03-31" }, "2027-02-01"), undefined, "nothing more than 30 days out");
