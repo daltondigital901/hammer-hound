@@ -90,6 +90,7 @@ export const stored = new Map(), sent = [], texts = [];
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (input, init = {}) => {
   const url = new URL(typeof input === "string" ? input : input.url || input);
+  if (url.hostname === "zip.test") { const z = url.pathname.split("/").pop(), hit = { 38103: ["Memphis", "TN"], 38654: ["olive branch", "MS"] }[z]; return hit ? new Response(JSON.stringify({ places: [{ "place name": hit[0], "state abbreviation": hit[1] }] }), { status: 200 }) : new Response("{}", { status: 404 }); }
   if (url.hostname === "ai.test") return aiMock(JSON.parse(init.body), init.headers);
   if (url.hostname === "api.twilio.com") { const b = new URLSearchParams(init.body); texts.push({ to: b.get("To"), body: b.get("Body") }); return new Response("{}", { status: 201 }); }
   if (url.hostname !== "api.airtable.com") return realFetch(input, init);
@@ -116,7 +117,7 @@ globalThis.fetch = async (input, init = {}) => {
 export const env = {
   AIRTABLE_TOKEN: "test", SESSION_SECRET: "local-test-secret", TEST_CODE: "424242", SHADOW_MODE: "true",
   SHADOW_SHARED_PRICE: "75", SHADOW_EXCLUSIVE_PRICE: "225", SHADOW_MAX_PROS: "5", TEST_BALANCE: "240",
-  ANTHROPIC_API_KEY: "test-key", ANTHROPIC_API: "https://ai.test/v1/messages", STYLE_BATCH: "50",
+  ZIP_API: "https://zip.test/us", ANTHROPIC_API_KEY: "test-key", ANTHROPIC_API: "https://ai.test/v1/messages", STYLE_BATCH: "50",
   DOCS: { put: async (k, v, o) => { stored.set(k, { size: v.byteLength, body: v, ...o }); }, get: async (k) => (stored.has(k) ? stored.get(k) : null) },
   ADMIN_KEY: "test-admin-key-0123456789", PRICING_ENGINE: "off", ADMIN_DELAY: "0",
   EMAIL: { send: async (msg) => { sent.push(msg); return { messageId: "m" + sent.length }; } },

@@ -164,6 +164,19 @@
     var legal = h("input", { class: "input", id: "v-legal", type: "text", autocomplete: "organization", required: "", value: pro.legalName || "" });
     var type = h("select", { class: "input", id: "v-type", required: "" }, [h("option", { value: "", text: "Choose a document" })].concat(DOC_TYPES.map(function (t) { return h("option", { value: t, text: t }); })));
     var bFile = file("doc-business"), iFile = file("doc-insurance");
+    // On a phone: open the camera and put the photo into the upload field. A hidden second input does the capturing.
+    function snap(target) {
+      if (!("ontouchstart" in window) && !(navigator.maxTouchPoints > 0)) return null;
+      var cam = h("input", { type: "file", accept: "image/*", capture: "environment", hidden: "", "aria-hidden": "true", tabindex: "-1" });
+      cam.addEventListener("change", function () { if (!cam.files[0]) return; try { var dt = new DataTransfer(); dt.items.add(cam.files[0]); target.files = dt.files; target.dispatchEvent(new Event("change", { bubbles: true })); } catch (e) { /* older browsers: the normal field still works */ } });
+      return h("div", { class: "snap" }, [cam, h("button", { class: "btn btn--outline btn--sm", type: "button", text: "Take a photo instead", on: { click: function () { cam.click(); } } })]);
+    }
+    // No documents on hand: email a link that comes back to this screen.
+    var laterStatus = h("div"), later = h("div", { class: "later" }, [h("strong", { text: "Don't have your documents with you?" }), h("p", { text: "Your account is saved. We can email you a link to finish when you do." }),
+      h("button", { class: "btn btn--outline btn--block", type: "button", text: "Email me a link to finish later", on: { click: function (e) { e.target.disabled = true; call("/api/pro/finish-later", {}).then(function (res) {
+        laterStatus.innerHTML = ""; e.target.disabled = false;
+        laterStatus.appendChild(res.error ? note(res.error, "bad") : res.emailed ? note("Sent to " + res.email + ". Open it when you have your documents.", "good") : note("We could not send the email right now. Your account is saved: come back to hammerhound.com/pros/sign-in any time and pick up here."));
+      }); } } }), laterStatus]);
     var expires = h("input", { class: "input", id: "v-expires", type: "date", required: "", min: new Date().toISOString().slice(0, 10) });
     var s1 = h("li", { text: "1. Your business" }), s2 = h("li", { text: "2. Your insurance" });
     var progress = function () { s1.className = legal.value.trim() && ein.value.length === 10 && type.value && bFile.files[0] ? "is-done" : ""; s2.className = iFile.files[0] && expires.value ? "is-done" : ""; };
@@ -180,14 +193,15 @@
       field("v-ein", "EIN", ein, "Your 9-digit federal tax ID. One account per EIN. We never accept a Social Security number."),
       field("v-email", "Email", email, "We send your result here."),
       field("v-type", "Proof of business", type),
-      field("doc-business", "Upload that document", bFile, "PDF, JPG or PNG up to 5 MB. It must show your business name."),
+      field("doc-business", "Upload that document", bFile, "PDF, JPG or PNG up to 5 MB. It must show your business name."), snap(bFile),
       h("h2", { text: "Your insurance" }),
-      field("doc-insurance", "Certificate of insurance", iFile, "PDF, JPG or PNG up to 5 MB, showing general liability cover."),
+      field("doc-insurance", "Certificate of insurance", iFile, "PDF, JPG or PNG up to 5 MB, showing general liability cover."), snap(iFile),
       field("v-expires", "Insurance expiry date", expires, "Your badge stays active until this date."),
       status,
       h("button", { class: "btn btn--yellow btn--block btn--lg", type: "submit", text: "Verify my business" }),
       pro.verified ? h("button", { class: "btn btn--text btn--block", type: "button", text: "Cancel", on: { click: function () { resubmit = false; render(); } } }) : h("button", { class: "btn btn--text btn--block", type: "button", text: "Skip for now and see leads in my market", on: { click: function () { store.set("hh_skip", "1"); go("offers"); } } }),
       pro.verified ? null : h("p", { class: "hint hint--center", text: "You can look at leads without verifying. You cannot claim or buy one until you do." }),
+      pro.verified ? null : later,
     ]);
     form.addEventListener("input", progress); form.addEventListener("change", progress);
     form.addEventListener("submit", function (e) {
@@ -268,10 +282,27 @@
   }
 
   // ---------- home ----------
+  // Getting started: what a new pro still has to do, in order. It goes away once the required steps are done.
+  function checklist(mine, team) {
+    var items = [
+      ["Verify your business", "Two documents, about two minutes. Unlocks claiming and your welcome credit.", pro.verified, "verify"],
+      ["Turn on lead texts", "New leads come to your phone and a YES claims one.", pro.textOffers, "notifications"],
+      ["Add the other towns you work in", "See leads and get texts for every town you will drive to.", (pro.serviceArea || []).length > 0, "profile"],
+      ["Add a card", "Keeps you claiming when your welcome credit runs out, and shows marked-down older leads.", !!pro.card, "wallet"],
+      ["Claim your first lead", "Pick one in Open leads. The owner's details are yours at once.", mine.length > 0, "offers"],
+    ];
+    var optional = ["Add your team", "Optional. Give your office or crew leads their own lead texts.", (team.members || []).length > 0, "team"];
+    var done = items.filter(function (i) { return i[2]; }).length;
+    if (done === items.length) return null;
+    var row = function (i, opt) { return h("li", { class: "todo" + (i[2] ? " is-done" : "") }, [h("span", { class: "todo-mark", "aria-hidden": "true", text: i[2] ? "✓" : "" }), h("div", {}, [h("strong", { text: i[0] + (opt ? " (optional)" : "") }), h("small", { text: i[1] })]), i[2] ? h("span", { class: "sr-only", text: "Done" }) : h("button", { class: "btn btn--outline btn--sm", type: "button", text: "Go", "aria-label": i[0], on: { click: function () { go(i[3]); } } })]); };
+    return card([h("div", { class: "tm-head" }, [h("h2", { text: "Getting started" }), h("span", { class: "chip chip--yellow", text: done + " of " + items.length + " done" })]),
+      h("div", { class: "todo-bar", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": String(items.length), "aria-valuenow": String(done) }, [h("i", { style: "width:" + Math.round(done / items.length * 100) + "%" })]),
+      h("ul", { class: "todos" }, items.map(function (i) { return row(i, false); }).concat([row(optional, true)]))]);
+  }
   function homeView() {
     shell([h("p", { class: "meta", text: "Loading your account." })]);
-    Promise.all([call("/api/pro/offers"), call("/api/pro/leads")]).then(function (res) {
-      var o = res[0], l = res[1];
+    Promise.all([call("/api/pro/offers"), call("/api/pro/leads"), call("/api/pro/team")]).then(function (res) {
+      var o = res[0], l = res[1], team = res[2] || {};
       if (o.error) return shell([note(o.error, "bad")]);
       pro = o.pro; if (tab !== "home") return;
       var mine = l.leads || [], count = function (st) { return mine.filter(function (x) { return x.pipeline === st; }).length; };
@@ -285,6 +316,7 @@
       shell([
         head("Welcome back", pro.business),
         h("div", { class: "pp-next" }, [h("div", {}, [h("p", { class: "eyebrow", text: "Do this next" }), h("h2", { text: next[0] }), h("p", { text: next[1] })]), h("button", { class: "btn btn--black btn--lg", type: "button", text: next[0], on: { click: function () { go(next[2]); } } })]),
+        checklist(mine, team),
         h("div", { class: "pp-stats" }, [stat(o.offers.length, "Open leads in " + where, "offers"), stat(count("New"), "New leads to call", "leads"), stat(count("Quoted"), "Quoted", "leads"), stat(count("Won"), "Jobs won", "leads")]),
         h("div", { class: "pp-two" }, [
           card([h("h2", { text: "Wallet" }), h("p", { class: "offer-price", text: money(pro.balance) }), h("p", { class: "meta", text: pro.credit > 0 ? money(pro.credit) + " of it is free welcome credit" : "Balance for buying leads" }), h("button", { class: "btn btn--outline btn--block", type: "button", text: "Open wallet", on: { click: function () { go("wallet"); } } })]),
@@ -310,6 +342,7 @@
       if (f.market !== "all" && !f.markets.some(function (m) { return m.name.toLowerCase() === f.market.toLowerCase(); })) mOpts.push([f.market, f.market + " (0)"]);
       var tOpts = [["all", "All trades (" + f.total + ")"]].concat(f.trades.map(function (t) { return [t.slug, t.name + " (" + t.count + ")"]; }));
       if (f.trade !== "all" && !f.trades.some(function (t) { return t.slug === f.trade; })) tOpts.push([f.trade, (pro.tradeName && f.trade === pro.trade ? pro.tradeName : f.trade) + " (0)"]);
+      if (f.mine) mOpts.splice(1, 0, ["mine", "My service area (" + f.mine.count + ")"]);
       var mSel = select("f-market", mOpts, (mOpts.filter(function (x) { return x[0].toLowerCase() === f.market.toLowerCase(); })[0] || ["all"])[0]), tSel = select("f-trade", tOpts, f.trade);
       mSel.addEventListener("change", function () { pick.market = mSel.value; offersView(); }); tSel.addEventListener("change", function () { pick.trade = tSel.value; offersView(); });
       var mine = (f.home.market || "all").toLowerCase() === f.market.toLowerCase() && (f.home.trade || "all") === f.trade;
@@ -373,6 +406,15 @@
     call("/api/pro/leads").then(function (r) {
       if (r.error) return shell([note(r.error, "bad")]);
       pro = r.pro; if (tab !== "leads") return;
+      // With the first lead or two: a short guide to working it. Dismissed for good with one tap.
+      var guide = r.leads.length && r.leads.length <= 2 && store.get("hh_guide") !== "0" ? h("div", { class: "guide" }, [
+        h("div", { class: "tm-head" }, [h("h2", { text: "How to win this lead" }), h("button", { class: "btn btn--text btn--sm", type: "button", text: "Got it", on: { click: function (e) { store.set("hh_guide", "0"); e.target.closest(".guide").remove(); } } })]),
+        h("ol", {}, [
+          h("li", {}, [h("strong", { text: "Call now. " }), "The first pro to reach the owner usually gets the visit. If they do not pick up, text them and try again in an hour."]),
+          h("li", {}, [h("strong", { text: "Say who you are and what they asked for. " }), "\"This is " + pro.business + ". You asked about " + String(r.leads[0].job || "your project").toLowerCase() + ".\" Then ask when you can come look."]),
+          h("li", {}, [h("strong", { text: "Book the visit before you hang up. " }), "A day and a time beats \"I'll call you back.\""]),
+          h("li", {}, [h("strong", { text: "Mark it here. " }), "Contacted, Quoted, Won. It keeps your follow-ups straight."]),
+          h("li", {}, [h("strong", { text: "Wrong number or not a real job? " }), "Report it from the lead and we review it for a credit back."])])]) : null;
       var chips = h("div", { class: "tabs" }, ["All"].concat(STAGES).map(function (st) {
         var n = st === "All" ? r.leads.length : r.leads.filter(function (l) { return l.pipeline === st; }).length;
         return h("button", { class: "chip chip--link" + (stageFilter === st ? " is-on" : ""), type: "button", text: st + " (" + n + ")", on: { click: function () { stageFilter = st; leadsView(); } } });
@@ -397,7 +439,7 @@
           field("st-" + l.purchaseId, "Where it stands", stage), field("nt-" + l.purchaseId, "Notes", notes), saveNotes, report, status,
         ]));
       });
-      shell([head("My leads", r.leads.length + " bought or claimed"), chips,
+      shell([head("My leads", r.leads.length + " bought or claimed"), guide, chips,
         items.length ? h("div", { class: "grid grid--3 pp-grid" }, items) : card([h("h2", { text: r.leads.length ? "Nothing in this stage" : "No leads yet" }), h("p", { class: "sub", text: "Leads you buy or claim show up here with the owner's details." }), h("button", { class: "btn btn--black btn--block", type: "button", text: "See open leads", on: { click: function () { go("offers"); } } })])]);
     });
   }
@@ -458,12 +500,28 @@
     var biz = input("p-biz", "text", pro.business, { autocomplete: "organization" }), city = input("p-city", "text", pro.city, { autocomplete: "address-level2" }), state = select("p-state", [["", "State"]].concat(["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"].map(function (c) { return [c, c]; })), pro.state || ""), zip = input("p-zip", "text", pro.zip, { inputmode: "numeric", maxlength: "5" }), email = input("p-email", "email", pro.email, { autocomplete: "email" });
     var trade = select("p-trade", [["", "Choose a trade"]].concat(TRADE_LIST), pro.trade);
     var boxes = TRADE_LIST.map(function (t) { var b = h("input", { type: "checkbox", value: t[0] }); b.checked = pro.extraTrades.indexOf(t[0]) >= 0; return { box: b, el: h("label", { class: "pp-check" }, [b, h("span", { text: t[1] })]) }; });
+    // Other towns the pro works in. Leads and lead texts cover the home market and all of these.
+    var areas = (pro.serviceArea || []).slice(), areaBox = h("div", { class: "area-chips" }), areaIn = input("p-area", "text", "", { placeholder: "Bartlett, TN", autocomplete: "off" }), areaErr = h("div");
+    function drawAreas() { areaBox.innerHTML = ""; areas.forEach(function (a, i) { areaBox.appendChild(h("span", { class: "chip area-chip" }, [a + " ", h("button", { type: "button", "aria-label": "Remove " + a, text: "×", on: { click: function () { areas.splice(i, 1); drawAreas(); } } })])); }); if (!areas.length) areaBox.appendChild(h("span", { class: "meta", text: "None yet. You only see and get texts for your home market." })); }
+    function addArea() {
+      var v = areaIn.value.trim().replace(/\s+/g, " "); areaErr.innerHTML = "";
+      if (!v) return;
+      if (!/,\s*[A-Za-z]{2}$/.test(v)) { v = v + ", " + (state.value || pro.state || ""); if (!/,\s*[A-Za-z]{2}$/.test(v)) { areaErr.appendChild(note("Add the state, like Bartlett, TN.", "bad")); return; } }
+      if (areas.length >= 10) { areaErr.appendChild(note("You can add up to 10 other towns.", "bad")); return; }
+      if (areas.map(function (x) { return x.toLowerCase(); }).indexOf(v.toLowerCase()) < 0) areas.push(v);
+      areaIn.value = ""; drawAreas();
+    }
+    areaIn.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); addArea(); } });
+    drawAreas();
     var save = h("button", { class: "btn btn--yellow btn--block", type: "button", text: "Save profile", on: { click: function () {
-      saver(status, save, "/api/pro/profile", { business: biz.value, city: city.value, state: state.value, zip: zip.value, email: email.value, trade: trade.value, extraTrades: boxes.filter(function (b) { return b.box.checked; }).map(function (b) { return b.box.value; }) }, function () { pick = { market: null, trade: null }; });
+      addArea();
+      saver(status, save, "/api/pro/profile", { business: biz.value, city: city.value, state: state.value, zip: zip.value, email: email.value, trade: trade.value, serviceArea: areas, extraTrades: boxes.filter(function (b) { return b.box.checked; }).map(function (b) { return b.box.value; }) }, function () { pick = { market: null, trade: null }; });
     } } });
     shell([head("Business profile", "What owners see, and which leads you see first."),
       card([h("h2", { text: "Your business" }), field("p-biz", "Business name", biz, "Shown to property owners whose leads you take."), field("p-email", "Email", email, "Where we send account notices."),
         h("h2", { text: "Your market" }), field("p-city", "City", city), field("p-state", "State", state, "Leads open on this market by default. You can look at any market from the Leads page."), field("p-zip", "Business ZIP code", zip),
+        h("h2", { text: "Other towns you work in" }), h("p", { class: "sub", text: "Add the towns around you that you will drive to. You see leads and get lead texts for all of them." }), areaBox,
+        h("div", { class: "area-add" }, [field("p-area", "Town and state", areaIn), h("button", { class: "btn btn--outline", type: "button", text: "Add", on: { click: addArea } })]), areaErr,
         h("h2", { text: "Your trades" }), field("p-trade", "Main trade", trade, "Leads open on this trade by default."), h("p", { class: "label", text: "Other trades you take" }), h("div", { class: "pp-checks" }, boxes.map(function (b) { return b.el; })),
         status, save], "verify"),
     ]);

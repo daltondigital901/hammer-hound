@@ -98,7 +98,7 @@ const c2 = await v2(61);
 // permissive: one unreadable document with one good one still passes, on the date the pro entered
 const soft = await send(docs(61, { insurance: "UNSURE" }), c2); assert.equal(soft.pro.verified, true, "one unreadable file does not block a pro"); assert.equal(soft.pro.insuranceExpires, nextYear);
 const c3 = await v2(62);
-const both = await send(docs(62, { business: "UNSURE", insurance: "UNSURE" }), c3); assert.equal(both.pro.verification, "In review", "two unreadable files go to a person"); assert.match(sent.at(-1).subject, /closer look/);
+const both = await send(docs(62, { business: "UNSURE", insurance: "UNSURE" }), c3); assert.equal(both.pro.verification, "In review", "two unreadable files go to a person"); assert.match(sent.at(-2).subject, /closer look/); assert.match(sent.at(-1).subject, /^\[Test\] Verification to review: /); assert.equal(sent.at(-1).to, "support@hammerhound.com", "the admin is told when a verification needs a person");
 const wrongEin = await send(docs(62, { business: "license EIN 999999999" }), c3); assert.equal(wrongEin.pro.verification, "Declined"); assert.match(wrongEin.pro.verificationReason, /EIN/);
 // reliability: the check survives a refused option and a chatty reply, and falls back to the backup model
 const c4 = await v2(63); ai.noSchema = true; ai.chatty = true; ai.models = [];
@@ -682,6 +682,45 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   me.fields.State = "TN"; const tn = await call("/api/pro/offers", null, c); assert.ok(tn.offers.length > 0 && tn.offers.every((o) => o.state !== "MO"), "the Missouri lead is not in a Tennessee pro's market"); assert.ok(tn.filters.markets.some((m) => m.name === "Memphis, MO") && tn.filters.markets.some((m) => m.name === "Memphis, TN"));
   const mo = await call("/api/pro/offers?market=" + encodeURIComponent("Memphis, MO") + "&trade=all", null, c); assert.ok(mo.offers.some((o) => o.place === "Memphis, MO") && !mo.offers.some((o) => o.state === "TN"), "Memphis, MO does not show Tennessee leads"); assert.equal(mo.filters.market, "Memphis, MO");
   LD.pop();
+}
+
+// ---- onboarding: service area, ZIP lookup, finish later, admin alerts, never-started nudges ----
+{
+  const P = db.tbl9bEGuy8DPkkee7, LD = db.tblfA6ivDIlWVp4us, { alertPros } = await import("../src/worker.js");
+  // ZIP to city and state, tidied; an unknown ZIP or a bad one just gives nothing
+  const zip = async (z) => { const r = await worker.fetch(new Request("https://hammerhound.com/api/zip?z=" + z), env); return { status: r.status, ...(await r.json()) }; };
+  assert.deepEqual(await zip("38103"), { status: 200, city: "Memphis", state: "TN" }); assert.deepEqual(await zip("38654"), { status: 200, city: "Olive Branch", state: "MS" }); assert.equal((await zip("99999")).status, 404); assert.equal((await zip("abc")).status, 400);
+  // service area: other towns, each with a state, tidied, no repeats, not the home town, ten at most
+  const c = await signUp(95), me = P.find((p) => p.fields.Mobile === "9015550195"), base = { business: "Area Co", city: "Memphis", state: "TN", zip: "38103", trade: "roofing" };
+  assert.match((await call("/api/pro/profile", { ...base, serviceArea: ["Bartlett"] }, c)).error, /Add the state for Bartlett/);
+  const sv = await call("/api/pro/profile", { ...base, serviceArea: ["bartlett, tn", "Bartlett, TN", "Memphis, TN", "Olive Branch MS", ""] }, c);
+  assert.deepEqual(sv.pro.serviceArea, ["Bartlett, TN", "Olive Branch, MS"]); assert.equal(me.fields["Service Area"], "Bartlett, TN; Olive Branch, MS");
+  assert.equal((await call("/api/pro/profile", { ...base, serviceArea: Array.from({ length: 11 }, (_, i) => `Town${i}, TN`) }, c)).status, 400);
+  assert.deepEqual((await call("/api/pro/profile", { ...base }, c)).pro.serviceArea, ["Bartlett, TN", "Olive Branch, MS"], "saving the profile without the list keeps it");
+  // Open leads now opens on the whole service area, and a lead in one of the other towns is in it
+  for (const l of LD) l.fields.Alerted = "x"; seedForm(81, { service: "Roof Repair", city: "Bartlett" }); await ingest(env); const bart = LD.at(-1);
+  const v = await call("/api/pro/offers?trade=all", null, c); assert.equal(v.filters.market, "mine"); assert.deepEqual(v.filters.mine.places, ["Memphis, TN", "Bartlett, TN", "Olive Branch, MS"]); assert.equal(v.filters.mine.count, v.offers.length);
+  assert.ok(v.offers.some((o) => o.id === bart.id) && v.offers.some((o) => o.place === "Memphis, TN") && v.offers.every((o) => ["Memphis", "Bartlett", "Olive Branch"].includes(o.city)));
+  assert.ok((await call("/api/pro/offers?market=" + encodeURIComponent("Memphis, TN"), null, c)).offers.every((o) => o.city === "Memphis"), "one town can still be picked");
+  // and the lead alert reaches a pro whose home is the next town over
+  Object.assign(env, { TWILIO_ACCOUNT_SID: "AC1", TWILIO_AUTH_TOKEN: "tok", TWILIO_FROM: "+19015550000" }); Object.assign(me.fields, { Mobile: "9016660001", "Text Offers": true });
+  const t0 = texts.length; await alertPros(env); assert.ok(texts.slice(t0).some((m) => m.to === "+19016660001" && /lead in Bartlett, TN/.test(m.body)), "a Memphis pro is texted a Bartlett lead"); me.fields.Mobile = "9015550195";
+  // finish later: an email with a link that returns to the verify screen after sign-in
+  const c2 = (await call("/api/pro/join", { city: "Memphis", state: "TN", agree: "yes", email: "later@example.com", business: "Later Co", phone: "9015550166" }), (await call("/api/pro/verify-code", { phone: "9015550166", code: "424242" })).cookie);
+  const n0 = sent.length, fl = await call("/api/pro/finish-later", {}, c2); assert.deepEqual([fl.ok, fl.emailed, fl.email], [true, true, "later@example.com"]);
+  assert.match(sent[n0].html, /https:\/\/hammerhound\.com\/pros\/sign-in\/\?next=verify/); assert.match(sent[n0].text, /proof of your business/); assert.equal((await call("/api/pro/finish-later", {}, null)).status, 401);
+  // the admin hears about a bad-lead report and a support ticket
+  const got = await call("/api/pro/buy", { leadId: bart.id, kind: "shared" }, c); assert.equal(got.status, 200); const pid = db.tblJnYLq2aCiCVU1C.find((p) => p.fields.Purchase === `${bart.id}:${me.id}`).id;
+  let n1 = sent.length; await call("/api/pro/report", { purchaseId: pid, reason: "Disconnected number." }, c); const rep = sent.slice(n1).find((e) => e.to === "support@hammerhound.com");
+  assert.match(rep.subject, /^\[Test\] Bad-lead report from Area Co$/); assert.match(rep.text, /Disconnected number\./); assert.match(rep.html, /hammerhound\.com\/admin\//);
+  n1 = sent.length; await call("/api/pro/tickets", { subject: "Where is my invoice", message: "I cannot find November.", topic: "Billing" }, c); assert.ok(sent.slice(n1).some((e) => e.to === "support@hammerhound.com" && e.subject === "[Test] Support ticket: Where is my invoice"));
+}
+// a pro who joined and never started verifying is nudged after 1, 3 and 7 days, then left alone
+{
+  const S = (v, joined, now) => (reminderFor({ Email: "a@b.co", Verification: v, "Created At": joined + "T15:00:00.000Z" }, now) || {}).stage;
+  assert.deepEqual(["2027-03-01", "2027-03-02", "2027-03-03", "2027-03-04", "2027-03-07", "2027-03-08", "2027-03-15", "2027-03-16"].map((n) => S("Not started", "2027-03-01", n)), [undefined, "start1", "start1", "start3", "start3", "start7", "start7", undefined]);
+  assert.equal(S(undefined, "2027-03-01", "2027-03-02"), "start1"); assert.equal(S("Pending", "2027-03-01", "2027-03-02"), undefined); assert.equal(S("In review", "2027-03-01", "2027-03-05"), undefined);
+  assert.equal(reminderFor({ Email: "a@b.co", Verification: "Not started", "Created At": "2027-03-01T15:00:00.000Z" }, "2027-03-02").key, "2027-03-01|start1");
 }
 
 // ---- insurance reminders and nudges ----

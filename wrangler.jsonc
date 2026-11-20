@@ -35,6 +35,8 @@
     "ACCESS_AUD": "",
     // The pricing engine (src/pricing.js). "off" returns every lead to the flat SHADOW_SHARED_PRICE and SHADOW_EXCLUSIVE_PRICE.
     "PRICING_ENGINE": "on",
+    // Where "needs you" emails go: a verification to review, a bad-lead report, a support ticket.
+    "ADMIN_EMAIL": "support@hammerhound.com",
     "AGED_PRICING": "50,40,30,20",
     "SHADOW_MAX_PROS": "5",
     // Free lead credit every new pro starts with. At $75 a lead that is 3 leads with $15 left over.

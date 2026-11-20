@@ -215,6 +215,11 @@ export function cleanPlace(cityIn, stateIn) {
 // Two places are the same market when the cities match and the states do not disagree. A missing state matches any.
 const sameMarket = (a, b) => sameCity(a.City, b.City) && (!a.State || !b.State || a.State === b.State);
 const placeParts = (text) => { const p = cleanPlace(text, ""); return { City: p.city, State: p.state }; };
+// A pro's service area: their home market, plus up to 10 other towns they work in ("Service Area": "City, ST; City, ST").
+export const AREA_MAX = 10;
+const extraAreas = (f) => String(f["Service Area"] || "").split(";").map((t) => placeParts(t)).filter((a) => a.City);
+const areasOf = (f) => [...(f.City ? [{ City: f.City, State: f.State || "" }] : []), ...extraAreas(f)];
+const inArea = (f, place) => areasOf(f).some((a) => sameMarket(a, place));
 // Verified means documents passed and the insurance on file has not expired.
 const isVerified = (p) => p.fields.Verification === "Verified" && (!p.fields["Insurance Expires"] || p.fields["Insurance Expires"] >= today());
 const proView = (p) => ({
@@ -224,7 +229,7 @@ const proView = (p) => ({
   legalName: p.fields["Legal Business Name"] || "", einLast4: (p.fields.EIN || "").slice(-4), insuranceExpires: p.fields["Insurance Expires"] || "", verifiedAt: p.fields["Verified At"] || "",
   email: p.fields.Email || "", verificationReason: p.fields["Verification Reason"] || "", checksLeft: checksLeft(p),
   balance: p.fields.Balance || 0, credit: Math.min(p.fields["Welcome Credit"] || 0, p.fields.Balance || 0),
-  city: p.fields.City || "", state: p.fields.State || "", market: placeOf(p.fields), extraTrades: String(p.fields["Extra Trades"] || "").split(",").filter(Boolean), tradeName: TRADE_NAME[p.fields.Trade] || "",
+  city: p.fields.City || "", state: p.fields.State || "", market: placeOf(p.fields), serviceArea: extraAreas(p.fields).map(placeOf), extraTrades: String(p.fields["Extra Trades"] || "").split(",").filter(Boolean), tradeName: TRADE_NAME[p.fields.Trade] || "",
   textOffers: !!p.fields["Text Offers"], emailOffers: !!p.fields["Email Offers"], paused: !!p.fields.Paused, dailyCap: p.fields["Daily Cap"] || 0, quietHours: p.fields["Quiet Hours"] || "",
   agreement: String(p.fields.Agreement || "").split(" | ")[0], memberSince: p.fields["Created At"] || "", card: p.fields.Card || "", autoReload: !!p.fields["Auto Reload"], reloadAmount: reloadUnit(p.fields),
 });
@@ -453,6 +458,7 @@ async function submitDocuments(request, env, pro) {
   if (decision.status === "Verified") fields["Verified At"] = new Date().toISOString();
   const saved = await update(env, HH.pros, pro.id, fields);
   await resultEmail(env, saved, decision.status, decision.reason);
+  if (decision.status === "In review") await notifyAdmin(env, saved, `Verification to review: ${saved.fields["Business Name"]}`, [`${saved.fields["Business Name"]} uploaded documents that the automated check could not decide on.`, decision.reason ? `Why: ${decision.reason}` : "", "Open both documents in the admin panel and approve or decline."]);
   return json({ pro: proView(saved) });
 }
 
@@ -770,7 +776,7 @@ export async function alertPros(env) {
     const l = lead.fields; let told = 0;
     for (const p of pros) {
       const f = p.fields;
-      if (!isVerified(p) || f["Closed At"] || !sameMarket(f, l) || ![f.Trade, ...String(f["Extra Trades"] || "").split(",")].includes(l.Trade)) continue;
+      if (!isVerified(p) || f["Closed At"] || !inArea(f, l) || ![f.Trade, ...String(f["Extra Trades"] || "").split(",")].includes(l.Trade)) continue;
       const [d, n] = String(f["Offers Today"] || "").split("|"), sentToday = d === day ? Number(n) || 0 : 0;
       if ((f["Daily Cap"] && sentToday >= f["Daily Cap"]) || inQuiet(f["Quiet Hours"])) continue;
       let reached = false;
@@ -1017,7 +1023,7 @@ export async function refreshMarkets(env) {
   const byCity = {};   // a pro who has not given a state is counted in the market that carries their city's name
   for (const l of leads) { if (!l.fields.City) continue; const k = segmentOf(l.fields, l.fields.Trade), s = S(k, placeOf(l.fields), l.fields.Trade || "other"); byCity[String(l.fields.City).trim().toLowerCase()] ||= { City: l.fields.City, State: l.fields.State }; s.leads++; s.spots += l.fields["Max Pros"] || num(env.SHADOW_MAX_PROS, 5); leadSeg[l.id] = { k, max: l.fields["Max Pros"] || num(env.SHADOW_MAX_PROS, 5) }; }
   for (const b of buys) { const [leadId, proId] = String(b.fields.Purchase).split(":"), ls = leadSeg[leadId]; if (ls && real[proId]) seg[ls.k].claims += selectName(b.fields.Kind) === "Exclusive" ? ls.max : 1; }
-  for (const p of Object.values(real)) if (isVerified(p) && p.fields.City) for (const t of new Set([p.fields.Trade, ...String(p.fields["Extra Trades"] || "").split(",").map((x) => x.trim())].filter(Boolean))) { const at = p.fields.State ? p.fields : byCity[String(p.fields.City).trim().toLowerCase()] || p.fields; S(segmentOf(at, t), placeOf(at), t).pros++; }
+  for (const p of Object.values(real)) if (isVerified(p) && p.fields.City) for (const t of new Set([p.fields.Trade, ...String(p.fields["Extra Trades"] || "").split(",").map((x) => x.trim())].filter(Boolean))) for (const area of areasOf(p.fields)) { const at = area.State ? area : byCity[String(area.City).trim().toLowerCase()] || area; S(segmentOf(at, t), placeOf(at), t).pros++; }
   for (const r of requests) if (!r.fields.Test && r.fields.Market && r.fields.Trade && r.fields.Trade !== "all") { const at = placeParts(r.fields.Market); S(segmentOf(at, r.fields.Trade), placeOf(at), r.fields.Trade).requests++; }
   const have = Object.fromEntries(rows.map((r) => [r.fields.Segment, r])), out = { segments: 0, written: 0, moved: 0 }, now = new Date().toISOString();
   for (const r of rows) S(r.fields.Segment, r.fields.Market, r.fields.Trade);          // a row a person made keeps getting numbers
@@ -1102,6 +1108,13 @@ export function reminderFor(f, now = today()) {
     const stage = left > 14 ? "pre30" : left > 7 ? "pre14" : left > 3 ? "pre7" : left > 1 ? "pre3" : left > 0 ? "pre1" : left > -3 ? "exp0" : left > -7 ? "post3" : left > -14 ? "post7" : left > -30 ? "post14" : "post30";
     return { key: `${f["Insurance Expires"]}|${stage}`, stage, left, nudge: left <= 0 };
   }
+  // Joined and never uploaded anything: a nudge after 1, 3 and 7 days, then we stop.
+  if ((!f.Verification || f.Verification === "Not started") && f["Created At"]) {
+    const joined = String(f["Created At"]).slice(0, 10), since = daysBetween(now, joined);
+    if (since < 1 || since > 14) return null;
+    const stage = since < 3 ? "start1" : since < 7 ? "start3" : "start7";
+    return { key: `${joined}|${stage}`, stage, since, nudge: true };
+  }
   if (f.Verification === "Declined" && f["Checks Day"]) {
     const since = daysBetween(now, f["Checks Day"]);
     if (since < 2 || since > 20) return null;
@@ -1128,6 +1141,12 @@ function reminderCopy(f, r) {
     subject: "Jobs are open in your market. Your badge is still paused.", heading: "Jobs are open in your market. Your badge is paused.",
     lines: [`Hi ${name},`, `Your badge has been paused since your insurance expired on ${exp}. Property owners in your market are still asking for quotes.`, "Upload a current certificate to get your badge back and start claiming again."],
     cta: ["Get my badge back", APP], leadsTitle: "Open in your market right now" };
+  if (r.stage.startsWith("start")) return {
+    subject: r.stage === "start1" ? `Your ${usd(creditOf(f))} in free leads is waiting` : r.stage === "start3" ? "Two documents and you can start claiming leads" : "Jobs are open in your market. Verify to claim them.",
+    heading: r.stage === "start1" ? `${usd(creditOf(f))} in free leads, one step away.` : r.stage === "start3" ? "Two documents. About two minutes." : "Last reminder: verify and claim these.",
+    lines: [`Hi ${name},`, "You joined Hammer Hound but have not verified your business yet, so you cannot claim leads.", "You need two things: proof of your business (a license, registration or tax document showing your business name) and a certificate of general liability insurance. A phone photo of each is fine.",
+      r.stage === "start7" ? "This is the last reminder we will send about it. Your account stays open." : `Verifying unlocks ${prize(f)}.`],
+    cta: ["Verify my business", `${SITE}/pros/sign-in/?next=verify`], leadsTitle: "Open in your market right now" };
   return {
     subject: r.stage !== "fail2" ? "Jobs are open in your market. Finish verifying to claim them." : creditOf(f) > 0 ? `You are one upload away from ${usd(creditOf(f))} in free leads` : "You are one upload away from claiming leads again",
     heading: r.stage !== "fail2" ? "Finish verifying and claim these." : creditOf(f) > 0 ? `One upload away from ${usd(creditOf(f))} in free leads.` : "One upload away from claiming leads again.",
@@ -1167,6 +1186,9 @@ export async function sendReminders(env, { dry = false, now = today() } = {}) {
   }
   return out;
 }
+
+// An email to the person running Hammer Hound when something lands in a queue that needs them.
+const notifyAdmin = (env, pro, subject, lines) => sendEmail(env, env.ADMIN_EMAIL || "support@hammerhound.com", `${pro.fields.Test ? "[Test] " : ""}${subject}`, lines.filter(Boolean), { heading: "Needs you", cta: ["Open the admin panel", `${SITE}/admin/`] }).catch(() => false);
 
 // ---------- admin panel ----------
 // Two ways in. With ACCESS_TEAM and ACCESS_AUD set, only a request that Cloudflare Access has signed is accepted.
@@ -1322,6 +1344,16 @@ async function api(request, env, path) {
     try { return json(await sendInvoices(env, { month: body.month, dry: !!body.dry })); } catch (e) { return json({ error: String(e && e.message || e) }, 500); }
   }
   if (["/api/admin/sign-in", "/api/admin/sign-out", "/api/admin/overview", "/api/admin/doc", "/api/admin/verify", "/api/admin/report", "/api/admin/ticket", "/api/admin/pricing"].includes(path)) return adminApi(request, env, path, body);
+  // City and state for a ZIP code, to fill in the join form. Best effort: the form works without it.
+  if (path === "/api/zip") {
+    const z = new URL(request.url).searchParams.get("z") || "";
+    if (!/^\d{5}$/.test(z)) return fail(400, "Enter a 5-digit ZIP code.");
+    try {
+      const r = await fetch(`${env.ZIP_API || "https://api.zippopotam.us/us"}/${z}`, { headers: { Accept: "application/json" } });
+      const place = r.ok ? ((await r.json()).places || [])[0] : null, pl = place ? cleanPlace(place["place name"], place["state abbreviation"]) : null;
+      return pl && pl.city && pl.state ? json({ city: pl.city, state: pl.state }, 200, { "Cache-Control": "public, max-age=86400" }) : json({}, 404);
+    } catch { return json({}, 404); }
+  }
   if (path === "/api/pro/link") {
     const [id, exp, sig] = (new URL(request.url).searchParams.get("t") || "").split(".");
     const good = /^rec[A-Za-z0-9]{14}$/.test(id || "") && Number(exp) > Date.now() && sig === (await hmac(env.SESSION_SECRET, `link:${id}.${exp}`)).slice(0, 40);
@@ -1396,6 +1428,13 @@ async function api(request, env, path) {
   if (pro.member && (path.startsWith("/api/pro/team") || ["/api/pro/documents", "/api/pro/review", "/api/pro/profile", "/api/pro/notifications", "/api/pro/wallet", "/api/pro/card", "/api/pro/add-funds", "/api/pro/reload-settings", "/api/pro/invoice", "/api/pro/close"].includes(path))) return fail(403, "Only the account owner can do that.");
   if (pro.member && path === "/api/pro/buy" && !pro.member.fields["Can Pay"]) return fail(403, `You cannot claim leads on this account. Ask ${pro.fields["Business Name"]} to claim it or to give you pay authority.`);
   if (path.startsWith("/api/pro/team")) return teamApi(request, env, pro, path, body);
+  // "Finish later": the pro does not have their documents on hand. Email a link that brings them back to the verify screen after sign-in.
+  if (path === "/api/pro/finish-later" && request.method === "POST") {
+    const emailed = await sendEmail(env, pro.fields.Email, "Finish verifying your business when you are ready", [`Hi ${pro.fields["Business Name"]},`, "Your account is saved. When you have your documents, come back and finish. It takes about two minutes.",
+      "You will need two things: proof of your business (a license, registration or tax document that shows your business name) and a certificate of general liability insurance.", `Finishing unlocks ${prize(pro.fields)}.`],
+      { heading: "Pick up where you left off", cta: ["Finish verifying", `${SITE}/pros/sign-in/?next=verify`] });
+    return json({ ok: true, emailed: !!emailed, email: pro.fields.Email || "" });
+  }
   // The numbers the first-time tour quotes come from the live settings, so the tour cannot drift from the prices.
   if (path === "/api/pro/me") return json({ pro: proView(pro), tour: { exclusiveMultiple: PRICING.exclusiveMultiple, maxPros: num(env.SHADOW_MAX_PROS, 5), welcome: num(env.WELCOME_CREDIT, 240), hotHours: HOT_HOURS, leadDays: LEAD_DAYS, textsLive: twilioReady(env) } });
   // The tour was finished or skipped. Stored on the person, so it shows once on any device.
@@ -1425,16 +1464,18 @@ async function api(request, env, path) {
     const open = leads.filter((l) => !mineIds.has(l.id) && (pro.fields.Card || isHot(l))).map((l) => offerView(env, l, count[l.id] || 0, !!excl[l.id]));
     // Filters default to the pro's own market and trade. "all" widens either one.
     const q = new URL(request.url).searchParams, home = { market: placeOf(pro.fields), trade: pro.fields.Trade || "" };
-    const market = q.has("market") ? q.get("market") : home.market || "all", trade = q.has("trade") ? q.get("trade") : home.trade || "all";
+    const wide = extraAreas(pro.fields).length > 0;
+    const market = q.has("market") ? q.get("market") : wide ? "mine" : home.market || "all", trade = q.has("trade") ? q.get("trade") : home.trade || "all";
     const tally = (list, key) => Object.entries(list.reduce((m, o) => { const k = key(o); if (k) m[k] = (m[k] || 0) + 1; return m; }, {}));
     // A market is a place, "City, ST". A pro who has not given a state yet is matched to the place with their city's name.
     const markets = tally(open, (o) => (o.city ? o.place : "")).map(([name, n]) => ({ name, count: n })).sort((a, b) => a.name.localeCompare(b.name));
     const want = placeParts(market);
     const trades = tally(open, (o) => o.trade).map(([slug, n]) => ({ slug, name: TRADE_NAME[slug] || "Other", count: n })).sort((a, b) => a.name.localeCompare(b.name));
-    const offers = open.filter((o) => (market === "all" || sameMarket({ City: o.city, State: o.state }, want)) && (trade === "all" || o.trade === trade));
+    const offers = open.filter((o) => (market === "all" || (market === "mine" ? inArea(pro.fields, { City: o.city, State: o.state }) : sameMarket({ City: o.city, State: o.state }, want))) && (trade === "all" || o.trade === trade));
+    const area = wide ? { count: open.filter((o) => inArea(pro.fields, { City: o.city, State: o.state })).length, places: areasOf(pro.fields).map(placeOf) } : null;
     // Show the market the way the list writes it, so the picker lands on the right entry.
-    const shown = market === "all" ? "all" : (markets.filter((m) => sameMarket(placeParts(m.name), want)).sort((a, b) => (want.State ? (b.name === placeOf(want)) - (a.name === placeOf(want)) : /, [A-Z]{2}$/.test(b.name) - /, [A-Z]{2}$/.test(a.name)) || b.count - a.count)[0] || { name: placeOf(want) || market }).name;
-    return json({ offers, hot: offers.filter((o) => o.hot).length, older: offers.filter((o) => !o.hot).length, hotHours: HOT_HOURS, leadDays: LEAD_DAYS, olderShown: !!pro.fields.Card, canBuy: isVerified(pro), filters: { market: shown, trade, markets, trades, home, total: open.length }, pro: proView(pro) });
+    const shown = market === "all" || market === "mine" ? market : (markets.filter((m) => sameMarket(placeParts(m.name), want)).sort((a, b) => (want.State ? (b.name === placeOf(want)) - (a.name === placeOf(want)) : /, [A-Z]{2}$/.test(b.name) - /, [A-Z]{2}$/.test(a.name)) || b.count - a.count)[0] || { name: placeOf(want) || market }).name;
+    return json({ offers, hot: offers.filter((o) => o.hot).length, older: offers.filter((o) => !o.hot).length, hotHours: HOT_HOURS, leadDays: LEAD_DAYS, olderShown: !!pro.fields.Card, canBuy: isVerified(pro), filters: { market: shown, trade, markets, trades, home, mine: area, total: open.length }, pro: proView(pro) });
   }
   if (path === "/api/pro/buy" && request.method === "POST") return buy(env, pro, body);
   // "I want more leads here": a pro tells us a market and trade had nothing for them. One row per pro, market and trade.
@@ -1461,6 +1502,7 @@ async function api(request, env, path) {
     if (!p) return fail(404, "That lead is not in your account.");
     if ((p.fields["Review Status"] || "None") !== "None") return fail(409, "This lead has already been reported.");
     await update(env, HH.purchases, p.id, { "Review Status": "Reported", "Review Reason": String(body.reason || "").slice(0, 1000) });
+    await notifyAdmin(env, pro, `Bad-lead report from ${pro.fields["Business Name"]}`, [`${pro.fields["Business Name"]} reported a lead and asked for a credit of ${usd2(p.fields.Price || 0)}.`, `They said: ${String(body.reason || "No reason given.").slice(0, 500)}`]);
     return json({ ok: true });
   }
   if (path === "/api/pro/lead-status" && request.method === "POST") {
@@ -1481,7 +1523,17 @@ async function api(request, env, path) {
     if (!TRADE_NAME[body.trade]) return fail(400, "Choose your main trade.");
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(400, "Check your email address.");
     const extra = [...new Set([].concat(body.extraTrades || []).filter((t) => TRADE_NAME[t] && t !== body.trade))].slice(0, 23);
-    const saved = await update(env, HH.pros, pro.id, { "Business Name": business, City: city, State: state, ZIP: zip, Trade: body.trade, "Extra Trades": extra.join(","), ...(email ? { Email: email } : {}) });
+    // Other towns: tidied, each with a state, no repeats, not the home market, at most AREA_MAX.
+    const areas = [];
+    for (const raw of Array.isArray(body.serviceArea) ? body.serviceArea : extraAreas(pro.fields).map(placeOf)) {
+      const a = placeParts(String(raw).slice(0, 80));
+      if (!a.City) continue;
+      if (!a.State) return fail(400, `Add the state for ${a.City}, like "${a.City}, ${state}".`);
+      if (sameMarket(a, { City: city, State: state }) || areas.some((x) => sameMarket(x, a))) continue;
+      areas.push(a);
+    }
+    if (areas.length > AREA_MAX) return fail(400, `You can add up to ${AREA_MAX} other towns.`);
+    const saved = await update(env, HH.pros, pro.id, { "Business Name": business, City: city, State: state, ZIP: zip, Trade: body.trade, "Service Area": areas.map(placeOf).join("; "), "Extra Trades": extra.join(","), ...(email ? { Email: email } : {}) });
     return json({ pro: proView(saved) });
   }
   if (path === "/api/pro/notifications" && request.method === "POST") {
@@ -1536,6 +1588,7 @@ async function api(request, env, path) {
     const subject = String(body.subject || "").trim().slice(0, 160), message = String(body.message || "").trim().slice(0, 4000);
     if (!subject || !message) return fail(400, "Add a subject and tell us what is going on.");
     const t = await create(env, HH.tickets, { Subject: subject, Message: message, Pro: [pro.id], "Pro ID": pro.id, Topic: String(body.topic || "Other").slice(0, 60), "Purchase ID": /^rec[A-Za-z0-9]{14}$/.test(body.purchaseId || "") ? body.purchaseId : "", Status: "Open", "Created At": new Date().toISOString(), Test: !!pro.fields.Test });
+    await notifyAdmin(env, pro, `Support ticket: ${subject}`, [`From ${pro.fields["Business Name"]}${pro.fields.Email ? ` (${pro.fields.Email})` : ""}.`, message.slice(0, 1500)]);
     return json({ ok: true, id: t.id });
   }
   if (path === "/api/pro/tickets") {
