@@ -387,12 +387,16 @@
       });
       var wantStatus = h("div"), askable = f.market !== "all";
       var tradeLabel = f.trade === "all" ? "" : ((f.trades.filter(function (t) { return t.slug === f.trade; })[0] || {}).name || pro.tradeName || "").toLowerCase();
-      var want = h("button", { class: "btn btn--yellow btn--block btn--lg", type: "button", text: "I want more " + (tradeLabel ? tradeLabel + " " : "") + "leads in " + f.market + "!", on: { click: function () {
+      var place = f.market === "mine" ? "your area" : f.market;
+      var doneNote = function (tradeName, where) { return note("Request sent for " + (tradeName ? tradeName + " " : "") + "leads in " + where + ". We use these requests to decide where to advertise next.", "good"); };
+      var want = h("button", { class: "btn btn--yellow btn--block btn--lg", type: "button", text: "Request " + (tradeLabel ? tradeLabel + " " : "") + "leads in " + place, on: { click: function () {
         want.disabled = true;
-        call("/api/pro/market-request", { market: f.market, trade: f.trade, total: f.total }).then(function (res) { wantStatus.innerHTML = ""; if (res.error) { want.disabled = false; wantStatus.appendChild(note(res.error, "bad")); return; } want.hidden = true; wantStatus.appendChild(note("Got it. We have told the team you want " + (res.trade === "all trades" ? "" : res.trade.toLowerCase() + " ") + "leads in " + res.market + ". We use these requests to decide where to advertise next.", "good")); });
+        call("/api/pro/market-request", { market: f.market, trade: f.trade, total: f.total }).then(function (res) { wantStatus.innerHTML = ""; if (res.error) { want.disabled = false; wantStatus.appendChild(note(res.error, "bad")); return; } want.hidden = true; wantStatus.appendChild(doneNote(res.trade === "all trades" ? "" : res.trade.toLowerCase(), f.market === "mine" ? "your area" : res.market)); });
       } } });
-      var empty = card([h("h2", { text: askable ? "No open leads in " + f.market + (tradeLabel ? " for " + tradeLabel : "") + " right now" : "No open leads for this trade right now" }),
-        h("p", { class: "sub", text: askable ? "Tell us you want them. We advertise where pros ask for leads." : "New leads show up here as they come in." }),
+      // already asked for this market and trade (even before a reload): show the confirmation, not the button
+      if (askable && f.requested) { want.hidden = true; wantStatus.appendChild(doneNote(tradeLabel, place)); }
+      var empty = card([h("h2", { text: askable ? "No open " + (tradeLabel ? tradeLabel + " " : "") + "leads in " + place + " right now" : "No open leads for this trade right now" }),
+        h("p", { class: "sub", text: askable ? (f.requested ? "You've asked for leads here." : "Want leads here? Tell us. We advertise where pros ask.") : "New leads show up here as they come in." }),
         askable ? want : null, wantStatus,
         f.total ? h("button", { class: "btn btn--outline btn--block", type: "button", text: "See the " + f.total + " open in other markets and trades", on: { click: function () { pick = { market: "all", trade: "all" }; offersView(); } } }) : null]);
       shell([head(r.canBuy ? "Open leads" : "Open leads in your market", r.offers.length + " showing of " + f.total + " open"), filters, r.offers.length && r.olderShown ? ageTabs : null, items.length ? h("div", { class: "grid grid--3 pp-grid" }, items) : empty]);

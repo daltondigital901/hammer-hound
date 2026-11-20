@@ -1490,15 +1490,20 @@ async function api(request, env, path) {
     const area = wide ? { count: open.filter((o) => inArea(pro.fields, { City: o.city, State: o.state })).length, places: areasOf(pro.fields).map(placeOf) } : null;
     // Show the market the way the list writes it, so the picker lands on the right entry.
     const shown = market === "all" || market === "mine" ? market : (markets.filter((m) => sameMarket(placeParts(m.name), want)).sort((a, b) => (want.State ? (b.name === placeOf(want)) - (a.name === placeOf(want)) : /, [A-Z]{2}$/.test(b.name) - /, [A-Z]{2}$/.test(a.name)) || b.count - a.count)[0] || { name: placeOf(want) || market }).name;
-    return json({ offers, hot: offers.filter((o) => o.hot).length, older: offers.filter((o) => !o.hot).length, hotHours: HOT_HOURS, leadDays: LEAD_DAYS, olderShown: !!pro.fields.Card, canBuy: isVerified(pro), filters: { market: shown, trade, markets, trades, home, mine: area, total: open.length }, pro: proView(pro) });
+    // empty list in one market: has this pro already asked for leads here? (the "want more leads" button stays done after a reload)
+    let requested = false;
+    if (!offers.length && market !== "all") {
+      const { key } = marketRequestKey(pro, market, trade);
+      requested = !!(await list(env, HH.base, HH.requests, { filterByFormula: `{Key}='${esc(key)}'`, maxRecords: 1 }).catch(() => [])).length;
+    }
+    return json({ offers, hot: offers.filter((o) => o.hot).length, older: offers.filter((o) => !o.hot).length, hotHours: HOT_HOURS, leadDays: LEAD_DAYS, olderShown: !!pro.fields.Card, canBuy: isVerified(pro), filters: { market: shown, trade, markets, trades, home, mine: area, total: open.length, requested }, pro: proView(pro) });
   }
   if (path === "/api/pro/buy" && request.method === "POST") return buy(env, pro, body);
   // "I want more leads here": a pro tells us a market and trade had nothing for them. One row per pro, market and trade.
   if (path === "/api/pro/market-request" && request.method === "POST") {
     if (String(body.market || "").trim().toLowerCase() === "all") return fail(400, "Pick a market first.");
-    const market = placeOf(placeParts(String(body.market || "").trim().slice(0, 80))) || placeOf(pro.fields), trade = TRADE_NAME[body.trade] ? body.trade : body.trade === "all" ? "all" : pro.fields.Trade || "all";
+    const { market, trade, key } = marketRequestKey(pro, body.market, body.trade);
     if (!market || market === "all") return fail(400, "Pick a market first.");
-    const key = `${pro.id}|${trade}|${market.toLowerCase()}`;
     if (!(await list(env, HH.base, HH.requests, { filterByFormula: `{Key}='${esc(key)}'`, maxRecords: 1 })).length)
       await create(env, HH.requests, { Request: `${TRADE_NAME[trade] || "All trades"} · ${market}`, Key: key, Pro: [pro.id], Market: market, Trade: trade, "Open Leads Then": Math.max(0, Math.round(Number(body.total) || 0)), Verified: isVerified(pro), At: new Date().toISOString(), Test: !!pro.fields.Test });
     return json({ ok: true, market, trade: TRADE_NAME[trade] || "all trades" });
@@ -1616,6 +1621,13 @@ async function api(request, env, path) {
     return json({ ok: true }, 200, { "Set-Cookie": "hh_s=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0" });
   }
   return fail(404, "Not found.");
+}
+
+// one market request per pro, trade and market ("mine" = the pro's own market)
+function marketRequestKey(pro, rawMarket, rawTrade) {
+  const market = placeOf(placeParts(String(rawMarket || "").trim().slice(0, 80))) || placeOf(pro.fields);
+  const trade = TRADE_NAME[rawTrade] ? rawTrade : rawTrade === "all" ? "all" : pro.fields.Trade || "all";
+  return { market, trade, key: `${pro.id}|${trade}|${String(market || "").toLowerCase()}` };
 }
 
 export default {

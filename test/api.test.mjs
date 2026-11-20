@@ -387,6 +387,11 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   assert.equal((await call("/api/pro/market-request", { market: "Tupelo", trade: "roofing", total: 12 }, dc)).status, 200); await call("/api/pro/market-request", { market: "tupelo", trade: "roofing" }, dc);
   assert.equal(MR.length, 1); assert.deepEqual([MR[0].fields.Request, MR[0].fields.Market, MR[0].fields.Trade, MR[0].fields["Open Leads Then"], MR[0].fields.Verified], ["Roofing · Tupelo", "Tupelo", "roofing", 12, true]);
   assert.equal((await call("/api/pro/market-request", { market: "Tupelo", trade: "roofing" }, null)).status, 401);
+  // the offers list remembers the request: the empty-market button stays done after a reload (Ryan 2026-11-20)
+  const again = await (await worker.fetch(new Request("https://hammerhound.com/api/pro/offers?market=Tupelo&trade=roofing", { headers: { Cookie: dc } }), env)).json();
+  if (!again.offers.length) assert.equal(again.filters.requested, true);
+  const other = await (await worker.fetch(new Request("https://hammerhound.com/api/pro/offers?market=Nowhereville&trade=roofing", { headers: { Cookie: dc } }), env)).json();
+  assert.equal(other.filters.requested, false);
 }
 
 // ---- second audit: paging past 100 rows, and a reload settling a declined one ----
