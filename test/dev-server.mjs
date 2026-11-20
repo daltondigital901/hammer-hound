@@ -18,7 +18,7 @@ const NUM = "fldfJJYK166eGNfxw";
 // Two stand-in sites: one free to offer, one with a GBP.
 export const SITE_FREE = "recSITEFREE0000000".slice(0, 17), SITE_GBP = "recSITEGBP00000000".slice(0, 17), SITE_CLIENT = "recSITECLIENT00000".slice(0, 17), SITE_PROSPECT = "recSITEPROSPECT000".slice(0, 17);
 db.tbl9olHmI5p746DOe.push({ id: SITE_PROSPECT, fields: { fldxjMNAdLglWFBLl: "Has One!", fldVIdJR2dkmKXRf0: 0, fldCTOMq0Mk1jUb3S: 1 } });
-db.tbl9olHmI5p746DOe.push({ id: SITE_FREE, fields: { fldxjMNAdLglWFBLl: "Yes - Not Requested Yet", fldVIdJR2dkmKXRf0: 0 } }, { id: SITE_GBP, fields: { fldxjMNAdLglWFBLl: "Has One!", fldVIdJR2dkmKXRf0: 0 } }, { id: SITE_CLIENT, fields: { fldxjMNAdLglWFBLl: "Inactive", fldVIdJR2dkmKXRf0: 1 } });
+db.tbl9olHmI5p746DOe.push({ id: SITE_FREE, fields: { fldxjMNAdLglWFBLl: "Yes - Not Requested Yet", fldVIdJR2dkmKXRf0: 0, fldYpj5Hd8EzNNzSV: "Tennessee", fldulMRfFVyOtNWUK: "Memphis" } }, { id: SITE_GBP, fields: { fldxjMNAdLglWFBLl: "Has One!", fldVIdJR2dkmKXRf0: 0 } }, { id: SITE_CLIENT, fields: { fldxjMNAdLglWFBLl: "Inactive", fldVIdJR2dkmKXRf0: 1 } });
 export function seedForm(n, o = {}) {
   const email = o.kind === "Email";
   const details = email
@@ -31,6 +31,7 @@ function matches(table, rec, formula) {
   if (!formula) return true;
   const f = rec.fields; let m;
   if (table === "tblW1A0iKDAd111iI") {
+    if (/^OR\(\{Call Number\}=\d+/.test(formula)) return formula.includes(`{Call Number}=${Number(f[NUM])},`) || formula.endsWith(`{Call Number}=${Number(f[NUM])})`);
     if (!formula.includes("{Form/Call}='Form'") || !formula.includes("{Form/Call}='Email'") || !formula.includes("{Client Portfolio}=BLANK()") || !formula.includes("{Valid/Spam}='✅ Valid'")) throw new Error("mock: Call Tracker filter is missing a required condition");
     if (!f._valid || f._client || !["Form", "Email"].includes(f._kind)) return false;
     m = formula.match(/\{Call Number\}>(\d+)/); return m ? Number(f[NUM]) > Number(m[1]) : true;
@@ -53,6 +54,7 @@ function matches(table, rec, formula) {
   if (formula === "AND({Verification}='Verified',NOT({Paused}))") return f.Verification === "Verified" && !f.Paused;
   if (formula === "NOT({Email}='')") return !!f.Email;
   if (formula.includes("{Alerted}=''")) return f.Status === "Offered" && f.Style === "v2" && Date.now() - Date.parse(f["Received At"]) < 12 * 3600e3 && !f.Alerted;
+  if (formula.startsWith("AND({State}='',{Site State}=''")) return !f.State && !f["Site State"] && f["DD1 Call Number"] != null && Date.now() - Date.parse(f["Received At"]) < 30 * 864e5;
   if (formula.includes("NOT({Price Version}=")) return f.Status === "Offered" && f.Style === "v2" && Date.now() - Date.parse(f["Received At"]) < 7 * 864e5 && f["Price Version"] !== "p1" && f["Price Version"] !== "sold" && !f["Price Locked"];
   if ((m = formula.match(/^\{Segment\}='(.*)'$/))) return f.Segment === m[1];
   if (formula.startsWith("AND({Style}='v2',{Qualified}='Yes'")) return f.Style === "v2" && f.Qualified === "Yes" && Date.now() - Date.parse(f["Received At"]) < 30 * 864e5;

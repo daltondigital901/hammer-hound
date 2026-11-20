@@ -11,7 +11,7 @@ const DD1 = {
   callTracker: "tblW1A0iKDAd111iI",
   siteList: "tbl9olHmI5p746DOe",
   f: { number: "fldfJJYK166eGNfxw", kind: "fldJmHzvV9WlWbPUH", site: "fldqadMmvag7tK3U7", siteLink: "fldiLbdgf1efaCUOf", details: "fldDI13VDK04kQnYK", created: "fldZ3OCAkOMlzbwec", source: "fldw8MWCtjotaU9Tw" },
-  s: { gbp: "fldxjMNAdLglWFBLl", activeClients: "fldVIdJR2dkmKXRf0", openProspects: "fldCTOMq0Mk1jUb3S" },
+  s: { gbp: "fldxjMNAdLglWFBLl", activeClients: "fldVIdJR2dkmKXRf0", openProspects: "fldCTOMq0Mk1jUb3S", state: "fldYpj5Hd8EzNNzSV" },
 };
 // "Needs GBP?" values that mean the site has a Google Business Profile, live or suspended.
 // Leads from these sites are never offered: GBP leads cannot be sold.
@@ -121,7 +121,7 @@ export async function ingest(env) {
     const what = f.Service || (email ? f.Subject : "") || "Job";
     return { fields: {
       Lead: `${what} · ${f.City || c[DD1.f.site] || "Unknown area"}`.slice(0, 200),
-      "DD1 Call Number": Number(c[DD1.f.number]), Source: "DD1 form (shadow)", Rule: RULE, "Site GBP": selectName((sites[(c[DD1.f.siteLink] || [])[0]] || {})[DD1.s.gbp]) || "Blank", Test: true, Status: "Offered", Style: "",
+      "DD1 Call Number": Number(c[DD1.f.number]), Source: "DD1 form (shadow)", Rule: RULE, "Site GBP": selectName((sites[(c[DD1.f.siteLink] || [])[0]] || {})[DD1.s.gbp]) || "Blank", "Site State": stateCode(selectName((sites[(c[DD1.f.siteLink] || [])[0]] || {})[DD1.s.state])), State: stateCode(selectName((sites[(c[DD1.f.siteLink] || [])[0]] || {})[DD1.s.state])), Test: true, Status: "Offered", Style: "",
       "Owner Name": f.Name || "", "Owner Phone": digits(f.Phone), "Owner Email": f.Email || "", City: f.City || "", Service: what.slice(0, 200),
       Message: (f.Message || "").slice(0, 5000), "Site Name": c[DD1.f.site] || "", "Lead Source": `${email ? "Email" : "Form"} · ${selectName(c[DD1.f.source]) || "Unknown"}`,
       "Received At": c[DD1.f.created] || new Date().toISOString(), "Max Pros": num(env.SHADOW_MAX_PROS, 5),
@@ -197,6 +197,24 @@ export const TRADES = [
 const TRADE_NAME = Object.fromEntries(TRADES.map(([slug, name]) => [slug, name]));
 export const tradeOf = (service) => { const t = String(service || "").toLowerCase(); return (TRADES.find(([, , words]) => words.some((w) => t.includes(w))) || ["other"])[0]; };
 const sameCity = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+// ---------- location: every place is written "City, ST" ----------
+const STATES = { Alabama: "AL", Alaska: "AK", Arizona: "AZ", Arkansas: "AR", California: "CA", Colorado: "CO", Connecticut: "CT", Delaware: "DE", "District of Columbia": "DC", Florida: "FL", Georgia: "GA", Hawaii: "HI", Idaho: "ID", Illinois: "IL", Indiana: "IN", Iowa: "IA", Kansas: "KS", Kentucky: "KY", Louisiana: "LA", Maine: "ME", Maryland: "MD", Massachusetts: "MA", Michigan: "MI", Minnesota: "MN", Mississippi: "MS", Missouri: "MO", Montana: "MT", Nebraska: "NE", Nevada: "NV", "New Hampshire": "NH", "New Jersey": "NJ", "New Mexico": "NM", "New York": "NY", "North Carolina": "NC", "North Dakota": "ND", Ohio: "OH", Oklahoma: "OK", Oregon: "OR", Pennsylvania: "PA", "Rhode Island": "RI", "South Carolina": "SC", "South Dakota": "SD", Tennessee: "TN", Texas: "TX", Utah: "UT", Vermont: "VT", Virginia: "VA", Washington: "WA", "West Virginia": "WV", Wisconsin: "WI", Wyoming: "WY" };
+const STATE_CODES = new Set(Object.values(STATES)), STATE_BY_NAME = Object.fromEntries(Object.entries(STATES).map(([n, c]) => [n.toLowerCase(), c]));
+// "Tennessee", "tn" or "TN" to "TN". Anything else to "".
+export const stateCode = (v) => { const t = String(v || "").trim(); return STATE_CODES.has(t.toUpperCase()) ? t.toUpperCase() : STATE_BY_NAME[t.toLowerCase()] || ""; };
+// A city typed as "memphis", "Memphis, TN" or "MEMPHIS tn" to { city: "Memphis", state: "TN" }.
+export function cleanPlace(cityIn, stateIn) {
+  let city = String(cityIn || "").replace(/\s+/g, " ").trim(), state = stateCode(stateIn);
+  // The last one to three words may be the state: "Byron Center mi", "Winston-Salem, North Carolina".
+  const words = city.split(/[,\s]+/).filter(Boolean);
+  for (const n of [3, 2, 1]) { const tail = words.slice(-n).join(" ").replace(/\.$/, ""), head = city.slice(0, city.length - words.slice(-n).join(" ").length); if (words.length > n && stateCode(tail) && city.endsWith(words.slice(-n).join(" "))) { city = head.replace(/[,\s]+$/, "").trim(); state = state || stateCode(tail); break; } }
+  city = city.replace(/,+$/, "").trim();
+  if (city && (city === city.toLowerCase() || city === city.toUpperCase())) city = city.toLowerCase().replace(/(^|[\s-])([a-z])/g, (x, a, b) => a + b.toUpperCase());
+  return { city: city.slice(0, 60), state };
+}
+// Two places are the same market when the cities match and the states do not disagree. A missing state matches any.
+const sameMarket = (a, b) => sameCity(a.City, b.City) && (!a.State || !b.State || a.State === b.State);
+const placeParts = (text) => { const p = cleanPlace(text, ""); return { City: p.city, State: p.state }; };
 // Verified means documents passed and the insurance on file has not expired.
 const isVerified = (p) => p.fields.Verification === "Verified" && (!p.fields["Insurance Expires"] || p.fields["Insurance Expires"] >= today());
 const proView = (p) => ({
@@ -206,7 +224,7 @@ const proView = (p) => ({
   legalName: p.fields["Legal Business Name"] || "", einLast4: (p.fields.EIN || "").slice(-4), insuranceExpires: p.fields["Insurance Expires"] || "", verifiedAt: p.fields["Verified At"] || "",
   email: p.fields.Email || "", verificationReason: p.fields["Verification Reason"] || "", checksLeft: checksLeft(p),
   balance: p.fields.Balance || 0, credit: Math.min(p.fields["Welcome Credit"] || 0, p.fields.Balance || 0),
-  city: p.fields.City || "", extraTrades: String(p.fields["Extra Trades"] || "").split(",").filter(Boolean), tradeName: TRADE_NAME[p.fields.Trade] || "",
+  city: p.fields.City || "", state: p.fields.State || "", market: placeOf(p.fields), extraTrades: String(p.fields["Extra Trades"] || "").split(",").filter(Boolean), tradeName: TRADE_NAME[p.fields.Trade] || "",
   textOffers: !!p.fields["Text Offers"], emailOffers: !!p.fields["Email Offers"], paused: !!p.fields.Paused, dailyCap: p.fields["Daily Cap"] || 0, quietHours: p.fields["Quiet Hours"] || "",
   agreement: String(p.fields.Agreement || "").split(" | ")[0], memberSince: p.fields["Created At"] || "", card: p.fields.Card || "", autoReload: !!p.fields["Auto Reload"], reloadAmount: reloadUnit(p.fields),
 });
@@ -752,7 +770,7 @@ export async function alertPros(env) {
     const l = lead.fields; let told = 0;
     for (const p of pros) {
       const f = p.fields;
-      if (!isVerified(p) || f["Closed At"] || !sameCity(f.City, l.City) || ![f.Trade, ...String(f["Extra Trades"] || "").split(",")].includes(l.Trade)) continue;
+      if (!isVerified(p) || f["Closed At"] || !sameMarket(f, l) || ![f.Trade, ...String(f["Extra Trades"] || "").split(",")].includes(l.Trade)) continue;
       const [d, n] = String(f["Offers Today"] || "").split("|"), sentToday = d === day ? Number(n) || 0 : 0;
       if ((f["Daily Cap"] && sentToday >= f["Daily Cap"]) || inQuiet(f["Quiet Hours"])) continue;
       let reached = false;
@@ -917,7 +935,7 @@ is_job_request: true when a person or business is asking for a contractor to do 
 request_type: "bid" when a contractor, builder or agency is inviting bids or quotes from subcontractors for a project (bid invitations, requests for proposal, addenda to a bid). "owner" for everything else.
 job: the work in 2 to 5 words, Title Case, no place name, no punctuation. Examples: "Roof Leak Repair", "Concrete Driveway Replacement", "Brick Veneer Repair". Never copy an email subject line. Drop "Fwd:", "Re:", dates and company names. For a bid, name the scope of work wanted from the subcontractor or the kind of project, and end with "Bid Invitation": "Demolition Bid Invitation", "Park Restroom Bid Invitation". Never use the project's proper name.
 trade: the one best match from the list.
-city and state: where the work is. Use the request first. If it does not say, use the city in the site name, if there is one. state is the two-letter code, or "" if unknown.
+city and state: where the work is. Use the request first. If it does not say, use the city in the site name, if there is one. state is the two-letter code. If the request does not name a state, use the site state, unless the city is plainly in a neighboring state (Southaven is in MS even when the site state is TN). "" only if there is nothing to go on.
 address: the street address of the job if given, else "".
 property_type: Home, Rental, Business, or Not stated.
 timing: Emergency (damage or danger now), Within a week, Within a month, Flexible, or Not stated.
@@ -936,7 +954,7 @@ export function scrub(text, f) {
 }
 // Sentences that only list what the owner did not say add nothing: the facts row already shows "Not stated".
 const noFiller = (t) => String(t || "").replace(/\s*\bNo [^.]{0,90}\b(?:was|were|is|are) (?:given|stated|provided|mentioned|specified|included)\.?/g, "").trim();
-const placeOf = (f) => [f.City, f.State].filter(Boolean).join(", ");
+const placeOf = (f) => { const pl = cleanPlace(f.City, f.State); return [pl.city, pl.state].filter(Boolean).join(", "); };
 // ---------- pricing: the glue between Airtable and src/pricing.js ----------
 // The engine itself is pure. This part loads its inputs (the trade row, the market row), stores what it decides
 // on the lead with the reasons, re-prices open leads when the engine version changes, and refreshes market demand daily.
@@ -953,14 +971,15 @@ async function pricingTrades(env) {
   tradeCache = { at: Date.now(), rows: Object.fromEntries(rows.map((r) => [r.fields.Trade, r])) };
   return tradeCache.rows;
 }
-const segmentOf = (city, trade) => `${String(city || "").trim().toLowerCase()}|${trade || "other"}`;
+// A segment is a market and a trade: "memphis, tn|roofing".
+const segmentOf = (f, trade) => `${placeOf(f).toLowerCase()}|${trade || "other"}`;
 const isBid = (job) => /Bid Invitation$/.test(job || "");
 // Prices one lead from its facts as they stand in `f` (the stored fields, with the writer's new values laid over them).
 // PRICING_ENGINE = "off" is the kill switch: every lead goes back to the flat SHADOW_SHARED_PRICE and SHADOW_EXCLUSIVE_PRICE.
 const engineOff = (env) => env.PRICING_ENGINE === "off";
 async function priceFor(env, f, marketRows = null) {
   if (engineOff(env)) { const shared = num(env.SHADOW_SHARED_PRICE, 75), exclusive = num(env.SHADOW_EXCLUSIVE_PRICE, 225); return { shared, exclusive, basis: { v: PRICING_VERSION, flat: true, shared, exclusive } }; }
-  const tr = (await pricingTrades(env))[f.Trade], seg = segmentOf(f.City, f.Trade);
+  const tr = (await pricingTrades(env))[f.Trade], seg = segmentOf(f, f.Trade);
   const mk = !f.City ? null : marketRows ? marketRows[seg] : (await list(env, HH.base, HH.pricingMarkets, { filterByFormula: `{Segment}='${esc(seg)}'`, maxRecords: 1 }))[0];
   return priceLead(
     { trade: f.Trade || "other", size: f["Job Size"], timing: f.Timing, property: f["Property Type"], bid: isBid(f.Job), hasPhone: digits(f["Owner Phone"]).length >= 10, hasEmail: /@/.test(f["Owner Email"] || ""), hasAddress: !!f["Job Address"] },
@@ -987,7 +1006,7 @@ export async function repriceLeads(env) {
 // Writes the numbers and the demand multiplier to Pricing Markets. Test accounts never count.
 export async function refreshMarkets(env) {
   const [leads, buys, pros, requests, rows] = await Promise.all([
-    list(env, HH.base, HH.leads, { filterByFormula: `AND({Style}='${STYLE}',{Qualified}='Yes',IS_AFTER({Received At},DATEADD(NOW(),-30,'days')))`, pageSize: 100, "fields[]": ["Trade", "City", "Max Pros"] }),
+    list(env, HH.base, HH.leads, { filterByFormula: `AND({Style}='${STYLE}',{Qualified}='Yes',IS_AFTER({Received At},DATEADD(NOW(),-30,'days')))`, pageSize: 100, "fields[]": ["Trade", "City", "State", "Max Pros"] }),
     list(env, HH.base, HH.purchases, { filterByFormula: "IS_AFTER({Bought At},DATEADD(NOW(),-30,'days'))", pageSize: 100, "fields[]": ["Purchase", "Kind"] }),
     list(env, HH.base, HH.pros, { pageSize: 100, maxRecords: 5000 }),
     list(env, HH.base, HH.requests, { pageSize: 100, maxRecords: 5000 }),
@@ -995,10 +1014,11 @@ export async function refreshMarkets(env) {
   ]);
   const seg = {}, S = (key, market, trade) => (seg[key] ||= { market, trade, leads: 0, claims: 0, pros: 0, requests: 0, spots: 0 });
   const leadSeg = {}, real = Object.fromEntries(pros.filter((p) => !p.fields.Test).map((p) => [p.id, p]));
-  for (const l of leads) { if (!l.fields.City) continue; const k = segmentOf(l.fields.City, l.fields.Trade), s = S(k, l.fields.City, l.fields.Trade || "other"); s.leads++; s.spots += l.fields["Max Pros"] || num(env.SHADOW_MAX_PROS, 5); leadSeg[l.id] = { k, max: l.fields["Max Pros"] || num(env.SHADOW_MAX_PROS, 5) }; }
+  const byCity = {};   // a pro who has not given a state is counted in the market that carries their city's name
+  for (const l of leads) { if (!l.fields.City) continue; const k = segmentOf(l.fields, l.fields.Trade), s = S(k, placeOf(l.fields), l.fields.Trade || "other"); byCity[String(l.fields.City).trim().toLowerCase()] ||= { City: l.fields.City, State: l.fields.State }; s.leads++; s.spots += l.fields["Max Pros"] || num(env.SHADOW_MAX_PROS, 5); leadSeg[l.id] = { k, max: l.fields["Max Pros"] || num(env.SHADOW_MAX_PROS, 5) }; }
   for (const b of buys) { const [leadId, proId] = String(b.fields.Purchase).split(":"), ls = leadSeg[leadId]; if (ls && real[proId]) seg[ls.k].claims += selectName(b.fields.Kind) === "Exclusive" ? ls.max : 1; }
-  for (const p of Object.values(real)) if (isVerified(p) && p.fields.City) for (const t of new Set([p.fields.Trade, ...String(p.fields["Extra Trades"] || "").split(",").map((x) => x.trim())].filter(Boolean))) S(segmentOf(p.fields.City, t), p.fields.City, t).pros++;
-  for (const r of requests) if (!r.fields.Test && r.fields.Market && r.fields.Trade && r.fields.Trade !== "all") S(segmentOf(r.fields.Market, r.fields.Trade), r.fields.Market, r.fields.Trade).requests++;
+  for (const p of Object.values(real)) if (isVerified(p) && p.fields.City) for (const t of new Set([p.fields.Trade, ...String(p.fields["Extra Trades"] || "").split(",").map((x) => x.trim())].filter(Boolean))) { const at = p.fields.State ? p.fields : byCity[String(p.fields.City).trim().toLowerCase()] || p.fields; S(segmentOf(at, t), placeOf(at), t).pros++; }
+  for (const r of requests) if (!r.fields.Test && r.fields.Market && r.fields.Trade && r.fields.Trade !== "all") { const at = placeParts(r.fields.Market); S(segmentOf(at, r.fields.Trade), placeOf(at), r.fields.Trade).requests++; }
   const have = Object.fromEntries(rows.map((r) => [r.fields.Segment, r])), out = { segments: 0, written: 0, moved: 0 }, now = new Date().toISOString();
   for (const r of rows) S(r.fields.Segment, r.fields.Market, r.fields.Trade);          // a row a person made keeps getting numbers
   for (const [key, s] of Object.entries(seg)) {
@@ -1015,14 +1035,32 @@ export async function refreshMarkets(env) {
   return out;
 }
 
+// Leads copied before states were carried over: look up each one's site and fill in the state, a few each minute.
+export async function fixStates(env) {
+  const todo = await list(env, HH.base, HH.leads, { filterByFormula: `AND({State}='',{Site State}='',NOT({DD1 Call Number}=BLANK()),IS_AFTER({Received At},DATEADD(NOW(),-30,'days')))`, pageSize: 30, maxRecords: 30 });
+  if (!todo.length) return 0;
+  const calls = await list(env, DD1.base, DD1.callTracker, { filterByFormula: `OR(${todo.map((l) => `{Call Number}=${Number(l.fields["DD1 Call Number"])}`).join(",")})`, pageSize: 100, returnFieldsByFieldId: "true", "fields[]": [DD1.f.number, DD1.f.siteLink] });
+  const siteOf = Object.fromEntries(calls.map((c) => [Number(c.fields[DD1.f.number]), (c.fields[DD1.f.siteLink] || [])[0]])), ids = [...new Set(Object.values(siteOf).filter(Boolean))];
+  const sites = ids.length ? await list(env, DD1.base, DD1.siteList, { filterByFormula: `OR(${ids.map((id) => `RECORD_ID()='${id}'`).join(",")})`, pageSize: 100, returnFieldsByFieldId: "true", "fields[]": [DD1.s.state] }) : [];
+  const stateOf = Object.fromEntries(sites.map((x) => [x.id, stateCode(selectName(x.fields[DD1.s.state]))]));
+  let fixed = 0;
+  for (const l of todo) {
+    // "none" marks a lead whose site has no state on file, so it is not looked up again every minute.
+    const st = stateOf[siteOf[Number(l.fields["DD1 Call Number"])]] || "", f = { ...l.fields, State: st };
+    await update(env, HH.leads, l.id, st ? { State: st, "Site State": st, ...(l.fields.Job ? { Lead: `${l.fields.Job} · ${placeOf(f) || "Area not stated"}` } : {}) } : { "Site State": "none" });
+    if (st) fixed++;
+  }
+  return fixed;
+}
+
 // Rejected by the lead writer (not by a person or an ingest rule). These are looked at again when the rules change.
 const writerRejected = (f) => f.Status === "Rejected" && String(f.Qualified || "").startsWith("No:");
 async function styleOne(env, lead) {
   const f = lead.fields;
-  const w = await askJson(env, { system: LEAD_RULES, schema: LEAD_SCHEMA, maxTokens: 700, content: [{ type: "text", text: `Came in as: ${String(f["Lead Source"] || "").split(" ")[0] || "Form"}\nSite name: ${f["Site Name"] || ""}\nCity field: ${f.City || ""}\nService or subject field: ${f.Service || ""}\nMessage:\n${f.Message || "(empty)"}` }] },
+  const w = await askJson(env, { system: LEAD_RULES, schema: LEAD_SCHEMA, maxTokens: 700, content: [{ type: "text", text: `Came in as: ${String(f["Lead Source"] || "").split(" ")[0] || "Form"}\nSite name: ${f["Site Name"] || ""}\nCity field: ${f.City || ""}\nSite state: ${f["Site State"] || ""}\nService or subject field: ${f.Service || ""}\nMessage:\n${f.Message || "(empty)"}` }] },
     (r) => { if (typeof r.is_job_request !== "boolean") throw new Error("no is_job_request in the reply"); });
   if (!w.is_job_request) return update(env, HH.leads, lead.id, { Style: STYLE, Qualified: "No: " + String(w.not_a_job_reason || "not a request for work").slice(0, 120), Status: f.Status === "Offered" ? "Rejected" : f.Status });
-  const trade = TRADE_NAME[w.trade] ? w.trade : tradeOf(`${w.job} ${f.Service}`), city = String(w.city || f.City || "").trim().slice(0, 60), state = /^[A-Za-z]{2}$/.test(w.state || "") ? w.state.toUpperCase() : "";
+  const trade = TRADE_NAME[w.trade] ? w.trade : tradeOf(`${w.job} ${f.Service}`), { city, state } = (() => { const pl = cleanPlace(w.city || f.City, stateCode(w.state)); return { city: pl.city, state: pl.state || stateCode(f["Site State"]) || stateCode(f.State) }; })();
   let job = String(w.job || "").replace(/^(fwd?|re):\s*/i, "").trim().slice(0, 60) || (TRADE_NAME[trade] ? TRADE_NAME[trade] + " Job" : "Job");
   // Every bid invitation gets the same title shape, whatever the model wrote: "<Scope> Bid Invitation".
   if (w.request_type === "bid") job = (job.replace(/\b(sub-?contractors?|subs?|bids?|bidding|proposals?|requests?|invitations?|rfp|itb|addend(?:um|a)|for|to)\b/gi, " ").replace(/[^A-Za-z0-9&' ]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 44) || (TRADE_NAME[trade] && trade !== "other" ? TRADE_NAME[trade] : "Project")) + " Bid Invitation";
@@ -1177,7 +1215,7 @@ async function adminOverview(env, realOnly) {
   // Market requests, grouped: where pros asked for leads and found none.
   const groups = {};
   for (const r of requests) { const k = `${String(r.fields.Market || "").toLowerCase()}|${r.fields.Trade}`, g = (groups[k] ||= { market: r.fields.Market || "", trade: TRADE_NAME[r.fields.Trade] || "All trades", tradeSlug: r.fields.Trade || "all", pros: 0, verified: 0, last: "" }); g.pros++; if (r.fields.Verified) g.verified++; if (String(r.fields.At) > g.last) g.last = r.fields.At; }
-  for (const g of Object.values(groups)) g.openNow = open.filter((l) => sameCity(l.fields.City || "", g.market) && (g.tradeSlug === "all" || l.fields.Trade === g.tradeSlug)).length;
+  for (const g of Object.values(groups)) g.openNow = open.filter((l) => sameMarket(l.fields, placeParts(g.market)) && (g.tradeSlug === "all" || l.fields.Trade === g.tradeSlug)).length;
   return {
     asOf: now, realOnly,
     stats: {
@@ -1298,9 +1336,10 @@ async function api(request, env, path) {
   }
   if (path === "/api/pro/join" && request.method === "POST") {
     const phone = digits(body.phone), business = String(body.business || "").trim().slice(0, 120);
-    const city = String(body.city || "").trim().slice(0, 80);
+    const { city, state } = cleanPlace(body.city, body.state);
     if (phone.length !== 10 || !business) return fail(400, "Enter your business name and a 10-digit mobile number.");
     if (!city) return fail(400, "Enter the city you work in.");
+    if (!state) return fail(400, "Pick the state you work in.");
     const email = String(body.email || "").trim().toLowerCase().slice(0, 160);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(400, "Enter your email address. We send your receipts and membership notices there.");
     if (body.agree !== "yes") return fail(400, "Tick the box to accept the Pro Agreement before creating your account.");
@@ -1309,7 +1348,7 @@ async function api(request, env, path) {
     const sent = await sendCode(env, phone);
     if (sent.error) return fail(503, sent.error);
     const test = env.SHADOW_MODE === "true";
-    const made = await create(env, HH.pros, { "Business Name": business, Mobile: phone, Trade: TRADE_NAME[body.trade] ? body.trade : "", ZIP: String(body.zip || "").slice(0, 5), City: city, Email: email, "Email Offers": true,
+    const made = await create(env, HH.pros, { "Business Name": business, Mobile: phone, Trade: TRADE_NAME[body.trade] ? body.trade : "", ZIP: String(body.zip || "").slice(0, 5), City: city, State: state, Email: email, "Email Offers": true,
       Agreement: `${AGREEMENT_VERSION} | ${new Date().toISOString()} | ${request.headers.get("CF-Connecting-IP") || "unknown"}`, Test: test, Verification: "Not started", Balance: num(env.WELCOME_CREDIT, 240), "Welcome Credit": num(env.WELCOME_CREDIT, 240), "Free Leads Left": 0, "Text Offers": body.sms === "yes", "Created At": new Date().toISOString() });
     if (num(env.WELCOME_CREDIT, 240) > 0) await post(env, made, { entry: "Welcome credit", type: "Welcome credit", amount: num(env.WELCOME_CREDIT, 240), creditPart: num(env.WELCOME_CREDIT, 240), balanceAfter: num(env.WELCOME_CREDIT, 240) });
     // Acknowledgment: the membership terms and how to cancel, in writing, kept by the pro.
@@ -1385,18 +1424,23 @@ async function api(request, env, path) {
     // Older, marked-down leads are only shown to a pro with a card on file.
     const open = leads.filter((l) => !mineIds.has(l.id) && (pro.fields.Card || isHot(l))).map((l) => offerView(env, l, count[l.id] || 0, !!excl[l.id]));
     // Filters default to the pro's own market and trade. "all" widens either one.
-    const q = new URL(request.url).searchParams, home = { market: pro.fields.City || "", trade: pro.fields.Trade || "" };
+    const q = new URL(request.url).searchParams, home = { market: placeOf(pro.fields), trade: pro.fields.Trade || "" };
     const market = q.has("market") ? q.get("market") : home.market || "all", trade = q.has("trade") ? q.get("trade") : home.trade || "all";
     const tally = (list, key) => Object.entries(list.reduce((m, o) => { const k = key(o); if (k) m[k] = (m[k] || 0) + 1; return m; }, {}));
-    const markets = tally(open, (o) => o.city).map(([name, n]) => ({ name, count: n })).sort((a, b) => a.name.localeCompare(b.name));
+    // A market is a place, "City, ST". A pro who has not given a state yet is matched to the place with their city's name.
+    const markets = tally(open, (o) => (o.city ? o.place : "")).map(([name, n]) => ({ name, count: n })).sort((a, b) => a.name.localeCompare(b.name));
+    const want = placeParts(market);
     const trades = tally(open, (o) => o.trade).map(([slug, n]) => ({ slug, name: TRADE_NAME[slug] || "Other", count: n })).sort((a, b) => a.name.localeCompare(b.name));
-    const offers = open.filter((o) => (market === "all" || sameCity(o.city, market)) && (trade === "all" || o.trade === trade));
-    return json({ offers, hot: offers.filter((o) => o.hot).length, older: offers.filter((o) => !o.hot).length, hotHours: HOT_HOURS, leadDays: LEAD_DAYS, olderShown: !!pro.fields.Card, canBuy: isVerified(pro), filters: { market, trade, markets, trades, home, total: open.length }, pro: proView(pro) });
+    const offers = open.filter((o) => (market === "all" || sameMarket({ City: o.city, State: o.state }, want)) && (trade === "all" || o.trade === trade));
+    // Show the market the way the list writes it, so the picker lands on the right entry.
+    const shown = market === "all" ? "all" : (markets.filter((m) => sameMarket(placeParts(m.name), want)).sort((a, b) => (want.State ? (b.name === placeOf(want)) - (a.name === placeOf(want)) : /, [A-Z]{2}$/.test(b.name) - /, [A-Z]{2}$/.test(a.name)) || b.count - a.count)[0] || { name: placeOf(want) || market }).name;
+    return json({ offers, hot: offers.filter((o) => o.hot).length, older: offers.filter((o) => !o.hot).length, hotHours: HOT_HOURS, leadDays: LEAD_DAYS, olderShown: !!pro.fields.Card, canBuy: isVerified(pro), filters: { market: shown, trade, markets, trades, home, total: open.length }, pro: proView(pro) });
   }
   if (path === "/api/pro/buy" && request.method === "POST") return buy(env, pro, body);
   // "I want more leads here": a pro tells us a market and trade had nothing for them. One row per pro, market and trade.
   if (path === "/api/pro/market-request" && request.method === "POST") {
-    const market = String(body.market || "").trim().slice(0, 80) || pro.fields.City || "", trade = TRADE_NAME[body.trade] ? body.trade : body.trade === "all" ? "all" : pro.fields.Trade || "all";
+    if (String(body.market || "").trim().toLowerCase() === "all") return fail(400, "Pick a market first.");
+    const market = placeOf(placeParts(String(body.market || "").trim().slice(0, 80))) || placeOf(pro.fields), trade = TRADE_NAME[body.trade] ? body.trade : body.trade === "all" ? "all" : pro.fields.Trade || "all";
     if (!market || market === "all") return fail(400, "Pick a market first.");
     const key = `${pro.id}|${trade}|${market.toLowerCase()}`;
     if (!(await list(env, HH.base, HH.requests, { filterByFormula: `{Key}='${esc(key)}'`, maxRecords: 1 })).length)
@@ -1429,14 +1473,15 @@ async function api(request, env, path) {
     return json({ ok: true });
   }
   if (path === "/api/pro/profile" && request.method === "POST") {
-    const business = String(body.business || "").trim().slice(0, 120), city = String(body.city || "").trim().slice(0, 80), zip = String(body.zip || "").trim(), email = String(body.email || "").trim().toLowerCase().slice(0, 160);
+    const business = String(body.business || "").trim().slice(0, 120), { city, state } = cleanPlace(body.city, body.state), zip = String(body.zip || "").trim(), email = String(body.email || "").trim().toLowerCase().slice(0, 160);
     if (!business) return fail(400, "Enter your business name.");
     if (!city) return fail(400, "Enter the city you work in.");
+    if (!state) return fail(400, "Pick the state you work in.");
     if (!/^\d{5}$/.test(zip)) return fail(400, "Enter a 5-digit ZIP code.");
     if (!TRADE_NAME[body.trade]) return fail(400, "Choose your main trade.");
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail(400, "Check your email address.");
     const extra = [...new Set([].concat(body.extraTrades || []).filter((t) => TRADE_NAME[t] && t !== body.trade))].slice(0, 23);
-    const saved = await update(env, HH.pros, pro.id, { "Business Name": business, City: city, ZIP: zip, Trade: body.trade, "Extra Trades": extra.join(","), ...(email ? { Email: email } : {}) });
+    const saved = await update(env, HH.pros, pro.id, { "Business Name": business, City: city, State: state, ZIP: zip, Trade: body.trade, "Extra Trades": extra.join(","), ...(email ? { Email: email } : {}) });
     return json({ pro: proView(saved) });
   }
   if (path === "/api/pro/notifications" && request.method === "POST") {
@@ -1532,6 +1577,7 @@ export default {
     const step = (name, fn) => fn().catch((e) => console.error(`${name} failed:`, String(e && e.message || e)));
     const run = async () => {
       if (env.SHADOW_MODE === "true") await step("ingest", async () => console.log("ingest", JSON.stringify(await ingest(env))));
+      await step("states", async () => { const n = await fixStates(env); if (n) console.log("states filled", n); });
       await step("pricing", async () => { const r = await repriceLeads(env); if (r.repriced || r.sold) console.log("pricing", JSON.stringify(r)); });
       await step("alerts", async () => { const alerts = await alertPros(env); if (alerts.leads) console.log("alerts", JSON.stringify(alerts)); });
       await step("credit backs", async () => { const back = await creditBacks(env); if (back) console.log("credit backs", back); });

@@ -27,7 +27,7 @@ const send = async (form, cookie) => {
 const ALL = "/api/pro/offers?market=all&trade=all";   // older checks look at every open lead
 const signUp = async (n) => {
   const phone = "90155501" + String(n).padStart(2, "0");
-  assert.equal((await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "join@example.com", business: "Test Pro " + n, phone, trade: "roofing", zip: "38103" })).next, "code");
+  assert.equal((await call("/api/pro/join", { city: "Memphis", state: "TN", agree: "yes", email: "join@example.com", business: "Test Pro " + n, phone, trade: "roofing", zip: "38103" })).next, "code");
   const v = await call("/api/pro/verify-code", { phone, code: "424242" }); assert.equal(v.status, 200);
   assert.equal((await send(docs(n), v.cookie)).pro.verified, true);
   return v.cookie;
@@ -55,12 +55,12 @@ const leads = db.tblfA6ivDIlWVp4us; assert.ok(leads.every((l) => l.fields.Test =
 const mail = leads.find((l) => l.fields["Lead Source"].startsWith("Email")); assert.equal(mail.fields.Service, "Quote for a retaining wall"); assert.equal(mail.fields["Owner Phone"], "");
 
 // gates
-assert.equal((await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "join@example.com", business: "Outsider", phone: "9012223333" })).status, 403, "shadow mode blocks non-internal numbers");
+assert.equal((await call("/api/pro/join", { city: "Memphis", state: "TN", agree: "yes", email: "join@example.com", business: "Outsider", phone: "9012223333" })).status, 403, "shadow mode blocks non-internal numbers");
 assert.equal((await call("/api/pro/me")).status, 401);
 const a = await signUp(1);
-assert.equal((await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "join@example.com", business: "Dup", phone: "9015550101" })).status, 409);
+assert.equal((await call("/api/pro/join", { city: "Memphis", state: "TN", agree: "yes", email: "join@example.com", business: "Dup", phone: "9015550101" })).status, 409);
 assert.equal((await call("/api/pro/verify-code", { phone: "9015550101", code: "000000" })).status, 401, "wrong code refused");
-const unverifiedPhone = "9015550150"; await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "join@example.com", business: "Unverified", phone: unverifiedPhone });
+const unverifiedPhone = "9015550150"; await call("/api/pro/join", { city: "Memphis", state: "TN", agree: "yes", email: "join@example.com", business: "Unverified", phone: unverifiedPhone });
 const u = await call("/api/pro/verify-code", { phone: unverifiedPhone, code: "424242" });
 // an unverified pro can browse but not claim, and sees no owner details
 seedForm(15); await ingest(env);
@@ -81,7 +81,7 @@ assert.equal((await call(ALL, null, u.cookie)).canBuy, true);
 assert.ok([...stored.keys()].some((k) => k.endsWith("-business.pdf")) && [...stored.keys()].some((k) => k.endsWith("-insurance.pdf")), "both files are kept");
 assert.equal(ai.last.headers["anthropic-version"], "2026-10-21"); assert.equal(ai.last.body.model, "claude-sonnet-5-5"); assert.ok(!ai.last.body.tool_choice, "no forced tool call: the live model refuses it"); assert.equal(ai.last.body.output_config.format.type, "json_schema");
 // the AI check: fail, unsure, expired, EIN mismatch, AI down, daily limit, review request
-const v2 = async (n) => { const phone = "90155501" + n; await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "join@example.com", business: "Check " + n, phone }); return (await call("/api/pro/verify-code", { phone, code: "424242" })).cookie; };
+const v2 = async (n) => { const phone = "90155501" + n; await call("/api/pro/join", { city: "Memphis", state: "TN", agree: "yes", email: "join@example.com", business: "Check " + n, phone }); return (await call("/api/pro/verify-code", { phone, code: "424242" })).cookie; };
 const c1 = await v2(60), before = sent.length;
 assert.equal((await send(docs(60, { type: "text/plain" }), c1)).status, 400, "file type refused");
 assert.equal((await send(docs(60, { email: "nope" }), c1)).status, 400, "email required");
@@ -174,7 +174,7 @@ assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, re
 assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "again" }, a)).status, 409);
 assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId }, b)).status, 404, "cannot report another pro's lead");
 // ---- sign-up agreement ----
-assert.equal((await call("/api/pro/join", { business: "No Agree", phone: "9015550190", city: "Memphis" })).status, 400, "the Pro Agreement must be accepted");
+assert.equal((await call("/api/pro/join", { business: "No Agree", phone: "9015550190", city: "Memphis", state: "TN" })).status, 400, "the Pro Agreement must be accepted");
 assert.equal((await call("/api/pro/join", { business: "No City", phone: "9015550190", agree: "yes" })).status, 400, "a city is required");
 assert.match(readFileSync(new URL("../site/src/legal/pro-agreement.md", import.meta.url), "utf8"), new RegExp("Last updated: " + AGREEMENT_VERSION), "the recorded version matches the published agreement");
 const agreed = db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550101").fields.Agreement;
@@ -203,19 +203,22 @@ assert.match(readFileSync(new URL("../site/dist/pros/join/index.html", import.me
 
 // ---- markets and trades ----
 assert.deepEqual(["Roof leak repair", "Driveway Replacement", "Asphalt driveway", "Water Heater", "Fence Install", "Quote for a retaining wall", "Mystery"].map(tradeOf), ["roofing", "concrete", "asphalt-paving", "water-heaters", "fencing", "masonry", "other"]);
-seedForm(30, { service: "Roof Repair", city: "Memphis" }); seedForm(31, { service: "Fence Install", city: "Memphis" }); seedForm(32, { service: "Roof Repair", city: "Nashville" }); await ingest(env);
+seedForm(30, { service: "Roof Repair", city: "Memphis", state: "TN" }); seedForm(31, { service: "Fence Install", city: "Memphis", state: "TN" }); seedForm(32, { service: "Roof Repair", city: "Nashville" }); await ingest(env);
 const m1 = await signUp(70);   // trade roofing, city Memphis
 const mineOnly = await call("/api/pro/offers", null, m1);
-assert.equal(mineOnly.filters.market, "Memphis"); assert.equal(mineOnly.filters.trade, "roofing"); assert.ok(mineOnly.offers.length > 0 && mineOnly.offers.every((o) => o.city === "Memphis" && o.trade === "roofing"), "defaults to the pro's market and trade");
+assert.equal(mineOnly.filters.market, "Memphis, TN"); assert.ok(mineOnly.filters.markets.every((m) => /, [A-Z]{2}$/.test(m.name)), "every market in the list is City, ST"); assert.equal(mineOnly.filters.trade, "roofing"); assert.ok(mineOnly.offers.length > 0 && mineOnly.offers.every((o) => o.city === "Memphis" && o.trade === "roofing"), "defaults to the pro's market and trade");
 const nash = await call("/api/pro/offers?market=Nashville&trade=all", null, m1); assert.ok(nash.offers.length > 0 && nash.offers.every((o) => o.city === "Nashville"), "another market can be picked");
-const everything = await call("/api/pro/offers?market=all&trade=all", null, m1); assert.equal(everything.offers.length, everything.filters.total); assert.ok(everything.filters.markets.some((k) => k.name === "Nashville") && everything.filters.trades.some((k) => k.slug === "fencing"));
+const everything = await call("/api/pro/offers?market=all&trade=all", null, m1); assert.equal(everything.offers.length, everything.filters.total); assert.ok(everything.filters.markets.some((k) => k.name === "Nashville, TN") && everything.filters.trades.some((k) => k.slug === "fencing"));
 assert.ok(!JSON.stringify(everything).match(/owner\d|9015550\d{3}@|Sample Owner/), "filters never expose owner details");
 
 // ---- profile, notifications, pipeline, wallet, tickets, closing ----
 assert.equal((await call("/api/pro/profile", { business: "New Name", city: "Nashville", zip: "37201", trade: "nope" }, m1)).status, 400);
-const prof = await call("/api/pro/profile", { business: "New Name", city: "Nashville", zip: "37201", trade: "fencing", extraTrades: ["roofing", "fencing", "bogus"] }, m1);
+assert.match((await call("/api/pro/profile", { business: "New Name", city: "Nashville", zip: "37201", trade: "fencing" }, m1)).error, /Pick the state/);
+// a city typed with its state, in any case, is split and tidied
+const prof = await call("/api/pro/profile", { business: "New Name", city: "nashville, tn", zip: "37201", trade: "fencing", extraTrades: ["roofing", "fencing", "bogus"] }, m1);
+assert.deepEqual([prof.pro.city, prof.pro.state, prof.pro.market], ["Nashville", "TN", "Nashville, TN"]);
 assert.equal(prof.pro.city, "Nashville"); assert.equal(prof.pro.trade, "fencing"); assert.deepEqual(prof.pro.extraTrades, ["roofing"]);
-assert.equal((await call("/api/pro/offers", null, m1)).filters.market, "Nashville", "the default market follows the profile");
+assert.equal((await call("/api/pro/offers", null, m1)).filters.market, "Nashville, TN", "the default market follows the profile");
 assert.equal((await call("/api/pro/notifications", { quietStart: "21:00" }, m1)).status, 400);
 const noti = await call("/api/pro/notifications", { textOffers: true, emailOffers: false, paused: true, dailyCap: "5", quietStart: "21:00", quietEnd: "07:00" }, m1);
 assert.equal(noti.pro.paused, true); assert.equal(noti.pro.dailyCap, 5); assert.equal(noti.pro.quietHours, "21:00-07:00");
@@ -239,7 +242,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   const P = db.tbl9bEGuy8DPkkee7, LD = db.tblfA6ivDIlWVp4us, PU = db.tblJnYLq2aCiCVU1C, find = (mob) => P.find((p) => p.fields.Mobile === mob);
   // auto-reload keeps a lead's worth in the wallet without being asked
   const r1 = await signUp(80); await call("/api/pro/card", { action: "save" }, r1); await call("/api/pro/reload-settings", { autoReload: true, reloadAmount: 150 }, r1);
-  seedForm(50, { service: "Roof Repair", city: "Memphis" }); seedForm(51, { service: "Roof Repair", city: "Memphis" }); seedForm(52, { service: "Roof Repair", city: "Memphis" }); seedForm(53, { service: "Roof Repair", city: "Memphis" }); await ingest(env);
+  seedForm(50, { service: "Roof Repair", city: "Memphis", state: "TN" }); seedForm(51, { service: "Roof Repair", city: "Memphis", state: "TN" }); seedForm(52, { service: "Roof Repair", city: "Memphis", state: "TN" }); seedForm(53, { service: "Roof Repair", city: "Memphis", state: "TN" }); await ingest(env);
   const four = (await call(ALL, null, r1)).offers.slice(0, 4);
   for (const o of four.slice(0, 2)) await call("/api/pro/buy", { leadId: o.id, kind: "shared" }, r1);
   const third = await call("/api/pro/buy", { leadId: four[2].id, kind: "shared" }, r1); assert.equal(third.autoReloaded, 150, "below a lead's price after the third claim, the wallet reloads itself"); assert.equal(third.balance, 165);
@@ -254,7 +257,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   const real = { id: "recREALPRO00000001", fields: { "Business Name": "Real Roofing", Mobile: "9012223333", Email: "real@example.com", Trade: "roofing", City: "memphis", Verification: "Verified", "Text Offers": true, "Email Offers": true, Balance: 15, "Welcome Credit": 15, Card: "Visa ending 1111", "Card Token": "TEST", Test: true, "Created At": new Date().toISOString() } };
   const other = { id: "recOTHERPRO0000001", fields: { "Business Name": "Other Fence", Mobile: "9014445555", Email: "other@example.com", Trade: "fencing", City: "Memphis", Verification: "Verified", "Text Offers": true, "Email Offers": true, Balance: 240 } };
   P.push(real, other);
-  seedForm(60, { service: "Roof Repair", city: "Memphis" }); await ingest(env);
+  seedForm(60, { service: "Roof Repair", city: "Memphis", state: "TN" }); await ingest(env);
   const fresh = LD.at(-1), t0 = texts.length, e0 = sent.length, al = await alertPros(env);
   assert.equal(al.leads, 1); const toReal = texts.slice(t0); assert.equal(toReal.length, 1, "only the matching pro with a real number is texted"); assert.equal(toReal[0].to, "+19012223333");
   assert.match(toReal[0].body, /New ROOFING lead in Memphis, TN\. Roof Repair\. Size: Small\. .*\$75 from your wallet; if it is short we charge Visa ending 1111\. Reply YES to claim, ONLY for exclusive \(\$225\)\. Reply STOP/);
@@ -286,7 +289,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   assert.match((await sms("+19012223333", "TOPUP 37")).text, /pick an amount/, "only the listed amounts");
   // a claim that leaves the wallet low sends the lead, then the menu as a second text
   real.fields.Balance = 80; real.fields["Welcome Credit"] = 0; real.fields["Text State"] = "";
-  seedForm(61, { service: "Roof Repair", city: "Memphis" }); await ingest(env); await alertPros(env);
+  seedForm(61, { service: "Roof Repair", city: "Memphis", state: "TN" }); await ingest(env); await alertPros(env);
   const low = await sms("+19012223333", "YES"); assert.equal((low.text.match(/<Message>/g) || []).length, 2); assert.match(low.text, /your wallet is running low\. Reply 1 to add \$150/); assert.match(real.fields["Text State"], /^topup\|/);
   assert.match((await sms("+19012223333", "1")).text, /\$150 added/); assert.equal(real.fields.Balance, 155);
   const cardless = { ...real.fields, Card: "", "Card Token": "" }; real.fields.Card = ""; assert.match((await sms("+19012223333", "TOPUP")).text, /Add a card and top up at hammerhound\.com/); real.fields.Card = "Visa ending 1111";
@@ -330,7 +333,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   assert.equal((await sendReminders(env, { now: "2027-02-04" })).membership, 0, "the same notice is not sent twice"); assert.equal((await sendReminders(env, { now: "2027-02-20" })).membership, 1); assert.equal((await sendReminders(env, { now: "2027-03-08" })).membership, 1);
   P.splice(P.indexOf(member), 1); P.forEach((p, i) => { p.fields.Email = keep[i]; });
   // sign-up: email required, and the terms are confirmed in writing
-  assert.equal((await call("/api/pro/join", { business: "No Email", phone: "9015550189", city: "Memphis", agree: "yes" })).status, 400);
+  assert.equal((await call("/api/pro/join", { business: "No Email", phone: "9015550189", city: "Memphis", state: "TN", agree: "yes" })).status, 400);
   const ack = sent.find((e) => /Welcome to Hammer Hound: your membership terms/.test(e.subject)); assert.ok(ack); assert.match(ack.text, /renews automatically for 12 months and \$300 is charged/); assert.match(ack.text, /To cancel at any time/);
 }
 
@@ -338,7 +341,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
 {
   const P = db.tbl9bEGuy8DPkkee7, find = (mob) => P.find((p) => p.fields.Mobile === mob);
   // five wrong codes lock the account for the hour, even against the right code
-  await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "g@example.com", business: "Guarded", phone: "9015550183" });
+  await call("/api/pro/join", { city: "Memphis", state: "TN", agree: "yes", email: "g@example.com", business: "Guarded", phone: "9015550183" });
   for (let i = 0; i < 5; i++) assert.equal((await call("/api/pro/verify-code", { phone: "9015550183", code: "000000" })).status, 401);
   assert.equal((await call("/api/pro/verify-code", { phone: "9015550183", code: "424242" })).status, 429, "locked after five wrong codes");
   assert.equal((await call("/api/pro/sign-in", { phone: "9015550183" })).status, 429);
@@ -347,7 +350,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
 
   // a declined card: nothing charged, a link to fix it, and the lead is claimed once a working card is saved
   const dc = await signUp(84), dp = find("9015550184"); dp.fields.Balance = 15; dp.fields["Welcome Credit"] = 15;
-  seedForm(70, { service: "Roof Repair", city: "Memphis" }); await ingest(env);
+  seedForm(70, { service: "Roof Repair", city: "Memphis", state: "TN" }); await ingest(env);
   const target = (await call(ALL, null, dc)).offers[0], led = db.tblZ2EIWCgOb36JR2.length, m0 = sent.length;
   assert.equal((await call("/api/pro/card", { action: "save", decline: true }, dc)).pro.card, "Test card ending 0002");
   const dec = await call("/api/pro/buy", { leadId: target.id, kind: "shared", reload: true }, dc);
@@ -363,7 +366,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   // by text: the reply carries the link
   Object.assign(env, { TWILIO_ACCOUNT_SID: "AC1", TWILIO_AUTH_TOKEN: "tok", TWILIO_FROM: "+19015550000" });
   const tp = { id: "recTEXTDECLINE0001", fields: { "Business Name": "Text Decline", Mobile: "9013334444", Email: "td@example.com", Trade: "roofing", City: "Memphis", Verification: "Verified", "Text Offers": true, Balance: 0, Card: "Test card ending 0002", "Card Token": "TEST-DECLINE", Test: true, "Created At": new Date().toISOString() } }; P.push(tp);
-  seedForm(71, { service: "Roof Repair", city: "Memphis" }); await ingest(env); tp.fields["Last Offer"] = db.tblfA6ivDIlWVp4us.at(-1).id + "|x";
+  seedForm(71, { service: "Roof Repair", city: "Memphis", state: "TN" }); await ingest(env); tp.fields["Last Offer"] = db.tblfA6ivDIlWVp4us.at(-1).id + "|x";
   const sms = async (body) => { const url = "https://hammerhound.com/api/sms/inbound", p = { Body: body, From: "+19013334444" }; const r = await worker.fetch(new Request(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Twilio-Signature": createHmac("sha1", "tok").update(url + Object.keys(p).sort().map((k) => k + p[k]).join("")).digest("base64") }, body: new URLSearchParams(p) }), env); return r.text(); };
   assert.match(await sms("YES"), /your card was declined, so that lead is not yours yet\. Update it here and we reload and claim it for you: https:\/\/hammerhound\.com\/api\/pro\/link\?t=rec/);
   assert.match(await sms("TOPUP 300"), /card was declined, so nothing was added\. Update it here and we finish the \$300 top-up/); P.splice(P.indexOf(tp), 1);
@@ -451,10 +454,10 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   assert.equal((await adm("/api/admin/overview", null, `hh_a=${Date.now() + 1e6}.${"a".repeat(64)}`)).status, 401);
   const A = (await adm("/api/admin/sign-in", { key: env.ADMIN_KEY })).cookie; assert.match(A, /^hh_a=\d+\.[a-f0-9]{64}$/);
   // set up one of each queue item
-  const c = await signUp(86), me = P.find((p) => p.fields.Mobile === "9015550186"), other = (await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "rev@example.com", business: "Needs Review LLC", phone: "9015550187" }), P.find((p) => p.fields.Mobile === "9015550187"));
+  const c = await signUp(86), me = P.find((p) => p.fields.Mobile === "9015550186"), other = (await call("/api/pro/join", { city: "Memphis", state: "TN", agree: "yes", email: "rev@example.com", business: "Needs Review LLC", phone: "9015550187" }), P.find((p) => p.fields.Mobile === "9015550187"));
   Object.assign(other.fields, { Verification: "In review", "Verification Reason": "Both documents were unreadable.", "Proof of Business File": `pros/${other.id}/1-business.pdf`, "Insurance File": `pros/${other.id}/1-insurance.pdf`, EIN: "123456789" });
   await env.DOCS.put(`pros/${other.id}/1-business.pdf`, new TextEncoder().encode("%PDF-test"), { httpMetadata: { contentType: "application/pdf" } });
-  seedForm(73, { service: "Roof Repair", city: "Memphis" }); await ingest(env);
+  seedForm(73, { service: "Roof Repair", city: "Memphis", state: "TN" }); await ingest(env);
   const lead = (await call(ALL, null, c)).offers.find((o) => o.hot); const got = await call("/api/pro/buy", { leadId: lead.id, kind: "shared" }, c); assert.equal(got.status, 200);
   const mineP = PU.find((p) => p.fields.Purchase === `${lead.id}:${me.id}`); await call("/api/pro/report", { purchaseId: mineP.id, reason: "Number is disconnected." }, c);
   await call("/api/pro/tickets", { subject: "Card question", message: "When can I add a card?", topic: "Billing" }, c);
@@ -518,7 +521,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes" }, c)).status, 409);
   assert.match(await sms("+19017771111", "hello"), /Reply YES to get lead texts/); assert.match(await sms("+19017771111", "Yes"), /you're in\. You'll get lead texts for Test Pro 91/); assert.ok(dana.fields["Opted In At"]); assert.equal(acts().at(-1), "Opted in");
   // a new lead is texted to the member; without pay authority a YES only asks the owner
-  for (const l of LD) l.fields.Alerted = "x"; seedForm(74, { service: "Roof Repair", city: "Memphis" }); await ingest(env); const lead = LD.at(-1), t1 = texts.length; await alertPros(env);
+  for (const l of LD) l.fields.Alerted = "x"; seedForm(74, { service: "Roof Repair", city: "Memphis", state: "TN" }); await ingest(env); const lead = LD.at(-1), t1 = texts.length; await alertPros(env);
   const toDana = texts.slice(t1).find((m) => m.to === "+19017771111"); assert.match(toDana.body, /New ROOFING lead in Memphis, TN.*Reply YES to ask Test Pro 91 to claim it/); assert.ok(!/\$75/.test(toDana.body)); assert.equal(dana.fields["Last Offer"].split("|")[0], lead.id);
   const m0 = sent.length, bal0 = me.fields.Balance; assert.match(await sms("+19017771111", "YES"), /you cannot claim leads by text on this account\. We told Test Pro 91/); assert.equal(me.fields.Balance, bal0); assert.ok(sent.slice(m0).some((e) => e.subject === "Dana wants a lead"));
   // the double confirm: on screen, then a code texted to the owner. Both are needed, and a wrong code grants nothing
@@ -542,7 +545,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   // the owner's daily limit for a member
   assert.equal((await call("/api/pro/team/update", { memberId: dana.id, getsTexts: true, portal: false, dailyCap: 5 }, c)).status, 400);
   assert.equal((await call("/api/pro/team/update", { memberId: dana.id, getsTexts: true, portal: false, dailyCap: 100 }, c)).members[0].dailyCap, 100); assert.equal(acts().at(-1), "Settings changed");
-  seedForm(75, { service: "Roof Repair", city: "Memphis" }); await ingest(env); dana.fields["Last Offer"] = LD.at(-1).id + "|x";
+  seedForm(75, { service: "Roof Repair", city: "Memphis", state: "TN" }); await ingest(env); dana.fields["Last Offer"] = LD.at(-1).id + "|x";
   assert.match(await sms("+19017771111", "YES"), /would pass your daily limit of \$100 \(\$75\.00 claimed today\)/); assert.equal(me.fields.Balance, bal0 - 75);
   // turning it off is one step, takes effect at once, and is logged
   assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: false }, c)).members[0].canPay, false); assert.equal(acts().at(-1), "Pay authority revoked"); assert.ok(dana.fields["Pay Revoked At"]);
@@ -625,7 +628,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   // --- wired in: the lead writer prices each lead, with its reasons, and the Pricing Trades table fills itself ---
   env.PRICING_ENGINE = "on";
   const LD = db.tblfA6ivDIlWVp4us, TR = db.tbl6J7aYXbhEZjrVw, MK = db.tbl4QFgPCQk4QL27B, PRO = db.tbl9bEGuy8DPkkee7, c = await signUp(93);
-  seedForm(76, { service: "Roof Repair", city: "Memphis" }); await ingest(env); const lead = LD.at(-1), basis = JSON.parse(lead.fields["Price Basis"]);
+  seedForm(76, { service: "Roof Repair", city: "Memphis", state: "TN" }); await ingest(env); const lead = LD.at(-1), basis = JSON.parse(lead.fields["Price Basis"]);
   assert.equal(TR.length, 25, "one row per trade, plus other"); assert.deepEqual([TR.find((r) => r.fields.Trade === "roofing").fields["Job Value"], TR.find((r) => r.fields.Trade === "plumbing").fields["Job Value"]], [3000, undefined]);
   assert.equal(lead.fields["Price Version"], "p1"); assert.equal(basis.jobValue, 3000); assert.equal(lead.fields["Shared Price"], basis.shared); assert.equal(lead.fields["Exclusive Price"], basis.shared * 3);
   assert.equal(lead.fields["Shared Price"], priceLead({ trade: "roofing", size: lead.fields["Job Size"], timing: lead.fields.Timing, property: lead.fields["Property Type"], bid: false, hasPhone: true, hasEmail: true, hasAddress: !!lead.fields["Job Address"] }).shared);
@@ -643,17 +646,42 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   const { offerText } = await import("../src/worker.js"); assert.match(offerText({ ...lead.fields }, {}), new RegExp("\\$" + fixed + " from your wallet.*exclusive \\(\\$" + fixed * 3 + "\\)"));
   // the daily market refresh: test accounts never count, so nothing moves on test sales alone; a real pro and a request get a row
   const before = MK.length, r1 = await refreshMarkets(env); assert.equal(r1.moved, 0); assert.ok(MK.every((m) => m.fields["Demand Multiplier"] === 1));
-  const tup = MK.find((m) => m.fields.Segment === "tupelo|roofing"); assert.equal(tup, undefined, "a request from a test account is not demand");
+  const tup = MK.find((m) => m.fields.Segment === "tupelo, ms|roofing"); assert.equal(tup, undefined, "a request from a test account is not demand");
   PRO.push({ id: "recREALPRICING0001".slice(0, 17), fields: { "Business Name": "Real Demo Co", Mobile: "9018889999", City: "Memphis", Trade: "roofing", "Extra Trades": "gutters", Verification: "Verified", Balance: 0 } });
-  await refreshMarkets(env); const mem = MK.find((m) => m.fields.Segment === "memphis|roofing"), gut = MK.find((m) => m.fields.Segment === "memphis|gutters");
+  await refreshMarkets(env); const mem = MK.find((m) => m.fields.Segment === "memphis, tn|roofing"), gut = MK.find((m) => m.fields.Segment === "memphis, tn|gutters");
   assert.ok(mem && gut); assert.equal(mem.fields["Verified Pros"], 1); assert.ok(mem.fields["Leads 30d"] >= 1); assert.equal(mem.fields["Claims 30d"], 0, "claims by test accounts are not counted"); assert.equal(mem.fields["Demand Multiplier"], mem.fields["Leads 30d"] >= 10 ? 0.9 : 1, "a real pro who buys nothing lowers the price one step"); assert.match(mem.fields["Demand Note"], /Only \d+ leads|% of possible sales made/);
   // a manual multiplier and a cost per lead on that row drive the next lead priced there
-  mem.fields["Manual Multiplier"] = 2; seedForm(77, { service: "Roof Repair", city: "Memphis" }); await ingest(env); const l2 = LD.at(-1), b2 = JSON.parse(l2.fields["Price Basis"]);
+  mem.fields["Manual Multiplier"] = 2; seedForm(77, { service: "Roof Repair", city: "Memphis", state: "TN" }); await ingest(env); const l2 = LD.at(-1), b2 = JSON.parse(l2.fields["Price Basis"]);
   assert.equal(b2.factors.market, 2); assert.equal(b2.factors.marketFrom, "manual"); mem.fields["Manual Multiplier"] = null; mem.fields["Cost Per Lead"] = 500;
-  seedForm(78, { service: "Roof Repair", city: "Memphis" }); await ingest(env); assert.equal(LD.at(-1).fields["Shared Price"], 750); assert.equal(JSON.parse(LD.at(-1).fields["Price Basis"]).bound, "cost floor");
+  seedForm(78, { service: "Roof Repair", city: "Memphis", state: "TN" }); await ingest(env); assert.equal(LD.at(-1).fields["Shared Price"], 750); assert.equal(JSON.parse(LD.at(-1).fields["Price Basis"]).bound, "cost floor");
   // the kill switch returns to the flat price
-  env.PRICING_ENGINE = "off"; seedForm(79, { service: "Roof Repair", city: "Memphis" }); await ingest(env); assert.deepEqual([LD.at(-1).fields["Shared Price"], LD.at(-1).fields["Exclusive Price"]], [75, 225]);
+  env.PRICING_ENGINE = "off"; seedForm(79, { service: "Roof Repair", city: "Memphis", state: "TN" }); await ingest(env); assert.deepEqual([LD.at(-1).fields["Shared Price"], LD.at(-1).fields["Exclusive Price"]], [75, 225]);
   PRO.pop(); for (const l of LD) l.fields.Alerted = "x";
+}
+
+// ---- location: every place is "City, ST" ----
+{
+  const { cleanPlace, stateCode, fixStates } = await import("../src/worker.js"), LD = db.tblfA6ivDIlWVp4us;
+  assert.deepEqual(cleanPlace("memphis", "tn"), { city: "Memphis", state: "TN" }); assert.deepEqual(cleanPlace("Memphis, TN", ""), { city: "Memphis", state: "TN" }); assert.deepEqual(cleanPlace("BYRON CENTER  mi", ""), { city: "Byron Center", state: "MI" });
+  assert.deepEqual(cleanPlace("Winston-Salem, North Carolina", ""), { city: "Winston-Salem", state: "NC" }); assert.deepEqual(cleanPlace("St. Louis", "Missouri"), { city: "St. Louis", state: "MO" }); assert.deepEqual(cleanPlace("Forest", ""), { city: "Forest", state: "" });
+  assert.deepEqual(cleanPlace("La Vergne", ""), { city: "La Vergne", state: "" }, "a two-word city is not mistaken for a city and a state"); assert.deepEqual(cleanPlace("McKinney", "TX"), { city: "McKinney", state: "TX" });
+  assert.deepEqual([stateCode("Tennessee"), stateCode("tn"), stateCode("XX"), stateCode("none"), stateCode("")], ["TN", "TN", "", "", ""]);
+  // a new lead with no state in the request takes its site's state, and the card and its title read "City, ST"
+  seedForm(80, { service: "Roof Repair", city: "Germantown" }); await ingest(env); const l = LD.at(-1).fields;
+  assert.deepEqual([l["Site State"], l.State], ["TN", "TN"]); assert.match(l.Lead, / · Germantown, TN$/);
+  // joining needs a state
+  assert.match((await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "ns@example.com", business: "No State", phone: "9015550164" })).error, /Pick the state/);
+  // a lead copied before states were carried over is fixed from its site, and its title follows
+  LD.push({ id: "recNOSTATELEAD0001".slice(0, 17), fields: { Lead: "Patio Pour · Bartlett", Job: "Patio Pour", City: "Bartlett", Trade: "concrete", Status: "Offered", Style: "v2", Qualified: "Yes", "DD1 Call Number": 80, "Received At": new Date().toISOString(), "Shared Price": 75, "Exclusive Price": 225, "Max Pros": 5, Alerted: "x", "Price Version": "p1" } });
+  assert.equal(await fixStates(env), 1); assert.deepEqual([LD.at(-1).fields.State, LD.at(-1).fields.Lead], ["TN", "Patio Pour · Bartlett, TN"]); assert.equal(await fixStates(env), 0);
+  // a pro who signed up before states (city only) still gets their market, shown with its state
+  const c = await signUp(94), me = db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550194"); me.fields.State = "";
+  const v = await call("/api/pro/offers", null, c); assert.equal(v.filters.market, "Memphis, TN"); assert.ok(v.offers.length > 0 && v.offers.every((o) => o.city === "Memphis"));
+  // the same city name in another state is a different market
+  LD.push({ id: "recOTHERSTATE00001".slice(0, 17), fields: { Lead: "Roof Repair · Memphis, MO", Job: "Roof Repair", City: "Memphis", State: "MO", "Site State": "MO", Trade: "roofing", Status: "Offered", Style: "v2", Qualified: "Yes", "Received At": new Date().toISOString(), "Shared Price": 75, "Exclusive Price": 225, "Max Pros": 5, Alerted: "x", "Price Version": "p1" } });
+  me.fields.State = "TN"; const tn = await call("/api/pro/offers", null, c); assert.ok(tn.offers.length > 0 && tn.offers.every((o) => o.state !== "MO"), "the Missouri lead is not in a Tennessee pro's market"); assert.ok(tn.filters.markets.some((m) => m.name === "Memphis, MO") && tn.filters.markets.some((m) => m.name === "Memphis, TN"));
+  const mo = await call("/api/pro/offers?market=" + encodeURIComponent("Memphis, MO") + "&trade=all", null, c); assert.ok(mo.offers.some((o) => o.place === "Memphis, MO") && !mo.offers.some((o) => o.state === "TN"), "Memphis, MO does not show Tennessee leads"); assert.equal(mo.filters.market, "Memphis, MO");
+  LD.pop();
 }
 
 // ---- insurance reminders and nudges ----
