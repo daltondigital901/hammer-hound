@@ -1,6 +1,6 @@
 ## Pro Agreement
 
-Last updated: November 19, 2026
+Last updated: November 20, 2026
 
 ### Summary
 
@@ -9,7 +9,7 @@ This summary is here to help you read the agreement. It is not part of the agree
 - You pay only for leads you choose to claim or buy. Every price is shown before you buy.
 - A lead is an introduction, not a job. We do not promise that an owner will answer, hire you or pay you.
 - A lead may be sold to as many as 5 pros unless you buy it exclusive.
-- Purchases are final, except that a bad lead gets a credit or a refund under the Lead Credit Policy.
+- Purchases are final, except that a bad lead is credited back to your wallet under the Lead Credit Policy. Nothing is refunded to a card.
 - You must be verified, and keep your insurance current, to claim or buy leads.
 - You may use an owner's details only to contact that owner about that job.
 - Membership is free for your first year. From the second year it renews automatically at $300 a year on your card on file, until you close your account. We email you before each charge.
@@ -72,7 +72,7 @@ The person who accepts this Agreement confirms that they are at least 18 and hav
 
 **5.1 Lead prices.** The price of each lead is shown in the offer before you buy. Prices vary by trade, the size and timing of the job, how the owner can be reached, demand in the market and the age of the lead, and may change at any time for leads you have not yet bought.
 
-**5.2 Wallet and card on file.** Leads are paid from your wallet. You add to your wallet with a card, and you may save that card on file. A wallet balance is not a bank deposit and earns no interest.
+**5.2 Wallet and card on file.** Leads are paid from your wallet. You add to your wallet with a card, and you may save that card on file. A wallet balance is not a bank deposit, earns no interest, and can be used only for leads and fees on Hammer Hound. Money added to your wallet is not refunded to your card or paid out in cash, except where the law requires it.
 
 **5.2.1 Claiming by text.** A lead offer we text you states the job and the price. Replying YES, or ONLY for an exclusive lead, is an order for that lead. The price is taken from your wallet. If your wallet does not cover it and you have a card on file, you authorize us to charge that card a reload, in the reload amount set in your wallet, and to take the price from the reloaded wallet. The reply gives you the lead's details. Every card charge is confirmed by an emailed receipt.
 
@@ -94,21 +94,23 @@ The person who accepts this Agreement confirms that they are at least 18 and hav
 
 **5.6 Taxes.** Prices do not include taxes. You are responsible for any taxes on what you buy, other than taxes on our income.
 
-**5.7 Chargebacks.** If you dispute a charge with your card issuer instead of using the Lead Credit Policy, we may suspend your account while the dispute is open.
+**5.7 Chargebacks.** If you dispute a charge with your card issuer instead of using the Lead Credit Policy, we may suspend your account while the dispute is open, and we may take the disputed amount out of your wallet.
 
 ### 6. Lead Credit Policy
 
-**6.1 What qualifies.** You may ask for a credit if a lead you paid for had a wrong or disconnected phone number, was a duplicate of a lead you already bought from us, was not a real request for service, or was outside the trades or service area in your account when you bought it.
+**6.1 What a lead is.** A lead is a person who asked for work in your trade, at a place inside your service area when you bought it, with a working phone number, received within the time shown on the offer. A lead is not a promise that the person will answer, hire you or hire anyone.
 
-**6.2 What does not qualify.** The owner did not answer, hired someone else, changed their mind, or the job was smaller than described.
+**6.2 What qualifies for a credit.** A lead qualifies if (a) the phone number was wrong or not in service; (b) the person did not ask for the work; (c) the work was not in the trade it was sold under; (d) the place was outside your service area when you bought it; (e) we sold you the same person and job in the previous 30 days; or (f) the lead was older than the offer showed.
 
-**6.3 How to ask.** Report the lead from your account or through support within \[7\] days of purchase.
+**6.3 What does not qualify.** A person who does not answer or call back, hires someone else, changes their mind, or wants less work than described; contact by other pros on a shared lead; and any lead you marked Contacted, Quoted or Won.
 
-**6.4 How we decide.** We review our records of the request using automated tools, including artificial intelligence. You may ask for a person to review the result. We aim to decide within \[3\] business days.
+**6.4 How to ask.** Report the lead from your account within 7 days of buying it, choosing one reason. For a wrong number, report within 72 hours of buying and show at least two calls, at least two hours apart and within 48 hours of buying, made with the Call button in your account or shown in a screenshot of your call log.
 
-**6.5 Credit or refund.** For each approved request you choose a credit to your balance or a refund to your card on file. Refunds reach your card in about \[3 to 5\] business days.
+**6.5 How we decide.** We check your report against our records, including the request, the number's status, other buyers of the same lead, and your account settings when you bought, using automated tools including artificial intelligence. Many reports are decided within minutes. You may ask once for a person to review a denied report, and the person's decision is final.
 
-**6.6 Abuse.** We may limit or refuse credits for an account that reports leads in bad faith.
+**6.6 Credits go to your wallet, never to your card.** An approved report is returned to your wallet as lead credit, in the amount you paid for the lead. The part you paid with welcome credit is returned as welcome credit. Lead credit can be used only for leads. We do not refund an approved report, or any lead purchase, to your card or any other payment method, and lead credit cannot be withdrawn or paid out in cash, except where the law requires it.
+
+**6.7 Limits.** If a high share of your recent leads is credited, a person reviews each of your reports. We may refuse credits to, suspend or close an account that reports in bad faith.
 
 ### 7. Messages from us
 
@@ -154,7 +156,7 @@ You will defend and indemnify Dalton Enterprises LLC and its owners, employees a
 
 **14.2 By us.** We may suspend or close an account that breaks this Agreement, gives false information, puts users at risk or abuses the Lead Credit Policy.
 
-**14.3 What happens to your balance.** \[On closure, any unused paid balance is refunded to your card on file, less amounts owed to us. Welcome credit and other promotional credit are not refunded.\]
+**14.3 What happens to your balance.** \[Money in your wallet is not refunded to your card or paid out in cash, except where the law requires it. On closure, any unused paid balance stays on your account for 12 months, less amounts owed to us, and is restored if you reopen your account in that time. Welcome credit and other promotional credit end on closure.\]
 
 **14.4 What continues.** Sections 3.3, 3.4 and 8 through 13 continue after your account closes.
 

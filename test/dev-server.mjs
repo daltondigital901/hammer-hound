@@ -50,6 +50,7 @@ function matches(table, rec, formula) {
 
   if ((m = formula.match(/^FIND\('(.*)',\{Purchase\}\)>0$/))) return String(f.Purchase).includes(m[1]);
   if ((m = formula.match(/^AND\(\{Pro ID\}='(.*?)',\{Month\}='(.*?)'(,\{Type\}='Top-up')?\)$/))) return f["Pro ID"] === m[1] && f.Month === m[2] && (!m[3] || f.Type === "Top-up");
+  if (formula === "{Review Status}='Reported'") return f["Review Status"] === "Reported";
   if (formula === "AND({Review Status}='Approved',NOT({Credited}))") return f["Review Status"] === "Approved" && !f.Credited;
   if (formula === "AND({Verification}='Verified',NOT({Paused}))") return f.Verification === "Verified" && !f.Paused;
   if (formula === "NOT({Email}='')") return !!f.Email;

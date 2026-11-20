@@ -50,14 +50,28 @@
         h("button", { class: "btn btn--yellow", type: "button", text: "Approve", on: { click: function () { act(status, "/api/admin/verify", { proId: p.id, decision: "approve", expires: exp.value }, "Approved. The pro has been emailed."); } } }),
         h("button", { class: "btn btn--outline", type: "button", text: "Decline", on: { click: function () { act(status, "/api/admin/verify", { proId: p.id, decision: "decline", reason: reason.value }, "Declined. The pro has been emailed the reason."); } } })]), status]);
   }
+  // A report the records could not settle. Everything needed to decide is on the card. Approval = wallet credit only.
   function reportCard(r) {
-    var status = h("div"), reason = h("input", { type: "text", class: "input", id: "d-" + r.purchaseId, placeholder: "Optional. Shown to the pro if you deny." });
+    var status = h("div"), reason = h("textarea", { class: "input", rows: "2", id: "d-" + r.purchaseId, placeholder: "Shown to the pro. Required to deny; optional to approve." });
+    var pct = r.rate.n ? Math.round(100 * r.rate.credited / r.rate.n) + "% of last " + r.rate.n + " credited" : "No other leads yet";
+    var calls = r.calls.length ? r.calls.map(function (c) { return when(c.at) + " · " + (c.via === "bridge" ? "through Hammer Hound" + (c.result ? ", " + c.result : "") + (c.seconds ? ", " + c.seconds + " s" : "") : "tapped Call") + (c.by && c.by !== "owner" ? " · " + c.by : ""); }) : ["No calls logged"];
+    var q = r.request || {};
     return h("div", { class: "card hq-card" }, [
-      h("div", { class: "hq-head" }, [h("h3", { text: r.lead }), h("span", { class: "chip", text: r.kind + " · " + money(r.price) })]),
-      h("p", { class: "meta", text: r.pro + " · bought " + when(r.boughtAt) }), h("p", { text: "Pro says: " + (r.reason || "No reason given.") }),
-      h("label", { for: "d-" + r.purchaseId, text: "Reason, if denying" }), reason,
+      h("div", { class: "hq-head" }, [h("h3", { text: r.lead }), h("span", { class: "chip", text: r.kind + " · " + money(r.price) }), r.appeal ? h("span", { class: "chip chip--yellow", text: "Pro asked for a person" }) : null, r.status === "Reported" ? h("span", { class: "chip", text: "Not decided yet" }) : null]),
+      h("p", { class: "meta", text: r.pro + " · bought " + when(r.boughtAt) + (r.reportedAt ? " · reported " + when(r.reportedAt) : "") + " · " + pct + " · pipeline " + r.pipeline }),
+      h("p", {}, [h("strong", { text: "Reason: " }), r.reason]), r.note ? h("p", { text: "Pro says: " + r.note }) : null,
+      r.autoNote ? h("p", { class: "meta", text: "Automatic check: " + r.autoNote }) : null,
+      h("details", { open: true }, [h("summary", { text: "The records" }), h("ul", { class: "hq-list" }, [
+        h("li", { text: "Request: " + [q.job, q.trade, q.place].filter(Boolean).join(" · ") + (q.receivedAt ? " · came in " + when(q.receivedAt) : "") }),
+        h("li", { text: "Owner phone " + q.phone + (r.line ? " · line " + r.line : " · line not checked") }),
+        r.snapshot ? h("li", { text: "Pro's area when bought: " + r.snapshot.area + " · trades " + r.snapshot.trades }) : h("li", { text: "No purchase snapshot (bought before snapshots)." }),
+        h("li", { text: "Calls: " + calls.join("; ") + (r.callsProven ? " (meets the 2 calls, 2 h apart rule)" : "") })]),
+        q.message ? h("pre", { class: "hq-pre", text: q.message }) : null,
+        r.evidence ? h("a", { class: "btn btn--outline btn--sm", href: "/api/admin/doc?key=" + encodeURIComponent(r.evidence), target: "_blank", rel: "noopener", text: "Open the pro's screenshot" }) : null]),
+      h("label", { for: "d-" + r.purchaseId, text: "Reason for the pro" }), reason,
+      h("p", { class: "meta", text: "Approving returns " + money(r.price) + " to the pro's wallet as lead credit" + (r.creditUsed ? " (" + money(Math.min(r.creditUsed, r.price)) + " of it as welcome credit)" : "") + ". Nothing is refunded to a card." + (r.appeal ? " This is the pro's one review: your decision is final." : "") }),
       h("div", { class: "hq-actions" }, [
-        h("button", { class: "btn btn--yellow", type: "button", text: "Approve · credit " + money(r.price), on: { click: function () { act(status, "/api/admin/report", { purchaseId: r.purchaseId, decision: "approve" }, money(r.price) + " is back in the pro's wallet."); } } }),
+        h("button", { class: "btn btn--yellow", type: "button", text: "Approve · credit " + money(r.price) + " to wallet", on: { click: function () { act(status, "/api/admin/report", { purchaseId: r.purchaseId, decision: "approve", reason: reason.value }, money(r.price) + " is back in the pro's wallet as credit."); } } }),
         h("button", { class: "btn btn--outline", type: "button", text: "Deny", on: { click: function () { act(status, "/api/admin/report", { purchaseId: r.purchaseId, decision: "deny", reason: reason.value }, "Denied. The pro has been emailed."); } } })]), status]);
   }
   function ticketCard(t) {
@@ -93,7 +107,7 @@
         tile("Wallet balances held", money(s.walletBalances), money(s.welcomeCreditOut) + " is unspent welcome credit"),
         tile("Leads rejected, 7 days", s.leadsOpen.rejectedWeek, s.leadsOpen.writerStuck ? s.leadsOpen.writerStuck + " the writer could not finish" : "Writer has none stuck")]),
       section("Verifications to review", q.verifications.length, q.verifications.map(verifyCard), "No documents are waiting for a person."),
-      section("Bad-lead reports", q.reports.length, q.reports.map(reportCard), "No reports are open."),
+      section("Lead reports for a person", q.reports.length, [h("p", { class: "meta", text: "Only reports the records could not settle, every report from a pro above a 20% credit rate, and denied reports a pro sent to a person. Credits always go to the wallet, never back to a card." })].concat(q.reports.map(reportCard)), "No reports need a person."),
       section("Support tickets", q.tickets.length, q.tickets.map(ticketCard), "No tickets are open."),
       section("Declined cards", q.declinedCards.length, q.declinedCards.map(declinedCard), "No card has been declined in the last 48 hours."),
       section("Pay authority changes", d.authority.length, [h("p", { class: "meta", text: "Every time an owner let a team member charge their account by text, or took that away. Newest first." }),

@@ -671,7 +671,7 @@ ${proPromise}
       <div class="card info-card">${icon("doc", 24)}<h3>Verify once</h3><p>Create an account and upload proof of business and proof of insurance. You get leads, including your 3 free ones, once both pass.</p></div>
       <div class="card info-card">${icon("bolt", 24)}<h3>Pay from a balance</h3><p>Leads are paid from a prepaid balance. Auto-refill is optional and you can turn it off at any time.</p></div>
       <div class="card info-card">${icon("user", 24)}<h3>Shared or exclusive</h3><p>An owner picks 1 to 5 pros, so a lead goes to 5 pros at most. If no one has bought it yet, you can take it exclusive.</p></div>
-      <div class="card info-card">${icon("shield", 24)}<h3>Bad lead? Credit or refund</h3><p>Wrong number, duplicate or not a real request: report it and choose a credit to your balance or a refund to your card.</p></div>
+      <div class="card info-card">${icon("shield", 24)}<h3>Bad lead? Credited back</h3><p>Wrong number, duplicate or not a real request: report it and the price goes back in your wallet as lead credit, most often within minutes.</p></div>
       <div class="card info-card">${icon("phone", 24)}<h3>Confirmed by phone</h3><p>Every request gets a recorded confirmation call before it is offered to you, including requests sent through a form.</p></div>
       <div class="card info-card">${icon("chat", 24)}<h3>Support by chat</h3><p>Chat opens a ticket on your account, attached to the lead in question.</p></div>
     </div>
@@ -708,7 +708,7 @@ const proFaqs = [
   ["How much does a lead cost?", "It depends on the trade, the market and the size of the job. The price is in every offer before you buy, so you always know what you are paying."],
   ["How many leads will I get?", "As many as you want to buy. There is no cap and no minimum. How many are offered depends on how many property owners in your service area ask for your trade."],
   ["Are the leads exclusive?", "They are shared with up to 5 pros, because the owner chooses how many can call. If no one has bought a lead yet, you can buy it exclusive at the exclusive price shown."],
-  ["What counts as a bad lead?", "A wrong or disconnected number, a duplicate of a lead you already bought from us, a request that was not real, or a job outside your trades or service area. Report it within the window in the Terms and choose a credit or a refund. An owner who does not pick up, hires someone else or changes their mind is not a bad lead."],
+  ["What counts as a bad lead?", "A wrong or disconnected number, a duplicate of a lead you already bought from us, a request that was not real, or a job outside your trades or service area. Report it within 7 days (72 hours for a wrong number) and, if approved, the price goes back in your wallet as lead credit. Credits are not refunded to a card. An owner who does not pick up, hires someone else or changes their mind is not a bad lead."],
   ["What do I need to get my $240 in free leads?", "Create an account, then verify your business: your EIN, one proof of business such as a contractor or business license, and proof of insurance. Your Verified Pro badge and free leads unlock when both documents pass. You can look at leads in your market before you verify."],
   ["Is there a membership fee?", "Membership is free for your first year. After that it renews automatically at $300 a year, charged to your card on file, until you close your account. We email you about 35, 18 and 3 days before each charge, and you can cancel in your account before then without paying it."],
   ["What am I agreeing to?", "The Pro Agreement and Terms of Use, which cover leads, your wallet, the membership fee and refunds. There is no minimum purchase, and you can close your account at any time."],
@@ -734,7 +734,7 @@ page({
         <button class="btn btn--yellow btn--lg" type="submit">Get $240 in free leads</button>
       </form>
       <p class="lp-micro">Two minutes to create your account. Free leads unlock once your business and insurance documents pass.</p>
-      ${checks(["Every job confirmed by phone", "No cap, no minimum", "Bad lead? Credit or refund"], "checks--row checks--yellow")}
+      ${checks(["Every job confirmed by phone", "No cap, no minimum", "Bad lead? Credited back"], "checks--row checks--yellow")}
     </div>
     <div class="sms" aria-label="Sample lead offer by text">
       <p class="sms-from"><img src="/assets/img/badge.png" alt="" width="33" height="40"><span><strong>${esc(site.name)}</strong><small>Text message</small></span></p>
@@ -764,7 +764,7 @@ ${proPromise}
       <ul class="trust-list">
         <li>${icon("phone", 22)}<div><h3>We call the owner first</h3><p>A recorded call confirms the job, the address and the timing before any pro is offered the lead.</p></div></li>
         <li>${icon("doc", 22)}<div><h3>The rule is in the Terms</h3><p>Wrong number, duplicate, not a real request or outside your area: credit or refund, your choice. It is the <a href="/terms/">Lead Credit Policy</a>, not a sales promise.</p></div></li>
-        <li>${icon("user", 22)}<div><h3>A person, if you ask</h3><p>We review the confirmation call to decide a bad-lead report. If you disagree with the result, ask for a person to review it.</p></div></li>
+        <li>${icon("user", 22)}<div><h3>A person, if you ask</h3><p>We check a bad-lead report against our records, and most are answered in minutes. If you disagree with the result, ask once for a person to review it.</p></div></li>
         <li>${icon("chat", 22)}<div><h3>Support tied to your account</h3><p>Chat opens a ticket attached to your account and to the lead in question, so you never explain it twice.</p></div></li>
       </ul>
       <p class="lp-micro">${esc(site.name)} is a trade name of ${esc(site.legalName)}. Read the <a href="/terms/">Terms of Use</a>, <a href="/privacy/">Privacy Policy</a> and <a href="/sms-policy/">SMS Policy</a>.</p>

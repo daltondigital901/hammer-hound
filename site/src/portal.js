@@ -418,7 +418,7 @@
           h("li", {}, [h("strong", { text: "Say who you are and what they asked for. " }), "\"This is " + pro.business + ". You asked about " + String(r.leads[0].job || "your project").toLowerCase() + ".\" Then ask when you can come look."]),
           h("li", {}, [h("strong", { text: "Book the visit before you hang up. " }), "A day and a time beats \"I'll call you back.\""]),
           h("li", {}, [h("strong", { text: "Mark it here. " }), "Contacted, Quoted, Won. It keeps your follow-ups straight."]),
-          h("li", {}, [h("strong", { text: "Wrong number or not a real job? " }), "Report it from the lead and we review it for a credit back."])])]) : null;
+          h("li", {}, [h("strong", { text: "Wrong number or not a real job? " }), "Use the Call button so your calls are on record, then report it from the lead. Approved reports go back to your wallet as lead credit."])])]) : null;
       var chips = h("div", { class: "tabs" }, ["All"].concat(STAGES).map(function (st) {
         var n = st === "All" ? r.leads.length : r.leads.filter(function (l) { return l.pipeline === st; }).length;
         return h("button", { class: "chip chip--link" + (stageFilter === st ? " is-on" : ""), type: "button", text: st + " (" + n + ")", on: { click: function () { stageFilter = st; leadsView(); } } });
@@ -429,16 +429,35 @@
         stage.addEventListener("change", function () { call("/api/pro/lead-status", { purchaseId: l.purchaseId, pipeline: stage.value }).then(function (res) { status.innerHTML = ""; status.appendChild(note(res.error || "Status saved.", res.error ? "bad" : "good")); if (!res.error) l.pipeline = stage.value; }); });
         var notes = h("textarea", { class: "input", rows: "2", placeholder: "Your notes on this job", id: "nt-" + l.purchaseId }); notes.value = l.notes;
         var saveNotes = h("button", { class: "btn btn--outline btn--sm", type: "button", text: "Save notes", on: { click: function () { call("/api/pro/lead-status", { purchaseId: l.purchaseId, notes: notes.value }).then(function (res) { status.innerHTML = ""; status.appendChild(note(res.error || "Notes saved.", res.error ? "bad" : "good")); }); } } });
-        var report = l.review === "None" ? h("button", { class: "btn btn--text btn--sm", type: "button", text: "Report a bad lead", on: { click: function () {
-          var reason = h("textarea", { class: "input", rows: "3", placeholder: "What was wrong with this lead?" });
+        // Report a bad lead: one reason, a short note, an optional screenshot. Most are answered at once.
+        var REASONS = [["", "Pick a reason"], ["wrong_number", "Wrong or disconnected number"], ["not_real", "Not a real request"], ["wrong_trade", "Wrong trade"], ["outside_area", "Outside my area"], ["duplicate", "Duplicate of a lead I already bought"], ["older_than_shown", "Older than the offer showed"]];
+        var REVIEW_TEXT = { Reported: "Report sent. We are checking it.", "Needs person": "A person is reviewing your report.", Approved: "Credited to your wallet", Denied: "Report not approved" };
+        var report;
+        if (l.review === "None" && l.canReport) report = h("button", { class: "btn btn--text btn--sm", type: "button", text: "Report a bad lead", on: { click: function () {
+          var why = select("rr-" + l.purchaseId, REASONS, ""), txt = h("textarea", { class: "input", rows: "3", id: "rn-" + l.purchaseId, placeholder: "What happened? Example: The number says it is not in service." }), file = h("input", { type: "file", accept: "image/jpeg,image/png,image/webp,application/pdf", id: "rf-" + l.purchaseId, class: "input" });
+          var hint = h("p", { class: "meta", text: "" });
+          why.addEventListener("change", function () { hint.textContent = why.value === "wrong_number" ? (l.callsProven ? "Your calls with the Call button are on file." : "Call at least twice, 2 hours apart, with the Call button first, or attach a screenshot of your call log. Report within 72 hours of buying.") : why.value === "outside_area" || why.value === "duplicate" || why.value === "older_than_shown" ? "We check this against our records. No proof needed." : ""; });
           var sendBtn = h("button", { class: "btn btn--black btn--sm", type: "button", text: "Send report", on: { click: function () {
-            call("/api/pro/report", { purchaseId: l.purchaseId, reason: reason.value }).then(function (res) { status.innerHTML = ""; status.appendChild(note(res.error || "Reported. We will review it and you can choose a credit or a refund if it is approved.", res.error ? "bad" : "good")); });
+            var fd = new FormData(); fd.append("purchaseId", l.purchaseId); fd.append("reason", why.value); fd.append("note", txt.value); if (file.files[0]) fd.append("evidence", file.files[0]);
+            sendBtn.disabled = true;
+            fetch("/api/pro/report", { method: "POST", credentials: "same-origin", body: fd }).then(function (x) { return x.json(); }).catch(function () { return { error: "Could not reach the server." }; }).then(function (res) {
+              sendBtn.disabled = false; status.innerHTML = "";
+              if (res.error) { status.appendChild(note(res.error, "bad")); return; }
+              status.appendChild(note(res.status === "Approved" ? "Approved: " + res.reason + " " + money(l.price) + " is back in your wallet as lead credit." : res.status === "Denied" ? "Not approved: " + res.reason + " You can ask a person to review it." : res.reason, res.status === "Denied" ? "bad" : "good"));
+              setTimeout(leadsView, 2500);
+            });
           } } });
-          status.innerHTML = ""; status.appendChild(reason); status.appendChild(sendBtn); report.hidden = true;
-        } } }) : h("span", { class: "chip", text: "Bad-lead report: " + l.review });
+          status.innerHTML = ""; [field("rr-" + l.purchaseId, "Reason", why), hint, field("rn-" + l.purchaseId, "What happened", txt), field("rf-" + l.purchaseId, "Screenshot (optional)", file), h("p", { class: "meta", text: "Approved reports go back to your wallet as lead credit. We do not refund to cards." }), sendBtn].forEach(function (k) { status.appendChild(k); }); report.hidden = true;
+        } } });
+        else if (l.review !== "None") report = h("div", { class: "lead-report" }, [h("span", { class: "chip" + (l.review === "Approved" ? " chip--green" : l.review === "Denied" ? "" : " chip--yellow"), text: (REVIEW_TEXT[l.review] || l.review) + (l.reportReason ? " · " + l.reportReason : "") }), l.decisionReason ? h("p", { class: "meta", text: l.decisionReason }) : null,
+          l.review === "Denied" && !l.personReview ? h("button", { class: "btn btn--text btn--sm", type: "button", text: "Ask a person to review", on: { click: function (e) { e.target.disabled = true; call("/api/pro/report-review", { purchaseId: l.purchaseId }).then(function (res) { status.innerHTML = ""; status.appendChild(note(res.error || "Sent. A person will review it and email you. Their decision is final.", res.error ? "bad" : "good")); if (!res.error) setTimeout(leadsView, 2000); else e.target.disabled = false; }); } } }) : null]);
+        // Call owner: every call is logged, which is the proof a wrong-number report needs.
+        var callBtn = l.ownerPhone ? h("button", { class: "btn btn--yellow btn--sm", type: "button", text: "Call owner" + (l.calls ? " (" + l.calls + " logged)" : ""), on: { click: function () {
+          call("/api/pro/call", { purchaseId: l.purchaseId }).then(function (res) { if (res.error) { status.innerHTML = ""; status.appendChild(note(res.error, "bad")); return; } l.calls = res.calls; l.callsProven = res.proven; callBtn.textContent = "Call owner (" + res.calls + " logged)"; if (res.bridged) { status.innerHTML = ""; status.appendChild(note(res.text, "good")); } else location.href = "tel:" + res.tel; });
+        } } }) : null;
         return h("div", { class: "card offer" }, [
           h("div", { class: "offer-top" }, [h("span", { class: "chip", text: l.tradeName }), h("span", { class: "chip", text: l.kind === "Free" ? "Free lead" : l.kind + " · " + money(l.price) + (l.creditUsed >= l.price && l.price ? " free credit" : "") }), l.claimedBy ? h("span", { class: "chip chip--yellow", text: "Claimed by " + l.claimedBy }) : null, h("span", { class: "meta", text: "Bought " + when(l.boughtAt) })])].concat(jobBlock(l), [
-          h("div", { class: "lead-contact" }, [h("span", { class: "lead-contact-label", text: "Owner" }), h("strong", { text: l.ownerName || "Name not given" }), l.ownerPhone ? h("a", { href: "tel:+1" + l.ownerPhone, text: phoneFmt(l.ownerPhone) }) : h("span", { class: "meta", text: "No phone number given" }), l.ownerEmail ? h("a", { href: "mailto:" + l.ownerEmail, text: l.ownerEmail }) : null, l.address ? h("span", { text: l.address }) : null]),
+          h("div", { class: "lead-contact" }, [h("span", { class: "lead-contact-label", text: "Owner" }), h("strong", { text: l.ownerName || "Name not given" }), l.ownerPhone ? h("span", { text: phoneFmt(l.ownerPhone) }) : h("span", { class: "meta", text: "No phone number given" }), callBtn, l.ownerEmail ? h("a", { href: "mailto:" + l.ownerEmail, text: l.ownerEmail }) : null, l.address ? h("span", { text: l.address }) : null]),
           l.message ? h("details", { class: "lead-words" }, [h("summary", { text: "The owner's own words" }), h("p", { text: l.message })]) : null,
           field("st-" + l.purchaseId, "Where it stands", stage), field("nt-" + l.purchaseId, "Notes", notes), saveNotes, report, status,
         ]));
@@ -623,7 +642,7 @@
       : "Each lead shows its price. It depends on the trade, the size of the job and how soon they want it. Shared goes to up to " + t.maxPros + " pros. \"Only me\" is yours alone for " + t.exclusiveMultiple + " times the shared price. The owner's details are yours the moment you claim." });
     if (!m) steps.push({ tab: "offers", sel: "[data-balance]", title: "You start with " + money0(t.welcome) + ".", body: "That is welcome credit. It pays for hot leads once you are verified. After that, leads are paid from your wallet. Add a card and it reloads when you run short." });
     if (!m) steps.push({ tab: "notifications", sel: ".pp-main .card", title: "Leads come to your phone.", body: t.textsLive ? "We text new leads in your market. Reply YES to claim one and the full details come straight back by text." : "Turn on lead texts here. When texting goes live, new leads in your market come to your phone and a YES claims one." });
-    steps.push({ tab: "leads", sel: "[data-nav=leads]", title: "Work them here.", body: "Every lead " + (m ? "on the account" : "you claim") + " lands in My leads. Mark each one New, Contacted, Quoted or Won, and keep notes. Got a bad one? Report it and we review it for a credit back." });
+    steps.push({ tab: "leads", sel: "[data-nav=leads]", title: "Work them here.", body: "Every lead " + (m ? "on the account" : "you claim") + " lands in My leads. Mark each one New, Contacted, Quoted or Won, and keep notes. Got a bad one? Report it: approved reports go back to your wallet as lead credit." });
     steps.push(m || pro.verified
       ? { hound: true, title: "You're set.", body: "Go see what is open right now.", cta: ["See open leads", "offers"] }
       : { hound: true, title: "One step left.", body: "Verify your business to start claiming. Upload proof of business and insurance. It takes about 2 minutes.", cta: ["Verify my business", "verify"] });

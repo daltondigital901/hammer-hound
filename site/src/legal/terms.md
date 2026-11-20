@@ -1,6 +1,6 @@
 ## Terms of Use
 
-Last updated: November 19, 2026
+Last updated: November 20, 2026
 
 ### 1. Who we are and how these Terms work
 
@@ -40,7 +40,7 @@ A Pro also accepts the Pro Agreement when creating an account. Where the Pro Agr
 
 **5.3 Prices.** Lead prices vary by trade, market, job size and demand, and change over time. The price that applies is the price shown in the offer you accept.
 
-**5.4 Balance and card on file.** Leads are paid from a prepaid balance. You authorize us to charge your card on file for amounts you add and, if you turn on auto-refill, for the refill amount each time your balance falls below the level you set. You can turn auto-refill off at any time in your account.
+**5.4 Balance and card on file.** Leads are paid from a prepaid balance. The balance can be used only on Hammer Hound and is not refunded to a card or paid out in cash, except where the law requires it. You authorize us to charge your card on file for amounts you add and, if you turn on auto-refill, for the refill amount each time your balance falls below the level you set. You can turn auto-refill off at any time in your account.
 
 **5.5 Buying by text.** If you opt in to text offers, replying YES (or the exclusive keyword) to an offer is your order and your authorization to deduct the stated price from your balance. Offers expire at the time stated or when all places are taken.
 
@@ -56,15 +56,19 @@ A Pro also accepts the Pro Agreement when creating an account. Where the Pro Agr
 
 ### 6. Lead Credit Policy
 
-**6.1 What qualifies.** You may ask for a credit if a lead you paid for had a wrong or disconnected phone number, was a duplicate of a lead you already bought from us, was not a real request for service, or was outside the trades or service area in your account when you bought it.
+**6.1 What a lead is.** A lead is a person who asked for work in your trade, at a place inside your service area when you bought it, with a working phone number, received within the time shown on the offer. A lead is not a promise that the person will answer, hire you or hire anyone.
 
-**6.2 What does not qualify.** The owner did not answer, hired someone else, changed their mind, or the job was smaller than described.
+**6.2 What qualifies for a credit.** A lead qualifies if (a) the phone number was wrong or not in service; (b) the person did not ask for the work; (c) the work was not in the trade it was sold under; (d) the place was outside your service area when you bought it; (e) we sold you the same person and job in the previous 30 days; or (f) the lead was older than the offer showed.
 
-**6.3 How to ask.** Report the lead from your account or through support chat within \[7\] days of purchase.
+**6.3 What does not qualify.** A person who does not answer or call back, hires someone else, changes their mind, or wants less work than described; contact by other pros on a shared lead; and any lead you marked Contacted, Quoted or Won.
 
-**6.4 How we decide.** We review the confirmation call recording and transcript and related records using automated tools, including AI, which score the lead as good or bad. You may ask for a person to review the result. We aim to decide within \[3\] business days.
+**6.4 How to ask.** Report the lead from your account within 7 days of buying it, choosing one reason. For a wrong number, report within 72 hours of buying and show at least two calls, at least two hours apart and within 48 hours of buying, made with the Call button in your account or shown in a screenshot of your call log.
 
-**6.5 Credit or refund.** For each approved request you choose a credit to your balance or a refund to your card on file. Refunds reach your card in about \[3 to 5\] business days.
+**6.5 How we decide.** We check your report against our records, including the request, the number's status, other buyers of the same lead, and your account settings when you bought, using automated tools including artificial intelligence. Many reports are decided within minutes. You may ask once for a person to review a denied report, and the person's decision is final.
+
+**6.6 Credits go to your wallet, never to your card.** An approved report is returned to your wallet as lead credit, in the amount you paid for the lead. The part you paid with welcome credit is returned as welcome credit. Lead credit can be used only for leads. We do not refund an approved report, or any lead purchase, to your card or any other payment method, and lead credit cannot be withdrawn or paid out in cash, except where the law requires it.
+
+**6.7 Limits.** If a high share of your recent leads is credited, a person reviews each of your reports. We may refuse credits to, suspend or close an account that reports in bad faith.
 
 ### 7. Reviews and content you submit
 
@@ -100,7 +104,7 @@ These Terms are governed by the laws of Tennessee. Disputes are resolved by bind
 
 ### 15. Suspension and closing an account
 
-We may suspend or close an account that breaks these Terms or puts users at risk. You may close your account at any time. \[On closure, any unused paid balance is refunded to your card on file, less amounts owed to us. Promotional and free credits are not refunded.\]
+We may suspend or close an account that breaks these Terms or puts users at risk. You may close your account at any time. \[Money in a pro's wallet is not refunded to a card or paid out in cash, except where the law requires it. On closure, any unused paid balance stays on the account for 12 months, less amounts owed to us, and is restored if the account is reopened in that time. Promotional and free credits end on closure.\]
 
 ### 16. Changes
 

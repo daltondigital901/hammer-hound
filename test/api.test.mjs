@@ -170,8 +170,19 @@ assert.equal((await call("/api/pro/reload-settings", { autoReload: true, reloadA
 assert.match((await call("/api/pro/add-funds", { amount: 150 }, a)).error, /monthly limit of \$500\.00 \(\$450\.00 charged/, "the monthly limit stops a reload");
 const walA = await call("/api/pro/wallet", null, a); assert.equal(walA.chargedThisMonth, 450); assert.equal(walA.card, "Test card ending 4242"); assert.equal(walA.rows[0].type, "Top-up"); assert.equal(walA.months.length, 1); assert.equal(walA.membership.inFreeYear, true);
 const mine = (await call("/api/pro/leads", null, a)).leads; assert.equal(mine.length, 4);
-assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "wrong number" }, a)).status, 200);
-assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "again" }, a)).status, 409);
+// ---- lead credit policy: a reason is required, the records decide, a denied report can go to a person once, credit only ----
+assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "wrong number" }, a)).status, 400, "the reason must be one of the six");
+assert.match((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "wrong_number" }, a)).error, /Call the owner at least 2 times/, "a wrong number needs logged calls or a screenshot");
+assert.match((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "not_real", note: "no" }, a)).error, /in a sentence/);
+const call1 = await call("/api/pro/call", { purchaseId: mine[0].purchaseId }, a); assert.equal(call1.calls, 1); assert.equal(call1.proven, false); assert.match(call1.tel, /^\+1\d{10}$/);
+{ const snap = JSON.parse(db.tblJnYLq2aCiCVU1C.find((x) => x.id === mine[0].purchaseId).fields.Snapshot); assert.equal(snap["Service Radius"], 20, "the pro's area is saved on the purchase"); assert.ok(snap.receivedAt); }
+const rep = await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "outside_area" }, a);
+assert.equal(rep.status, "Denied", "Memphis was inside the radius when bought: the record denies it at once"); assert.match(rep.reason, /inside your service area/);
+assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId, reason: "duplicate" }, a)).status, 409, "one report per lead");
+assert.equal((await call("/api/pro/report-review", { purchaseId: mine[0].purchaseId }, a)).ok, true);
+assert.equal((await call("/api/pro/report-review", { purchaseId: mine[0].purchaseId }, a)).status, 409, "a person reviews it once");
+{ const pu = db.tblJnYLq2aCiCVU1C.find((x) => x.id === mine[0].purchaseId); assert.equal(pu.fields["Review Status"], "Needs person"); assert.equal(pu.fields["Person Review"], true); }
+const dupRep = await call("/api/pro/report", { purchaseId: mine[1].purchaseId, reason: "duplicate" }, a); assert.equal(dupRep.status, "Denied", "no earlier lead with this phone and trade");
 assert.equal((await call("/api/pro/report", { purchaseId: mine[0].purchaseId }, b)).status, 404, "cannot report another pro's lead");
 // ---- sign-up agreement ----
 assert.equal((await call("/api/pro/join", { business: "No Agree", phone: "9015550190", city: "Memphis", state: "TN" })).status, 400, "the Pro Agreement must be accepted");
@@ -464,14 +475,14 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   await env.DOCS.put(`pros/${other.id}/1-business.pdf`, new TextEncoder().encode("%PDF-test"), { httpMetadata: { contentType: "application/pdf" } });
   seedForm(73, { service: "Roof Repair", city: "Memphis", state: "TN" }); await ingest(env);
   const lead = (await call(ALL, null, c)).offers.find((o) => o.hot); const got = await call("/api/pro/buy", { leadId: lead.id, kind: "shared" }, c); assert.equal(got.status, 200);
-  const mineP = PU.find((p) => p.fields.Purchase === `${lead.id}:${me.id}`); await call("/api/pro/report", { purchaseId: mineP.id, reason: "Number is disconnected." }, c);
+  const mineP = PU.find((p) => p.fields.Purchase === `${lead.id}:${me.id}`); const rq = await call("/api/pro/report", { purchaseId: mineP.id, reason: "wrong_trade", note: "This is a fence job, not a roof." }, c); assert.equal(rq.status, "Needs person", "the AI could not settle it, so a person decides");
   await call("/api/pro/tickets", { subject: "Card question", message: "When can I add a card?", topic: "Billing" }, c);
   await call("/api/pro/market-request", { market: "Olive Branch", trade: "roofing" }, c);
   const o = await adm("/api/admin/overview", null, A);
   assert.equal(o.status, 200); assert.equal(o.who, "key");
   assert.ok(o.stats.pros.today >= 2); assert.ok(o.stats.claims.today >= 1); assert.ok(o.stats.leadSales.today >= 75); assert.equal(o.stats.leadsOpen.hot + o.stats.leadsOpen.older > 0, true);
   const v = o.queues.verifications.find((q) => q.id === other.id); assert.ok(v); assert.equal(v.files.length, 2); assert.equal(v.reason, "Both documents were unreadable.");
-  const rp = o.queues.reports.find((q) => q.purchaseId === mineP.id); assert.equal(rp.reason, "Number is disconnected."); assert.equal(rp.price, 75);
+  const rp = o.queues.reports.find((q) => q.purchaseId === mineP.id); assert.equal(rp.reason, "Wrong trade"); assert.equal(rp.note, "This is a fence job, not a roof."); assert.equal(rp.price, 75); assert.equal(rp.snapshot.area.startsWith("20 mi"), true);
   const tk = o.queues.tickets.find((q) => q.subject === "Card question"); assert.ok(tk);
   assert.ok(o.marketRequests.find((g) => g.market === "Olive Branch" && g.trade === "Roofing" && g.pros === 1 && g.openNow === 0)); assert.ok(o.marketRequests.find((g) => g.market === "Tupelo"));
   assert.doesNotMatch(JSON.stringify(o), /Owner Phone|owner\d+@example\.com/, "no property owner details in the overview");
@@ -515,7 +526,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   // before anyone can be added: the owner's acknowledgment, recorded with the version, time and IP address
   assert.equal((await call("/api/pro/team", null, c)).ack, false); assert.equal((await call("/api/pro/team/add", { name: "Dana", phone: "9017771111" }, c)).status, 403, "no team before the acknowledgment");
   assert.equal((await call("/api/pro/team/ack", {}, c)).status, 400); assert.equal((await call("/api/pro/team/ack", { agree: "yes" }, c)).ack, true);
-  assert.match(me.fields["Team Ack"], /^November 19, 2026 \| 20\d\d-.* \| /); assert.equal(acts().at(-1), "Team turned on");
+  assert.match(me.fields["Team Ack"], /^November 20, 2026 \| 20\d\d-.* \| /); assert.equal(acts().at(-1), "Team turned on");
   // adding: a name and a number nobody else uses; the invite goes out by text
   assert.equal((await call("/api/pro/team/add", { name: "", phone: "9017771111" }, c)).status, 400); assert.equal((await call("/api/pro/team/add", { name: "Me", phone: "9015550191" }, c)).status, 409);
   const t0 = texts.length, added = await call("/api/pro/team/add", { name: "Dana", phone: "(901) 777-1111" }, c); assert.equal(added.members.length, 1); assert.equal(added.max, 5);
@@ -716,8 +727,8 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   assert.match(sent[n0].html, /https:\/\/hammerhound\.com\/pros\/sign-in\/\?next=verify/); assert.match(sent[n0].text, /proof of your business/); assert.equal((await call("/api/pro/finish-later", {}, null)).status, 401);
   // the admin hears about a bad-lead report and a support ticket
   const got = await call("/api/pro/buy", { leadId: bart.id, kind: "shared" }, c); assert.equal(got.status, 200); const pid = db.tblJnYLq2aCiCVU1C.find((p) => p.fields.Purchase === `${bart.id}:${me.id}`).id;
-  let n1 = sent.length; await call("/api/pro/report", { purchaseId: pid, reason: "Disconnected number." }, c); const rep = sent.slice(n1).find((e) => e.to === "support@hammerhound.com");
-  assert.match(rep.subject, /^\[Test\] Bad-lead report from Area Co$/); assert.match(rep.text, /Disconnected number\./); assert.match(rep.html, /hammerhound\.com\/admin\//);
+  let n1 = sent.length; await call("/api/pro/report", { purchaseId: pid, reason: "not_real", note: "Disconnected number. Never asked for anything." }, c); const rep = sent.slice(n1).find((e) => e.to === "support@hammerhound.com");
+  assert.match(rep.subject, /^\[Test\] Lead report needs you: Area Co$/); assert.match(rep.text, /Disconnected number\./); assert.match(rep.text, /as credit/); assert.match(rep.html, /hammerhound\.com\/admin\//);
   n1 = sent.length; await call("/api/pro/tickets", { subject: "Where is my invoice", message: "I cannot find November.", topic: "Billing" }, c); assert.ok(sent.slice(n1).some((e) => e.to === "support@hammerhound.com" && e.subject === "[Test] Support ticket: Where is my invoice"));
 }
 // a pro who joined and never started verifying is nudged after 1, 3 and 7 days, then left alone
@@ -796,5 +807,26 @@ const noSecrets = await worker.fetch(new Request("http://x/api/pro/me"), { ASSET
   // make the backup the main card, then removing the main promotes the backup
   const sw = await call("/api/pro/card", { action: "make-main" }, rc); assert.equal(sw.pro.card, "Test card ending 5556"); assert.equal(sw.pro.backupCard, "Test card ending 0002");
   const rm = await call("/api/pro/card", { action: "remove" }, rc); assert.equal(rm.pro.card, "Test card ending 0002"); assert.equal(rm.pro.backupCard, "");
+}
+// ---- credit rules (src/credits.js) ----
+{
+  const { decideCredit, callsProve, reportBlock } = await import("../src/credits.js");
+  assert.equal(decideCredit({ reason: "wrong_number", line: "inactive" }).status, "Approved");
+  assert.equal(decideCredit({ reason: "wrong_number", line: "inactive", othersReached: true }).status, "Denied", "another buyer reached the owner");
+  assert.equal(decideCredit({ reason: "wrong_number", line: "active" }).status, "Needs person");
+  assert.equal(decideCredit({ reason: "outside_area", outside: true, place: "Tupelo, MS" }).status, "Approved");
+  assert.equal(decideCredit({ reason: "duplicate", dupOf: "November 2, 2026" }).status, "Approved");
+  assert.equal(decideCredit({ reason: "older_than_shown", olderBy: 30 }).status, "Approved");
+  assert.equal(decideCredit({ reason: "outside_area", outside: true, rate: { n: 20, credited: 5 } }).status, "Needs person", "over 20% credited: a person decides");
+  assert.match(decideCredit({ reason: "outside_area", outside: true, rate: { n: 20, credited: 8 } }).reason, /More than 35%/);
+  const t = Date.parse("2026-11-20T12:00:00Z"), at = (h) => new Date(t + h * 3600e3).toISOString();
+  assert.equal(callsProve([{ at: at(1) }, { at: at(2) }], at(0)), false, "less than 2 hours apart");
+  assert.equal(callsProve([{ at: at(1) }, { at: at(4) }], at(0)), true);
+  assert.equal(callsProve([{ at: at(1) }, { at: at(50) }], at(0)), false, "the second call came after 48 hours");
+  assert.match(reportBlock({ reason: "duplicate", boughtAt: at(0), pipeline: "Quoted", calls: [], now: t + 3600e3 }), /marked this lead Quoted/);
+  assert.match(reportBlock({ reason: "duplicate", boughtAt: at(0), pipeline: "New", calls: [], now: t + 8 * 864e5 }), /7 days/);
+  assert.match(reportBlock({ reason: "wrong_number", boughtAt: at(0), pipeline: "New", calls: [], hasEvidence: true, now: t + 80 * 3600e3 }), /72 hours/);
+  assert.equal(reportBlock({ reason: "wrong_number", boughtAt: at(0), pipeline: "New", calls: [], hasEvidence: true, now: t + 3600e3 }), "", "a screenshot stands in for the calls");
+  const credited = sent.filter((e) => /is back in your wallet/.test(e.subject)); assert.ok(credited.length); for (const e of credited) assert.match(e.text, /not refunded to your card/);
 }
 console.log("All API checks passed.");

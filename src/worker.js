@@ -1,6 +1,7 @@
 import { invoicePdf } from "./pdf.js";
 import { inRadius, radiusOf, centerOf, citiesWithin, RADIUS_CHOICES } from "./geo.js";
 import { PRICING, PRICING_VERSION, priceLead, demandMultiplier, priceReasons } from "./pricing.js";
+import { REASONS, reportBlock, decideCredit, parseCalls, parseSnap, RATE, callsProve } from "./credits.js";
 
 // Hammer Hound engine: serves the static site and the pro API, and copies
 // Dalton Digital form leads into the Hammer Hound base for shadow testing.
@@ -186,7 +187,7 @@ const internal = (env, phone) => isTestPhone(phone) || String(env.INTERNAL_PHONE
 export const DOC_TYPES = ["State contractor license", "City or county business license", "Secretary of State registration", "IRS EIN letter (CP 575 or 147C)", "DBA or assumed-name certificate", "State tax registration certificate"];
 const today = () => new Date().toISOString().slice(0, 10);
 // The Pro Agreement version a pro accepts at sign-up. Must match "Last updated" in site/src/legal/pro-agreement.md.
-export const AGREEMENT_VERSION = "November 19, 2026";
+export const AGREEMENT_VERSION = "November 20, 2026";
 // Trades, with the words that mark a lead as that trade. Order matters: the first match wins.
 export const TRADES = [
   ["water-heaters", "Water heaters", ["water heater"]], ["roofing", "Roofing", ["roof", "shingle"]], ["sealcoating", "Sealcoating", ["sealcoat", "seal coat", "striping", "crack fill"]],
@@ -667,6 +668,9 @@ async function teamApi(request, env, pro, path, body) {
   return fail(404, "Not found.");
 }
 
+// What the pro's account looked like when they bought, so "outside my area" and "older than shown" are judged on that, not on later edits.
+const snapshotOf = (pro, lead) => ({ at: new Date().toISOString(), ZIP: pro.fields.ZIP || "", City: pro.fields.City || "", State: pro.fields.State || "", "Service Radius": radiusOf(pro.fields), "Service Area": pro.fields["Service Area"] || "",
+  trades: [pro.fields.Trade, ...String(pro.fields["Extra Trades"] || "").split(",")].filter(Boolean), receivedAt: lead.fields["Received At"] || "", hot: isHot(lead) });
 // Claims a lead for a pro. Used by the portal and by a YES reply to a text.
 // reload: the pro agreed to have the card on file charged if the wallet is short (the button or the text said so).
 // by: the team member claiming, when it is not the owner.
@@ -703,7 +707,7 @@ async function purchase(env, pro, { leadId, kind, reload = false, via = "Portal"
     pro = t.pro; balance = pro.fields.Balance || 0; reloaded = need;
   }
   const credit = Math.min(pro.fields["Welcome Credit"] || 0, balance), creditUsed = hot ? Math.min(credit, price) : 0, after = cents(balance - price), creditAfter = cents(credit - creditUsed);
-  const made = await create(env, HH.purchases, { Purchase: `${leadId}:${pro.id}`, Lead: [leadId], Pro: [pro.id], Kind: kind === "exclusive" ? "Exclusive" : "Shared", Price: price, "Credit Used": creditUsed, "Bought At": new Date().toISOString(), Test: !!pro.fields.Test || !!lead.fields.Test, "Review Status": "None", "Claimed By": by ? who(by) : "" });
+  const made = await create(env, HH.purchases, { Purchase: `${leadId}:${pro.id}`, Lead: [leadId], Pro: [pro.id], Kind: kind === "exclusive" ? "Exclusive" : "Shared", Price: price, "Credit Used": creditUsed, "Bought At": new Date().toISOString(), Test: !!pro.fields.Test || !!lead.fields.Test, "Review Status": "None", "Claimed By": by ? who(by) : "", Snapshot: JSON.stringify(snapshotOf(pro, lead)) });
   let saved = await update(env, HH.pros, pro.id, { Balance: after, "Welcome Credit": creditAfter });
   await post(env, saved, { entry: `${kind === "exclusive" ? "Exclusive lead" : "Lead"}: ${lead.fields.Lead}${by ? ` (claimed by ${by.fields.Member})` : ""}`, type: "Lead", amount: -price, creditPart: -creditUsed, balanceAfter: after, purchaseId: made.id, via, by: by ? who(by) : "" });
   if (by) {
@@ -744,7 +748,9 @@ async function ensureLedger(env, pro) {
   return list(env, HH.base, HH.ledger, { filterByFormula: `{Pro ID}='${pro.id}'`, "sort[0][field]": "At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 100 });
 }
 
-// A bad-lead report marked Approved in Airtable puts the money straight back in the wallet.
+// ---------- lead credits (src/credits.js has the rules) ----------
+// An approved report puts the price straight back in the wallet: the welcome-credit part as welcome credit, the rest as paid balance.
+// Credits are never refunded to a card (Ryan 2026-11-20). Approved by the auto-decider, a person in the admin panel, or Airtable.
 export async function creditBacks(env) {
   const due = await list(env, HH.base, HH.purchases, { filterByFormula: "AND({Review Status}='Approved',NOT({Credited}))", pageSize: 20, maxRecords: 20 });
   let done = 0;
@@ -753,13 +759,78 @@ export async function creditBacks(env) {
     if (!pro) continue;
     const lead = await at(env, HH.base, HH.leads, { id: leadId }).catch(() => null), after = cents((pro.fields.Balance || 0) + price);
     const saved = await update(env, HH.pros, pro.id, { Balance: after, "Welcome Credit": cents((pro.fields["Welcome Credit"] || 0) + part) });
-    await post(env, saved, { entry: `Bad-lead report approved: ${lead ? lead.fields.Job || lead.fields.Lead : "lead"}`, type: "Credit back", amount: price, creditPart: part, balanceAfter: after, purchaseId: p.id });
+    await post(env, saved, { entry: `Lead credit: ${lead ? lead.fields.Job || lead.fields.Lead : "lead"}`, type: "Credit back", amount: price, creditPart: part, balanceAfter: after, purchaseId: p.id });
     await update(env, HH.purchases, p.id, { Credited: true });
-    await sendEmail(env, saved.fields.Email, `${usd2(price)} is back in your wallet`, [`Hi ${saved.fields["Business Name"]},`, `We approved your bad-lead report${lead ? ` for ${lead.fields.Job || "that lead"}` : ""}.`, `${usd2(price)} is back in your wallet now. Your balance is ${usd2(after)}.`, part < price ? "If you would rather have the paid part refunded to your card, reply to this email." : ""].filter(Boolean), { heading: "Your report was approved", cta: ["See open leads", APP + "#offers"] });
+    const why = p.fields["Decision Reason"] || "";
+    await sendEmail(env, saved.fields.Email, `${usd2(price)} is back in your wallet`, [`Hi ${saved.fields["Business Name"]},`, `We approved your report${lead ? ` on ${lead.fields.Job || "that lead"}` : ""}.${why ? " " + why : ""}`, `${usd2(price)} is back in your wallet now as lead credit. Your balance is ${usd2(after)}.`, "Lead credits stay in your wallet for your next leads. They are not refunded to your card."], { heading: "Your report was approved", cta: ["See open leads", APP + "#offers"] });
     done++;
   }
   return done;
 }
+
+// Is the number in service? Twilio Lookup line status: "inactive" means disconnected. Without Twilio, "unknown".
+async function lineStatus(env, phone) {
+  if (!env.TWILIO_ACCOUNT_SID || !env.TWILIO_AUTH_TOKEN || !hasPhone(phone)) return "unknown";
+  try {
+    const r = await fetch(`https://lookups.twilio.com/v2/PhoneNumbers/%2B1${digits(phone)}?Fields=line_status`, { headers: { Authorization: "Basic " + btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`) }, signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return "unknown";
+    const st = String(((await r.json()).line_status || {}).status || "").toLowerCase();
+    return st === "inactive" ? "inactive" : st === "active" ? "active" : "unknown";
+  } catch { return "unknown"; }
+}
+// One yes / no / unsure question about the request text, for "wrong trade" and "not a real request".
+async function aiAsk(env, question, lead, note) {
+  if (!env.ANTHROPIC_API_KEY) return "unsure";
+  try {
+    const r = await askJson(env, { maxTokens: 300, system: "You check reports from contractors who bought a home-service lead. Answer only from the request text. Say unsure unless the text makes the answer clear. The contractor's note is a claim, not evidence.",
+      schema: { type: "object", properties: { answer: { type: "string", enum: ["yes", "no", "unsure"] }, why: { type: "string" } }, required: ["answer", "why"], additionalProperties: false },
+      content: [{ type: "text", text: `${question}\n\nService field: ${lead.fields.Service || ""}\nJob title: ${lead.fields.Job || ""}\nRequest text:\n${lead.fields.Message || "(empty)"}\n\nContractor's note: ${note || "(none)"}` }] },
+    (x) => { if (!["yes", "no", "unsure"].includes(x.answer)) throw new Error("no answer"); });
+    return r.answer;
+  } catch { return "unsure"; }
+}
+// Gathers the facts for one report and writes the decision.
+export async function decideReport(env, p) {
+  const [leadId, proId] = String(p.fields.Purchase).split(":"), reason = p.fields["Report Reason"] || "";
+  const [lead, pro] = await Promise.all([at(env, HH.base, HH.leads, { id: leadId }).catch(() => null), at(env, HH.base, HH.pros, { id: proId }).catch(() => null)]);
+  if (!lead || !pro) return null;
+  const mine = await purchasesFor(env, pro.id), others = (await purchasesFor(env, leadId)).filter((x) => x.id !== p.id);
+  const snap = parseSnap(p.fields.Snapshot), sf = snap || pro.fields, place = { City: lead.fields.City, State: lead.fields.State };
+  const f = { reason, rate: RATE(mine, p.id), othersReached: others.some((x) => ["Contacted", "Quoted", "Won"].includes(x.fields.Pipeline)), place: placeOf(place), tradeName: TRADE_NAME[lead.fields.Trade] || "" };
+  const extra = {};
+  if (reason === "wrong_number") { f.line = await lineStatus(env, lead.fields["Owner Phone"]); extra["Line Status"] = f.line; extra["Line Checked At"] = new Date().toISOString(); }
+  if (reason === "wrong_trade") f.ai = await aiAsk(env, `Is this job ${TRADE_NAME[lead.fields.Trade] || lead.fields.Trade} work? Answer no only if the job clearly belongs to a different trade.`, lead, p.fields["Review Reason"]);
+  if (reason === "not_real") f.ai = await aiAsk(env, "Is this a request from someone who wants work done on a property? Answer no only if it is clearly a sales pitch, a job seeker, spam, a test or a question that asks for no work.", lead, p.fields["Review Reason"]);
+  if (reason === "outside_area") { const r = inRadius(sf, place), named = areasOf(sf).some((a) => sameMarket(a, place)); f.outside = named || r === true ? false : r === false ? true : null; }
+  if (reason === "older_than_shown") f.olderBy = snap && snap.receivedAt && lead.fields["Received At"] ? (Date.parse(snap.receivedAt) - Date.parse(lead.fields["Received At"])) / 3600e3 : 0;
+  if (reason === "duplicate") {
+    const t0 = Date.parse(p.fields["Bought At"]), phone = digits(lead.fields["Owner Phone"]);
+    for (const x of mine.filter((x) => x.id !== p.id && t0 - Date.parse(x.fields["Bought At"]) > 0 && t0 - Date.parse(x.fields["Bought At"]) <= 30 * 864e5)) {
+      const l = await at(env, HH.base, HH.leads, { id: String(x.fields.Purchase).split(":")[0] }).catch(() => null);
+      if (l && digits(l.fields["Owner Phone"]) === phone && l.fields.Trade === lead.fields.Trade) { f.dupOf = niceDate(String(x.fields["Bought At"]).slice(0, 10)); break; }
+    }
+  }
+  const d = decideCredit(f);
+  if (Object.keys(extra).length) await update(env, HH.leads, lead.id, extra).catch(() => {});
+  await update(env, HH.purchases, p.id, { "Review Status": d.status, "Decision Reason": d.reason, "Decided By": d.status === "Needs person" ? "" : "Auto", "Decided At": d.status === "Needs person" ? null : new Date().toISOString(), "Decision Facts": JSON.stringify({ ...f, rate: f.rate }) });
+  const job = lead.fields.Job || "that lead";
+  if (d.status === "Approved") await creditBacks(env);
+  else if (d.status === "Denied") await sendEmail(env, pro.fields.Email, "About your lead report", [`Hi ${pro.fields["Business Name"]},`, `We checked your report on ${job} and could not approve a credit.`, `Why: ${d.reason}`, "If you think we got it wrong, open the lead in My leads and press \"Ask a person to review\". A person will look at it once."], { cta: ["Open my leads", APP + "#leads"] });
+  else await notifyAdmin(env, pro, `Lead report needs you: ${pro.fields["Business Name"]}`, [`${pro.fields["Business Name"]} reported ${job} as "${REASONS[reason] || reason}" and asked for ${usd2(p.fields.Price || 0)} back as credit.`, `Why it needs a person: ${d.reason}`, p.fields["Review Reason"] ? `They said: ${String(p.fields["Review Reason"]).slice(0, 500)}` : ""]);
+  return d;
+}
+// Every minute: decide reports that are waiting (also catches any whose instant decision failed).
+export async function decideReports(env) {
+  const todo = await list(env, HH.base, HH.purchases, { filterByFormula: "{Review Status}='Reported'", pageSize: 10, maxRecords: 10 });
+  let n = 0;
+  for (const p of todo) { try { if (await decideReport(env, p)) n++; } catch (e) { console.error("decide report failed:", p.id, String(e && e.message || e)); } }
+  return n;
+}
+
+// A tap on "Call owner" is logged on the purchase (the proof for a wrong-number report).
+// With CALL_BRIDGE = "live" Hammer Hound rings the pro and connects them to the owner, and the call's outcome and length are logged too.
+async function logCall(env, p, entry) { const calls = parseCalls(p.fields.Calls); calls.push(entry); await update(env, HH.purchases, p.id, { Calls: JSON.stringify(calls.slice(-30)) }); return calls; }
+const callSig = (env, id) => hmac(env.SESSION_SECRET, "call:" + id);
 
 // ---------- lead alerts by text and email ----------
 const twilioReady = (env) => !!(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_FROM);
@@ -1260,6 +1331,9 @@ async function adminOverview(env, realOnly) {
   const span = (fn) => ({ today: fn(isToday), week: fn(inWeek) });
   const open = leads.filter((l) => l.fields.Status === "Offered" && l.fields.Style === STYLE && isOpenAge(l));
   const leadName = {}; for (const l of leads) leadName[l.id] = l.fields.Lead || l.fields.Job || "Lead";
+  // Reports waiting on a person: their leads in full (request text, phone, line status).
+  const repIds = [...new Set(buys.filter((b) => ["Reported", "Needs person"].includes(b.fields["Review Status"])).map((b) => String(b.fields.Purchase).split(":")[0]))].slice(0, 40);
+  const leadById = Object.fromEntries((await Promise.all(repIds.map((id) => at(env, HH.base, HH.leads, { id }).catch(() => null)))).filter(Boolean).map((l) => [l.id, l]));
   const proCard = (p) => ({ id: p.id, business: p.fields["Business Name"] || "", legalName: p.fields["Legal Business Name"] || "", phone: p.fields.Mobile || "", email: p.fields.Email || "", city: p.fields.City || "", trade: TRADE_NAME[p.fields.Trade] || "", test: !!p.fields.Test });
   // Market requests, grouped: where pros asked for leads and found none.
   const groups = {};
@@ -1281,7 +1355,12 @@ async function adminOverview(env, realOnly) {
     queues: {
       verifications: pros.filter((p) => p.fields.Verification === "In review").map((p) => ({ ...proCard(p), ein: p.fields.EIN || "", docType: p.fields["Proof of Business Type"] || "", expires: p.fields["Insurance Expires"] || "", reason: p.fields["Verification Reason"] || "", detail: String(p.fields["Verification Detail"] || "").slice(0, 3000),
         files: [["Proof of business", p.fields["Proof of Business File"]], ["Insurance", p.fields["Insurance File"]]].filter((x) => String(x[1] || "").startsWith("pros/")).map(([label, key]) => ({ label, key })) })),
-      reports: buys.filter((b) => b.fields["Review Status"] === "Reported").map((b) => { const [leadId, proId] = String(b.fields.Purchase).split(":"); return { purchaseId: b.id, pro: name(proId), lead: leadName[leadId] || "Lead", kind: b.fields.Kind || "", price: b.fields.Price || 0, boughtAt: b.fields["Bought At"], reason: b.fields["Review Reason"] || "" }; }),
+      reports: buys.filter((b) => ["Reported", "Needs person"].includes(b.fields["Review Status"])).map((b) => { const [leadId, proId] = String(b.fields.Purchase).split(":"), l = leadById[leadId], mineAll = buys.filter((x) => String(x.fields.Purchase).endsWith(":" + proId)), r = RATE(mineAll, b.id), snap = parseSnap(b.fields.Snapshot);
+        return { purchaseId: b.id, status: b.fields["Review Status"], pro: name(proId), lead: leadName[leadId] || "Lead", kind: b.fields.Kind || "", price: b.fields.Price || 0, creditUsed: b.fields["Credit Used"] || 0, boughtAt: b.fields["Bought At"], reportedAt: b.fields["Reported At"] || "",
+          reason: REASONS[b.fields["Report Reason"]] || "Old report (no reason picked)", note: b.fields["Review Reason"] || "", autoNote: b.fields["Decision Reason"] || "", appeal: !!b.fields["Person Review"], pipeline: b.fields.Pipeline || "New",
+          calls: parseCalls(b.fields.Calls), callsProven: callsProve(parseCalls(b.fields.Calls), b.fields["Bought At"]), evidence: b.fields["Report Evidence"] || "", rate: r, line: l ? l.fields["Line Status"] || "" : "",
+          request: l ? { job: l.fields.Job || "", trade: TRADE_NAME[l.fields.Trade] || l.fields.Trade || "", place: placeOf(l.fields), phone: l.fields["Owner Phone"] ? "ends " + String(l.fields["Owner Phone"]).slice(-4) : "none", receivedAt: l.fields["Received At"] || "", message: String(l.fields.Message || "").replace(/[\w.+-]+@[\w-]+\.[\w.]+/g, "[email]").replace(/\+?1?[\s(.-]*\d{3}[\s).-]*\d{3}[\s.-]*\d{4}/g, "[phone]").slice(0, 1500) } : null,
+          snapshot: snap ? { area: `${snap["Service Radius"]} mi of ${snap.ZIP || placeOf(snap)}${snap["Service Area"] ? " + " + snap["Service Area"] : ""}`, trades: (snap.trades || []).map((t) => TRADE_NAME[t] || t).join(", ") } : null }; }),
       tickets: tickets.filter((t) => (selectName(t.fields.Status) || "Open") === "Open").map((t) => ({ id: t.id, pro: name(t.fields["Pro ID"]), email: proOf(t.fields["Pro ID"]).fields.Email || "", topic: t.fields.Topic || "", subject: t.fields.Subject || "", message: t.fields.Message || "", createdAt: t.fields["Created At"] })),
       declinedCards: pros.filter((p) => pendingOf(p.fields)).map((p) => ({ ...proCard(p), card: p.fields.Card || "", amount: pendingOf(p.fields).amount, forLead: pendingOf(p.fields).lead, at: String(p.fields["Pending Reload"]).split("|")[3] })),
     },
@@ -1304,7 +1383,7 @@ async function adminApi(request, env, path, body) {
   // A pro's uploaded document, straight from storage. Only keys under pros/ are served.
   if (path === "/api/admin/doc") {
     const key = new URL(request.url).searchParams.get("key") || "";
-    if (!/^pros\/rec[A-Za-z0-9]{14}\/[A-Za-z0-9._-]+$/.test(key) || !env.DOCS) return fail(404, "Not found.");
+    if (!/^(pros|reports)\/rec[A-Za-z0-9]{14}\/[A-Za-z0-9._-]+$/.test(key) || !env.DOCS) return fail(404, "Not found.");
     const o = await env.DOCS.get(key);
     return o ? new Response(o.body, { headers: { "Content-Type": (o.httpMetadata && o.httpMetadata.contentType) || "application/octet-stream", "Content-Disposition": "inline", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } }) : fail(404, "Not found.");
   }
@@ -1329,14 +1408,17 @@ async function adminApi(request, env, path, body) {
   }
   // Run the daily market refresh and a re-pricing pass now, instead of waiting for the schedule.
   if (path === "/api/admin/pricing") return json({ ok: true, markets: await refreshMarkets(env), leads: await repriceLeads(env) });
+  // A person decides a report. Approval always returns the money to the wallet as credit; there is no card refund.
   if (path === "/api/admin/report") {
     if (!okId(body.purchaseId) || !["approve", "deny"].includes(body.decision)) return fail(400, "Pick a report and a decision.");
     const p = await at(env, HH.base, HH.purchases, { id: body.purchaseId });
-    if (p.fields["Review Status"] !== "Reported") return fail(409, "This report has already been handled.");
-    await update(env, HH.purchases, p.id, { "Review Status": body.decision === "approve" ? "Approved" : "Denied" });
+    if (!["Reported", "Needs person"].includes(p.fields["Review Status"])) return fail(409, "This report has already been handled.");
+    const note = String(body.reason || "").trim().slice(0, 500);
+    if (body.decision === "deny" && !note) return fail(400, "Say why, in words the pro will read.");
+    await update(env, HH.purchases, p.id, { "Review Status": body.decision === "approve" ? "Approved" : "Denied", "Decision Reason": note || (body.decision === "approve" ? "A person reviewed it and approved it." : ""), "Decided By": who, "Decided At": new Date().toISOString(), ...(p.fields["Person Review"] ? {} : { "Person Review": true }) });
     if (body.decision === "approve") return json({ ok: true, credited: await creditBacks(env) });
-    const [leadId, proId] = String(p.fields.Purchase).split(":"), pro = await at(env, HH.base, HH.pros, { id: proId }).catch(() => null), note = String(body.reason || "").trim().slice(0, 500);
-    if (pro) await sendEmail(env, pro.fields.Email, "About your bad-lead report", [`Hi ${pro.fields["Business Name"]},`, "We looked at your bad-lead report and could not approve a credit for it.", note ? `Why: ${note}` : "", "If you think we got it wrong, reply to this email."].filter(Boolean), { cta: ["Open my leads", APP + "#leads"] });
+    const [leadId, proId] = String(p.fields.Purchase).split(":"), pro = await at(env, HH.base, HH.pros, { id: proId }).catch(() => null);
+    if (pro) await sendEmail(env, pro.fields.Email, "About your lead report", [`Hi ${pro.fields["Business Name"]},`, "A person reviewed your lead report and could not approve a credit for it.", `Why: ${note}`, "This decision is final."], { cta: ["Open my leads", APP + "#leads"] });
     return json({ ok: true, leadId });
   }
   if (path === "/api/admin/ticket") {
@@ -1353,7 +1435,7 @@ async function adminApi(request, env, path, body) {
 async function api(request, env, path) {
   if (!env.AIRTABLE_TOKEN || !env.SESSION_SECRET) return fail(503, NOT_OPEN);
   const isForm = (request.headers.get("Content-Type") || "").includes("multipart/form-data");
-  const body = request.method === "POST" && !isForm && path !== "/api/sms/inbound" ? await request.json().catch(() => ({})) : {};
+  const body = request.method === "POST" && !isForm && path !== "/api/sms/inbound" && path !== "/api/twilio/dial-done" ? await request.json().catch(() => ({})) : {};
 
   if (path === "/api/admin/ingest" && request.method === "POST") {
     if (!env.ADMIN_KEY || request.headers.get("X-Admin-Key") !== env.ADMIN_KEY) return fail(401, "Not allowed.");
@@ -1366,6 +1448,14 @@ async function api(request, env, path) {
     try { return json(await sendReminders(env, { dry: !!body.dry })); } catch (e) { return json({ error: String(e && e.message || e) }, 500); }
   }
   if (path === "/api/sms/inbound" && request.method === "POST") return inboundText(request, env);
+  // Twilio calls this when a bridged "Call owner" call ends: outcome and length go on the call log entry.
+  if (path === "/api/twilio/dial-done" && request.method === "POST") {
+    const q = new URL(request.url).searchParams, id = q.get("p") || "", t = q.get("t") || "";
+    if (!/^rec[A-Za-z0-9]{14}$/.test(id) || !(await sameText(env, q.get("s") || "", await callSig(env, id + t)))) return new Response("<Response/>", { status: 403, headers: { "Content-Type": "text/xml" } });
+    const fd = await request.formData().catch(() => null), p = await at(env, HH.base, HH.purchases, { id }).catch(() => null);
+    if (p && fd) { const calls = parseCalls(p.fields.Calls), c = calls.find((x) => x.at === t); if (c) { c.result = String(fd.get("DialCallStatus") || ""); c.seconds = Number(fd.get("DialCallDuration") || 0); await update(env, HH.purchases, id, { Calls: JSON.stringify(calls) }); } }
+    return new Response("<Response><Hangup/></Response>", { headers: { "Content-Type": "text/xml" } });
+  }
   if (path === "/api/admin/invoices" && request.method === "POST") {
     if (!env.ADMIN_KEY || request.headers.get("X-Admin-Key") !== env.ADMIN_KEY) return fail(401, "Not allowed.");
     try { return json(await sendInvoices(env, { month: body.month, dry: !!body.dry })); } catch (e) { return json({ error: String(e && e.message || e) }, 500); }
@@ -1525,17 +1615,51 @@ async function api(request, env, path) {
     const out = [];
     for (const p of mine.sort((a, b) => String(b.fields["Bought At"]).localeCompare(String(a.fields["Bought At"]))).slice(0, 40)) {
       const lead = await at(env, HH.base, HH.leads, { id: p.fields.Purchase.split(":")[0] }).catch(() => null);
-      if (lead) out.push({ purchaseId: p.id, kind: p.fields.Kind, price: p.fields.Price || 0, creditUsed: p.fields["Credit Used"] || 0, boughtAt: p.fields["Bought At"], review: p.fields["Review Status"] || "None", pipeline: p.fields.Pipeline || "New", notes: p.fields.Notes || "", claimedBy: String(p.fields["Claimed By"] || "").split(" · ")[0], ...leadView(lead), id: lead.id });
+      if (lead) out.push({ purchaseId: p.id, kind: p.fields.Kind, price: p.fields.Price || 0, creditUsed: p.fields["Credit Used"] || 0, boughtAt: p.fields["Bought At"], review: p.fields["Review Status"] || "None", reportReason: REASONS[p.fields["Report Reason"]] || "", decisionReason: p.fields["Decision Reason"] || "", personReview: !!p.fields["Person Review"], calls: parseCalls(p.fields.Calls).length, callsProven: callsProve(parseCalls(p.fields.Calls), p.fields["Bought At"]), canReport: !reportBlock({ reason: "duplicate", boughtAt: p.fields["Bought At"], pipeline: p.fields.Pipeline || "New", reviewStatus: p.fields["Review Status"], calls: [] }), pipeline: p.fields.Pipeline || "New", notes: p.fields.Notes || "", claimedBy: String(p.fields["Claimed By"] || "").split(" · ")[0], ...leadView(lead), id: lead.id });
     }
     return json({ leads: out, pro: proView(pro) });
   }
+  // Report a bad lead: one reason, a note, optional screenshot (multipart, field "evidence"). Decided at once when the records settle it.
   if (path === "/api/pro/report" && request.method === "POST") {
-    const mine = await purchasesFor(env, pro.id), p = mine.find((x) => x.id === body.purchaseId);
+    let b = body, file = null;
+    if (isForm) { const fd = await request.formData().catch(() => null); if (!fd) return fail(400, "Could not read the form."); b = Object.fromEntries([...fd.entries()].filter(([, v]) => typeof v === "string")); const e = fd.get("evidence"); if (e && typeof e !== "string" && e.size) file = e; }
+    if (file && (file.size > MAX_FILE || !["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(file.type))) return fail(400, "The screenshot must be a JPG, PNG, WebP or PDF under 5 MB.");
+    const mine = await purchasesFor(env, pro.id), p = mine.find((x) => x.id === b.purchaseId);
     if (!p) return fail(404, "That lead is not in your account.");
-    if ((p.fields["Review Status"] || "None") !== "None") return fail(409, "This lead has already been reported.");
-    await update(env, HH.purchases, p.id, { "Review Status": "Reported", "Review Reason": String(body.reason || "").slice(0, 1000) });
-    await notifyAdmin(env, pro, `Bad-lead report from ${pro.fields["Business Name"]}`, [`${pro.fields["Business Name"]} reported a lead and asked for a credit of ${usd2(p.fields.Price || 0)}.`, `They said: ${String(body.reason || "No reason given.").slice(0, 500)}`]);
+    const reason = b.reason in REASONS ? b.reason : "", note = String(b.note || "").trim().slice(0, 1000);
+    const blocked = reportBlock({ reason, note, boughtAt: p.fields["Bought At"], pipeline: p.fields.Pipeline || "New", reviewStatus: p.fields["Review Status"], calls: parseCalls(p.fields.Calls), hasEvidence: !!file });
+    if (blocked) return fail(p.fields["Review Status"] && p.fields["Review Status"] !== "None" ? 409 : 400, blocked);
+    let key = "";
+    if (file && env.DOCS) { key = `reports/${p.id}/${Date.now()}.${(file.type.split("/")[1] || "bin").replace("jpeg", "jpg")}`; await env.DOCS.put(key, await file.arrayBuffer(), { httpMetadata: { contentType: file.type }, customMetadata: { pro: pro.id } }); }
+    const saved = await update(env, HH.purchases, p.id, { "Review Status": "Reported", "Report Reason": reason, "Review Reason": note, "Reported At": new Date().toISOString(), ...(key ? { "Report Evidence": key } : {}) });
+    let decision = null;
+    try { decision = await decideReport(env, saved); } catch (e) { console.error("instant decision failed:", String(e && e.message || e)); }
+    return json({ ok: true, status: decision ? decision.status : "Reported", reason: decision ? decision.reason : "We are checking it. You will get an email with the answer." });
+  }
+  // A denied report can go to a person once.
+  if (path === "/api/pro/report-review" && request.method === "POST") {
+    const p = (await purchasesFor(env, pro.id)).find((x) => x.id === body.purchaseId);
+    if (!p) return fail(404, "That lead is not in your account.");
+    if (p.fields["Review Status"] !== "Denied" || p.fields["Person Review"]) return fail(409, p.fields["Person Review"] ? "A person has already reviewed this report. That decision is final." : "Only a denied report can be sent to a person.");
+    await update(env, HH.purchases, p.id, { "Review Status": "Needs person", "Person Review": true, "Decided By": "", "Decided At": null });
+    await notifyAdmin(env, pro, `Report review asked: ${pro.fields["Business Name"]}`, [`${pro.fields["Business Name"]} asked a person to review a denied report (${REASONS[p.fields["Report Reason"]] || "no reason"}).`, `The automatic answer was: ${p.fields["Decision Reason"] || ""}`, body.note ? `They added: ${String(body.note).slice(0, 500)}` : ""]);
     return json({ ok: true });
+  }
+  // "Call owner": logged every time. With CALL_BRIDGE = "live", Hammer Hound rings the pro's phone and connects the owner.
+  if (path === "/api/pro/call" && request.method === "POST") {
+    const p = (await purchasesFor(env, pro.id)).find((x) => x.id === body.purchaseId);
+    if (!p) return fail(404, "That lead is not in your account.");
+    const lead = await at(env, HH.base, HH.leads, { id: String(p.fields.Purchase).split(":")[0] }).catch(() => null);
+    if (!lead || !hasPhone(lead.fields["Owner Phone"])) return fail(410, "This lead has no phone number.");
+    const caller = pro.member ? pro.member.fields.Mobile : pro.fields.Mobile, entry = { at: new Date().toISOString(), by: pro.member ? pro.member.fields.Member : "owner", via: "tap" };
+    if (env.CALL_BRIDGE === "live" && twilioReady(env) && hasPhone(caller)) {
+      const done = `${SITE}/api/twilio/dial-done?p=${p.id}&t=${encodeURIComponent(entry.at)}&s=${encodeURIComponent(await callSig(env, p.id + entry.at))}`;
+      const twiml = `<Response><Say>Hammer Hound is connecting you to ${hx(lead.fields["Owner Name"] || "the homeowner")}.</Say><Dial callerId="${hx(env.TWILIO_FROM)}" timeout="30" action="${hx(done)}"><Number>+1${digits(lead.fields["Owner Phone"])}</Number></Dial></Response>`;
+      const r = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${env.TWILIO_ACCOUNT_SID}/Calls.json`, { method: "POST", headers: { Authorization: "Basic " + btoa(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`), "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ To: "+1" + digits(caller), From: env.TWILIO_FROM, Twiml: twiml }) }).catch(() => null);
+      if (r && r.ok) { entry.via = "bridge"; entry.sid = (await r.json()).sid || ""; const calls = await logCall(env, p, entry); return json({ ok: true, bridged: true, calls: calls.length, proven: callsProve(calls, p.fields["Bought At"]), text: `Your phone (${fmtPhone(caller)}) will ring now. Answer it and we connect the owner.` }); }
+    }
+    const calls = await logCall(env, p, entry);
+    return json({ ok: true, bridged: false, tel: "+1" + digits(lead.fields["Owner Phone"]), calls: calls.length, proven: callsProve(calls, p.fields["Bought At"]) });
   }
   if (path === "/api/pro/lead-status" && request.method === "POST") {
     const p = (await purchasesFor(env, pro.id)).find((x) => x.id === body.purchaseId);
@@ -1695,6 +1819,7 @@ export default {
       await step("states", async () => { const n = await fixStates(env); if (n) console.log("states filled", n); });
       await step("pricing", async () => { const r = await repriceLeads(env); if (r.repriced || r.sold) console.log("pricing", JSON.stringify(r)); });
       await step("alerts", async () => { const alerts = await alertPros(env); if (alerts.leads) console.log("alerts", JSON.stringify(alerts)); });
+      await step("reports", async () => { const n = await decideReports(env); if (n) console.log("reports decided", n); });
       await step("credit backs", async () => { const back = await creditBacks(env); if (back) console.log("credit backs", back); });
     };
     ctx.waitUntil(run());
