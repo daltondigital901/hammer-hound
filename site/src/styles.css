@@ -678,3 +678,22 @@ legend + .option-grid { margin-top: 0; }
 @media (prefers-reduced-motion: reduce) { .tour-card, .tour-ring { animation: none; } }
 .offer-why { margin: 2px 0 0; font-size: 13px; color: var(--steel); }
 .field-row { display: grid; grid-template-columns: 1fr 110px; gap: 10px; align-items: end; }
+/* onboarding: checklist, guide, finish later, service area */
+.todos { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.todo { display: grid; grid-template-columns: 28px 1fr auto; gap: 10px; align-items: center; }
+.todo strong, .todo small { display: block; }
+.todo small { color: var(--steel); font-size: 13px; }
+.todo-mark { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--asphalt); display: grid; place-items: center; font-weight: 800; font-size: 14px; }
+.todo.is-done .todo-mark { background: var(--green); border-color: var(--green); color: #fff; }
+.todo.is-done strong { text-decoration: line-through; opacity: .65; }
+.todo-bar { height: 8px; border-radius: 99px; background: var(--concrete-2); overflow: hidden; }
+.todo-bar i { display: block; height: 100%; background: var(--yellow); border-right: 2px solid var(--asphalt); }
+.guide { background: var(--yellow-tint); border: 2px solid var(--asphalt); border-radius: var(--r); padding: 16px 18px; margin-bottom: 16px; }
+.guide h2 { margin: 0; font-size: 18px; }
+.guide ol { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 8px; }
+.later { display: grid; gap: 8px; margin-top: 18px; padding: 14px; border: 2px dashed var(--line); border-radius: 10px; }
+.later p { margin: 0; color: var(--steel); }
+.snap { margin: -6px 0 6px; }
+.area-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.area-chip button { background: none; border: 0; font-size: 16px; line-height: 1; cursor: pointer; padding: 0 0 0 2px; color: inherit; }
+.area-add { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }

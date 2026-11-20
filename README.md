@@ -272,3 +272,13 @@ exclusive    = shared x 3
 - **Markets** in Open leads are places, "Memphis, TN (3)", so two cities with one name in different states are separate. A place with no state matches any state.
 - **Pros** have a `State` (fldnNtg6oNSxPrFcF). The join form and the profile have a state picker and require it. A pro who joined before this is matched by city alone until they pick one.
 - **Pricing segments** are keyed by place and trade: `memphis, tn|roofing`.
+
+## Onboarding
+
+- **Getting started checklist** on Home: verify, turn on lead texts, add other towns, add a card, claim a first lead, plus "add your team" as optional. It disappears when the five are done.
+- **Service area.** A pro's market is their home City and State plus up to 10 other towns in `Service Area` (fld1ZE8feRE8JJinT, "City, ST; City, ST"), edited in Profile. Lead texts, the default view of Open leads ("My service area") and the pricing demand counts all cover the whole area.
+- **ZIP to city and state** on the join form: `GET /api/zip?z=38103`, backed by api.zippopotam.us (`ZIP_API` overrides it). Best effort: if it fails the pro types the city and state, and a typed city is never overwritten.
+- **Finish later.** On Verify, "Email me a link to finish later" (`POST /api/pro/finish-later`) sends a link to `/pros/sign-in/?next=verify`, which lands on Verify after sign-in. On a phone each upload has a "Take a photo instead" button.
+- **Never started.** A pro who joined and uploaded nothing is emailed after 1, 3 and 7 days (`start1`, `start3`, `start7`), then left alone. Like the other nudges, these wait for `MAILING_ADDRESS` before going to real pros.
+- **Admin alerts.** `ADMIN_EMAIL` gets an email when a verification needs a person, a bad lead is reported, or a ticket is opened.
+- **First lead.** My leads shows "How to win this lead" while a pro has one or two leads, until they tap "Got it".

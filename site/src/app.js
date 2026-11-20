@@ -59,6 +59,29 @@
   }
 
   // Pro join and sign-in: after the number is accepted, ask for the 6-digit code.
+  // ?next=verify on the sign-in link (from "finish later" and reminder emails) lands on that screen after sign-in.
+  function nextTab() { var n = (location.search.match(/[?&]next=([a-z]+)/) || [])[1]; return ["verify", "offers", "leads", "wallet", "team", "profile"].indexOf(n) >= 0 ? "#" + n : ""; }
+  // Join form: a ZIP code fills in the city and state. If the lookup fails, the pro types them as before.
+  (function () {
+    var zip = document.getElementById("j-zip"), city = document.getElementById("j-city"), state = document.getElementById("j-state");
+    if (!zip || !city || !state) return;
+    var last = "";
+    function look() {
+      var z = zip.value.trim();
+      if (!/^\d{5}$/.test(z) || z === last) return;
+      last = z;
+      fetch("/api/zip?z=" + z).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+        if (!d || !d.city || zip.value.trim() !== z) return;
+        // Never overwrite what the person typed themselves.
+        var typedCity = city.value.trim() && city.dataset.filled !== "1", typedState = state.value && state.dataset.filled !== "1";
+        if (typedCity || typedState) return;   // a city and state go together: do not put a looked-up state next to a typed city
+        city.value = d.city; city.dataset.filled = "1"; state.value = d.state; state.dataset.filled = "1";
+      }).catch(function () { /* the fields stay as they are */ });
+    }
+    zip.addEventListener("input", look); zip.addEventListener("change", look);
+    city.addEventListener("input", function () { city.dataset.filled = ""; }); state.addEventListener("change", function () { state.dataset.filled = ""; });
+    look();
+  })();
   function codeStep(form, phone, sent) {
     form.innerHTML = '<h2 class="h1">Enter your code</h2><p class="sub"></p>' +
       '<label class="label" for="code-input">6-digit code</label><input class="input" id="code-input" name="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" required>' +
@@ -67,7 +90,7 @@
     form.setAttribute("data-form", "proCode");
     form.onsubmit = function (e) {
       e.preventDefault(); e.stopImmediatePropagation();
-      send("proCode", { phone: phone, code: form.elements.code.value.trim() }, $("[data-status]", form), $("button", form)).then(function (ok) { if (ok) location.href = "/pros/app/"; });
+      send("proCode", { phone: phone, code: form.elements.code.value.trim() }, $("[data-status]", form), $("button", form)).then(function (ok) { if (ok) location.href = "/pros/app/" + nextTab(); });
     };
     form.elements.code.focus();
   }
