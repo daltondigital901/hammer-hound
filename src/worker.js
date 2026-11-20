@@ -1,4 +1,5 @@
 import { invoicePdf } from "./pdf.js";
+import { inRadius, radiusOf, centerOf, citiesWithin, RADIUS_CHOICES } from "./geo.js";
 import { PRICING, PRICING_VERSION, priceLead, demandMultiplier, priceReasons } from "./pricing.js";
 
 // Hammer Hound engine: serves the static site and the pro API, and copies
@@ -223,7 +224,8 @@ const placeParts = (text) => { const p = cleanPlace(text, ""); return { City: p.
 export const AREA_MAX = 10;
 const extraAreas = (f) => String(f["Service Area"] || "").split(";").map((t) => placeParts(t)).filter((a) => a.City);
 const areasOf = (f) => [...(f.City ? [{ City: f.City, State: f.State || "" }] : []), ...extraAreas(f)];
-const inArea = (f, place) => areasOf(f).some((a) => sameMarket(a, place));
+// In the market = inside the pro's radius (Ryan 2026-11-20: a radius, not a list of towns), or one of the towns they named before radii existed.
+const inArea = (f, place) => inRadius(f, place) === true || areasOf(f).some((a) => sameMarket(a, place));
 // Verified means documents passed and the insurance on file has not expired.
 const isVerified = (p) => p.fields.Verification === "Verified" && (!p.fields["Insurance Expires"] || p.fields["Insurance Expires"] >= today());
 const proView = (p) => ({
@@ -235,7 +237,7 @@ const proView = (p) => ({
   balance: p.fields.Balance || 0, credit: Math.min(p.fields["Welcome Credit"] || 0, p.fields.Balance || 0),
   city: p.fields.City || "", state: p.fields.State || "", market: placeOf(p.fields), serviceArea: extraAreas(p.fields).map(placeOf), extraTrades: String(p.fields["Extra Trades"] || "").split(",").filter(Boolean), tradeName: TRADE_NAME[p.fields.Trade] || "",
   textOffers: !!p.fields["Text Offers"], emailOffers: !!p.fields["Email Offers"], paused: !!p.fields.Paused, dailyCap: p.fields["Daily Cap"] || 0, quietHours: p.fields["Quiet Hours"] || "",
-  agreement: String(p.fields.Agreement || "").split(" | ")[0], memberSince: p.fields["Created At"] || "", card: p.fields.Card || "", autoReload: !!p.fields["Auto Reload"], reloadAmount: reloadUnit(p.fields),
+  agreement: String(p.fields.Agreement || "").split(" | ")[0], memberSince: p.fields["Created At"] || "", card: p.fields.Card || "", backupCard: p.fields["Backup Card"] || "", serviceRadius: radiusOf(p.fields), autoReload: !!p.fields["Auto Reload"], reloadAmount: reloadUnit(p.fields),
 });
 
 // ---------- document check ----------
@@ -508,12 +510,22 @@ async function post(env, pro, e) {
 }
 // Charges the card on file. PLACEHOLDER: the Square call goes here (SQUARE_ACCESS_TOKEN, SQUARE_LOCATION_ID, the customer
 // and card IDs kept in "Card Token", and an idempotency key). Until then only a test account's test card can be charged.
-async function chargeCard(env, pro, amount) {
-  const token = pro.fields["Card Token"];
-  if (!token) return { ok: false, error: "There is no card on file." };
+async function chargeToken(env, pro, token, amount) {
   if (token === "TEST" && pro.fields.Test) return { ok: true, id: "TEST-" + Date.now().toString(36).toUpperCase() };
   if (token === "TEST-DECLINE" && pro.fields.Test) return { ok: false, declined: true, error: "Your card was declined." };
   return { ok: false, error: "Card payments are not switched on yet." };
+}
+// Main card first; if it is DECLINED and a backup card is saved, the backup is charged (Ryan 2026-11-20). cardUsed names the card charged.
+async function chargeCard(env, pro, amount) {
+  const token = pro.fields["Card Token"], backup = pro.fields["Backup Card Token"];
+  if (!token && !backup) return { ok: false, error: "There is no card on file." };
+  if (token) {
+    const first = await chargeToken(env, pro, token, amount);
+    if (first.ok) return { ...first, cardUsed: pro.fields.Card || "your card on file" };
+    if (!first.declined || !backup) return first;
+  }
+  const second = await chargeToken(env, pro, backup, amount);
+  return second.ok ? { ...second, cardUsed: pro.fields["Backup Card"] || "your backup card", usedBackup: true } : { ...second, error: token ? "Your card and your backup card were both declined." : second.error };
 }
 const chargedThisMonth = async (env, pro) => (await list(env, HH.base, HH.ledger, { filterByFormula: `AND({Pro ID}='${pro.id}',{Month}='${monthOf()}',{Type}='Top-up')`, pageSize: 100, maxRecords: 100 })).reduce((n, r) => n + (r.fields.Amount || 0), 0);
 // Adds paid funds from the card on file. Honours the pro's monthly limit. Returns { ok, pro, paymentId } or { ok: false, error }.
@@ -536,8 +548,8 @@ async function topUp(env, pro, amount, via, ctx = {}) {
   const paid = await chargeCard(env, pro, amount);
   if (!paid.ok) { if (paid.declined) paid.link = await cardDeclined(env, pro, amount, ctx); return paid; }
   const after = cents((pro.fields.Balance || 0) + amount), saved = await update(env, HH.pros, pro.id, { Balance: after, ...(pro.fields["Pending Reload"] ? { "Pending Reload": "" } : {}) });
-  await post(env, saved, { entry: `${via === "Auto-reload" ? "Auto-reload" : "Reload"} on ${pro.fields.Card || "card on file"}`, type: "Top-up", amount, balanceAfter: after, paymentId: paid.id, via });
-  await sendEmail(env, saved.fields.Email, `Receipt: ${usd2(amount)} added to your Hammer Hound wallet`, [`Hi ${saved.fields["Business Name"]},`, `We charged ${usd2(amount)} to ${pro.fields.Card || "your card on file"} and added it to your wallet.`, `Wallet balance: ${usd2(after)}. Reference: ${paid.id}.`,
+  await post(env, saved, { entry: `${via === "Auto-reload" ? "Auto-reload" : "Reload"} on ${paid.cardUsed || pro.fields.Card || "card on file"}`, type: "Top-up", amount, balanceAfter: after, paymentId: paid.id, via });
+  await sendEmail(env, saved.fields.Email, `Receipt: ${usd2(amount)} added to your Hammer Hound wallet`, [`Hi ${saved.fields["Business Name"]},`, `We charged ${usd2(amount)} to ${paid.cardUsed || pro.fields.Card || "your card on file"} and added it to your wallet.`, paid.usedBackup ? `${pro.fields.Card || "Your main card"} was declined, so we used your backup card. Update your main card in your wallet.` : "", `Wallet balance: ${usd2(after)}. Reference: ${paid.id}.`,
     via === "Auto-reload" ? "This was an automatic reload. You can change the amount, set a monthly limit or turn it off in your wallet." : via === "Text" ? "This reload covered a lead you claimed by text." : ""].filter(Boolean), { heading: `${usd2(amount)} added to your wallet`, cta: ["Open my wallet", APP + "#wallet"] });
   return { ok: true, pro: saved, paymentId: paid.id };
 }
@@ -1479,7 +1491,7 @@ async function api(request, env, path) {
     const open = leads.filter((l) => !mineIds.has(l.id) && (pro.fields.Card || isHot(l))).map((l) => offerView(env, l, count[l.id] || 0, !!excl[l.id]));
     // Filters default to the pro's own market and trade. "all" widens either one.
     const q = new URL(request.url).searchParams, home = { market: placeOf(pro.fields), trade: pro.fields.Trade || "" };
-    const wide = extraAreas(pro.fields).length > 0;
+    const wide = extraAreas(pro.fields).length > 0 || !!centerOf(pro.fields); // a radius market = "mine" by default
     const market = q.has("market") ? q.get("market") : wide ? "mine" : home.market || "all", trade = q.has("trade") ? q.get("trade") : home.trade || "all";
     const tally = (list, key) => Object.entries(list.reduce((m, o) => { const k = key(o); if (k) m[k] = (m[k] || 0) + 1; return m; }, {}));
     // A market is a place, "City, ST". A pro who has not given a state yet is matched to the place with their city's name.
@@ -1487,7 +1499,7 @@ async function api(request, env, path) {
     const want = placeParts(market);
     const trades = tally(open, (o) => o.trade).map(([slug, n]) => ({ slug, name: TRADE_NAME[slug] || "Other", count: n })).sort((a, b) => a.name.localeCompare(b.name));
     const offers = open.filter((o) => (market === "all" || (market === "mine" ? inArea(pro.fields, { City: o.city, State: o.state }) : sameMarket({ City: o.city, State: o.state }, want))) && (trade === "all" || o.trade === trade));
-    const area = wide ? { count: open.filter((o) => inArea(pro.fields, { City: o.city, State: o.state })).length, places: areasOf(pro.fields).map(placeOf) } : null;
+    const area = wide ? { count: open.filter((o) => inArea(pro.fields, { City: o.city, State: o.state })).length, places: areasOf(pro.fields).map(placeOf), radius: radiusOf(pro.fields) } : null;
     // Show the market the way the list writes it, so the picker lands on the right entry.
     const shown = market === "all" || market === "mine" ? market : (markets.filter((m) => sameMarket(placeParts(m.name), want)).sort((a, b) => (want.State ? (b.name === placeOf(want)) - (a.name === placeOf(want)) : /, [A-Z]{2}$/.test(b.name) - /, [A-Z]{2}$/.test(a.name)) || b.count - a.count)[0] || { name: placeOf(want) || market }).name;
     // empty list in one market: has this pro already asked for leads here? (the "want more leads" button stays done after a reload)
@@ -1534,6 +1546,12 @@ async function api(request, env, path) {
     await update(env, HH.purchases, p.id, fields);
     return json({ ok: true });
   }
+  // The towns inside a radius, for the profile screen while the pro picks one (nothing is saved here).
+  if (path === "/api/pro/coverage") {
+    const q = new URL(request.url).searchParams, f = { ZIP: q.get("zip") || pro.fields.ZIP, City: q.get("city") || pro.fields.City, State: q.get("state") || pro.fields.State, "Service Radius": Number(q.get("radius")) || pro.fields["Service Radius"] };
+    const towns = citiesWithin(f);
+    return json({ found: !!centerOf(f), radius: radiusOf(f), count: towns.length, towns });
+  }
   if (path === "/api/pro/profile" && request.method === "POST") {
     const business = String(body.business || "").trim().slice(0, 120), { city, state } = cleanPlace(body.city, body.state), zip = String(body.zip || "").trim(), email = String(body.email || "").trim().toLowerCase().slice(0, 160);
     if (!business) return fail(400, "Enter your business name.");
@@ -1553,7 +1571,11 @@ async function api(request, env, path) {
       areas.push(a);
     }
     if (areas.length > AREA_MAX) return fail(400, `You can add up to ${AREA_MAX} other towns.`);
-    const saved = await update(env, HH.pros, pro.id, { "Business Name": business, City: city, State: state, ZIP: zip, Trade: body.trade, "Service Area": areas.map(placeOf).join("; "), "Extra Trades": extra.join(","), ...(email ? { Email: email } : {}) });
+    // Service radius in miles around the ZIP (Ryan 2026-11-20). Missing = keep what they had.
+    const radius = body.serviceRadius == null || body.serviceRadius === "" ? radiusOf(pro.fields) : Math.round(Number(body.serviceRadius));
+    if (!RADIUS_CHOICES.includes(radius)) return fail(400, `Pick a radius: ${RADIUS_CHOICES.join(", ")} miles.`);
+    if (!centerOf({ ZIP: zip, City: city, State: state })) return fail(400, "We could not find that ZIP code. Check it and try again.");
+    const saved = await update(env, HH.pros, pro.id, { "Business Name": business, City: city, State: state, ZIP: zip, Trade: body.trade, "Service Area": areas.map(placeOf).join("; "), "Service Radius": radius, "Extra Trades": extra.join(","), ...(email ? { Email: email } : {}) });
     return json({ pro: proView(saved) });
   }
   if (path === "/api/pro/notifications" && request.method === "POST") {
@@ -1566,7 +1588,7 @@ async function api(request, env, path) {
   if (path === "/api/pro/wallet") {
     const rows = await ensureLedger(env, pro), month = monthOf(), f = pro.fields;
     return json({
-      balance: f.Balance || 0, credit: creditOf(f), leadPrice: num(env.SHADOW_SHARED_PRICE, 75), card: f.Card || "", cardsReady: !!env.SQUARE_ACCESS_TOKEN, testCard: !!f.Test,
+      balance: f.Balance || 0, credit: creditOf(f), leadPrice: num(env.SHADOW_SHARED_PRICE, 75), card: f.Card || "", backupCard: f["Backup Card"] || "", cardsReady: !!env.SQUARE_ACCESS_TOKEN, testCard: !!f.Test,
       autoReload: !!f["Auto Reload"], reloadAmount: reloadUnit(f), monthlyLimit: f["Monthly Limit"] || 0, reloads: RELOADS,
       chargedThisMonth: cents(rows.filter((r) => r.fields.Month === month && selectName(r.fields.Type) === "Top-up").reduce((n, r) => n + (r.fields.Amount || 0), 0)),
       rows: rows.slice(0, 60).map((r) => ({ id: r.id, date: r.fields.At, entry: r.fields.Entry, type: selectName(r.fields.Type), amount: r.fields.Amount || 0, creditPart: r.fields["Credit Part"] || 0, balanceAfter: r.fields["Balance After"] || 0, via: r.fields.Via || "" })),
@@ -1575,7 +1597,19 @@ async function api(request, env, path) {
     });
   }
   if (path === "/api/pro/card" && request.method === "POST") {
-    if (body.action === "remove") return json({ pro: proView(await update(env, HH.pros, pro.id, { Card: "", "Card Token": "", "Auto Reload": false })) });
+    // Backup card (Ryan 2026-11-20): charged only when the main card is declined.
+    if (body.action === "remove-backup") return json({ pro: proView(await update(env, HH.pros, pro.id, { "Backup Card": "", "Backup Card Token": "" })) });
+    if (body.action === "make-main") {
+      if (!pro.fields["Backup Card Token"]) return fail(400, "There is no backup card.");
+      return json({ pro: proView(await update(env, HH.pros, pro.id, { Card: pro.fields["Backup Card"], "Card Token": pro.fields["Backup Card Token"], "Backup Card": pro.fields.Card || "", "Backup Card Token": pro.fields["Card Token"] || "" })) });
+    }
+    if (body.action === "save-backup") {
+      if (!pro.fields["Card Token"]) return fail(400, "Add your main card first.");
+      if (!pro.fields.Test) return fail(503, "Card payments are not switched on yet. We will email you when you can add a card.");
+      return json({ pro: proView(await update(env, HH.pros, pro.id, body.decline ? { "Backup Card": "Test card ending 0002", "Backup Card Token": "TEST-DECLINE" } : { "Backup Card": "Test card ending 5556", "Backup Card Token": "TEST" })), test: true });
+    }
+    // Removing the main card promotes the backup, so the account is never left without a card it had.
+    if (body.action === "remove") return json({ pro: proView(await update(env, HH.pros, pro.id, pro.fields["Backup Card Token"] ? { Card: pro.fields["Backup Card"], "Card Token": pro.fields["Backup Card Token"], "Backup Card": "", "Backup Card Token": "" } : { Card: "", "Card Token": "", "Auto Reload": false })) });
     // PLACEHOLDER: with Square connected, the card form posts a card token here and it is saved as a card on file.
     if (!pro.fields.Test) return fail(503, "Card payments are not switched on yet. We will email you when you can add a card.");
     // Test accounts: a working test card, or one that always declines so the declined-card flow can be tried.

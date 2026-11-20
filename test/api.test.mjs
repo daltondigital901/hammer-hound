@@ -206,7 +206,7 @@ assert.deepEqual(["Roof leak repair", "Driveway Replacement", "Asphalt driveway"
 seedForm(30, { service: "Roof Repair", city: "Memphis", state: "TN" }); seedForm(31, { service: "Fence Install", city: "Memphis", state: "TN" }); seedForm(32, { service: "Roof Repair", city: "Nashville" }); await ingest(env);
 const m1 = await signUp(70);   // trade roofing, city Memphis
 const mineOnly = await call("/api/pro/offers", null, m1);
-assert.equal(mineOnly.filters.market, "Memphis, TN"); assert.ok(mineOnly.filters.markets.every((m) => /, [A-Z]{2}$/.test(m.name)), "every market in the list is City, ST"); assert.equal(mineOnly.filters.trade, "roofing"); assert.ok(mineOnly.offers.length > 0 && mineOnly.offers.every((o) => o.city === "Memphis" && o.trade === "roofing"), "defaults to the pro's market and trade");
+assert.equal(mineOnly.filters.market, "mine", "defaults to the radius around the pro (2026-11-20)"); assert.equal(mineOnly.filters.mine.radius, 20); assert.ok(mineOnly.filters.markets.every((m) => /, [A-Z]{2}$/.test(m.name)), "every market in the list is City, ST"); assert.equal(mineOnly.filters.trade, "roofing"); assert.ok(mineOnly.offers.length > 0 && mineOnly.offers.every((o) => o.city === "Memphis" && o.trade === "roofing"), "defaults to the pro's market and trade");
 const nash = await call("/api/pro/offers?market=Nashville&trade=all", null, m1); assert.ok(nash.offers.length > 0 && nash.offers.every((o) => o.city === "Nashville"), "another market can be picked");
 const everything = await call("/api/pro/offers?market=all&trade=all", null, m1); assert.equal(everything.offers.length, everything.filters.total); assert.ok(everything.filters.markets.some((k) => k.name === "Nashville, TN") && everything.filters.trades.some((k) => k.slug === "fencing"));
 assert.ok(!JSON.stringify(everything).match(/owner\d|9015550\d{3}@|Sample Owner/), "filters never expose owner details");
@@ -218,7 +218,7 @@ assert.match((await call("/api/pro/profile", { business: "New Name", city: "Nash
 const prof = await call("/api/pro/profile", { business: "New Name", city: "nashville, tn", zip: "37201", trade: "fencing", extraTrades: ["roofing", "fencing", "bogus"] }, m1);
 assert.deepEqual([prof.pro.city, prof.pro.state, prof.pro.market], ["Nashville", "TN", "Nashville, TN"]);
 assert.equal(prof.pro.city, "Nashville"); assert.equal(prof.pro.trade, "fencing"); assert.deepEqual(prof.pro.extraTrades, ["roofing"]);
-assert.equal((await call("/api/pro/offers", null, m1)).filters.market, "Nashville, TN", "the default market follows the profile");
+{ const nf = (await call("/api/pro/offers", null, m1)); assert.equal(nf.filters.market, "mine", "the default market is the radius around the profile ZIP"); assert.ok(nf.offers.every((o) => o.city === "Nashville"), "the radius follows the profile"); }
 assert.equal((await call("/api/pro/notifications", { quietStart: "21:00" }, m1)).status, 400);
 const noti = await call("/api/pro/notifications", { textOffers: true, emailOffers: false, paused: true, dailyCap: "5", quietStart: "21:00", quietEnd: "07:00" }, m1);
 assert.equal(noti.pro.paused, true); assert.equal(noti.pro.dailyCap, 5); assert.equal(noti.pro.quietHours, "21:00-07:00");
@@ -681,7 +681,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   assert.equal(await fixStates(env), 1); assert.deepEqual([LD.at(-1).fields.State, LD.at(-1).fields.Lead], ["TN", "Patio Pour · Bartlett, TN"]); assert.equal(await fixStates(env), 0);
   // a pro who signed up before states (city only) still gets their market, shown with its state
   const c = await signUp(94), me = db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550194"); me.fields.State = "";
-  const v = await call("/api/pro/offers", null, c); assert.equal(v.filters.market, "Memphis, TN"); assert.ok(v.offers.length > 0 && v.offers.every((o) => o.city === "Memphis"));
+  const v = await call("/api/pro/offers", null, c); assert.equal(v.filters.market, "mine"); assert.ok(v.offers.length > 0 && v.offers.some((o) => o.city === "Memphis") && v.offers.every((o) => ["Memphis", "Germantown"].includes(o.city) && o.state !== "MO"), "radius around Memphis: Memphis and Germantown, TN");
   // the same city name in another state is a different market
   LD.push({ id: "recOTHERSTATE00001".slice(0, 17), fields: { "Owner Phone": "9015550100", Lead: "Roof Repair · Memphis, MO", Job: "Roof Repair", City: "Memphis", State: "MO", "Site State": "MO", Trade: "roofing", Status: "Offered", Style: "v2", Qualified: "Yes", "Received At": new Date().toISOString(), "Shared Price": 75, "Exclusive Price": 225, "Max Pros": 5, Alerted: "x", "Price Version": "p1" } });
   me.fields.State = "TN"; const tn = await call("/api/pro/offers", null, c); assert.ok(tn.offers.length > 0 && tn.offers.every((o) => o.state !== "MO"), "the Missouri lead is not in a Tennessee pro's market"); assert.ok(tn.filters.markets.some((m) => m.name === "Memphis, MO") && tn.filters.markets.some((m) => m.name === "Memphis, TN"));
@@ -705,7 +705,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   // Open leads now opens on the whole service area, and a lead in one of the other towns is in it
   for (const l of LD) l.fields.Alerted = "x"; seedForm(81, { service: "Roof Repair", city: "Bartlett" }); await ingest(env); const bart = LD.at(-1);
   const v = await call("/api/pro/offers?trade=all", null, c); assert.equal(v.filters.market, "mine"); assert.deepEqual(v.filters.mine.places, ["Memphis, TN", "Bartlett, TN", "Olive Branch, MS"]); assert.equal(v.filters.mine.count, v.offers.length);
-  assert.ok(v.offers.some((o) => o.id === bart.id) && v.offers.some((o) => o.place === "Memphis, TN") && v.offers.every((o) => ["Memphis", "Bartlett", "Olive Branch"].includes(o.city)));
+  assert.ok(v.offers.some((o) => o.id === bart.id) && v.offers.some((o) => o.place === "Memphis, TN") && v.offers.every((o) => ["Memphis", "Bartlett", "Olive Branch", "Germantown"].includes(o.city)), "the radius (Germantown) plus the named towns");
   assert.ok((await call("/api/pro/offers?market=" + encodeURIComponent("Memphis, TN"), null, c)).offers.every((o) => o.city === "Memphis"), "one town can still be picked");
   // and the lead alert reaches a pro whose home is the next town over
   Object.assign(env, { TWILIO_ACCOUNT_SID: "AC1", TWILIO_AUTH_TOKEN: "tok", TWILIO_FROM: "+19015550000" }); Object.assign(me.fields, { Mobile: "9016660001", "Text Offers": true });
@@ -770,4 +770,31 @@ pb.fields["Insurance Expires"] = soon(-8); assert.equal((await sendReminders(env
 assert.equal((await call("/api/admin/reminders", { dry: true }, null)).status, 401);
 assert.equal((await call("/api/admin/ingest", {}, null)).status, 401);
 const noSecrets = await worker.fetch(new Request("http://x/api/pro/me"), { ASSETS: env.ASSETS }); assert.equal(noSecrets.status, 503);
+
+// ---- 2026-11-20: radius markets and a backup card ----
+{
+  const geo = await import("../src/geo.js");
+  const memphis = { ZIP: "38103", City: "Memphis", State: "TN" };
+  assert.equal(geo.inRadius(memphis, { City: "Germantown", State: "TN" }), true, "Germantown is inside 20 miles of downtown Memphis");
+  assert.equal(geo.inRadius(memphis, { City: "Jackson", State: "TN" }), false, "Jackson is ~80 miles out");
+  assert.equal(geo.inRadius({ ...memphis, "Service Radius": 100 }, { City: "Jackson", State: "TN" }), true, "a bigger radius reaches it");
+  assert.equal(geo.inRadius(memphis, { City: "Nowhereville", State: "TN" }), null, "unknown places fall back to name matching");
+  assert.equal(geo.cityPoint("St. Louis", "MO") !== null, true, "St. / Saint spellings resolve");
+  const towns = geo.citiesWithin(memphis); assert.ok(towns.length > 5 && towns[0].miles <= 1 && towns.some((t) => t.name === "Germantown, TN"));
+  const P = db.tbl9bEGuy8DPkkee7, find = (mob) => P.find((p) => p.fields.Mobile === mob);
+  const rc = await signUp(59), rp = find("9015550159");
+  const cov = await call("/api/pro/coverage?radius=30&zip=38103", null, rc); assert.equal(cov.found, true); assert.equal(cov.radius, 30); assert.ok(cov.count > towns.length);
+  // backup card: the main card declines, the backup pays, the receipt says so
+  rp.fields.Balance = 0;
+  assert.equal((await call("/api/pro/card", { action: "save-backup" }, rc)).status, 400, "a backup needs a main card first");
+  await call("/api/pro/card", { action: "save", decline: true }, rc);
+  const b = await call("/api/pro/card", { action: "save-backup" }, rc); assert.equal(b.pro.backupCard, "Test card ending 5556");
+  const m0 = sent.length, added = await call("/api/pro/add-funds", { amount: 150 }, rc);
+  assert.equal(added.status, 200); assert.equal(rp.fields.Balance, 150, "the backup card covered it");
+  assert.ok(sent.slice(m0).some((m) => /Test card ending 5556/.test(JSON.stringify(m)) && /was declined, so we used your backup card/.test(JSON.stringify(m))), "receipt names the backup card");
+  assert.match(db.tblZ2EIWCgOb36JR2.at(-1).fields.Entry, /Test card ending 5556/);
+  // make the backup the main card, then removing the main promotes the backup
+  const sw = await call("/api/pro/card", { action: "make-main" }, rc); assert.equal(sw.pro.card, "Test card ending 5556"); assert.equal(sw.pro.backupCard, "Test card ending 0002");
+  const rm = await call("/api/pro/card", { action: "remove" }, rc); assert.equal(rm.pro.card, "Test card ending 0002"); assert.equal(rm.pro.backupCard, "");
+}
 console.log("All API checks passed.");

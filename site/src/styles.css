@@ -348,6 +348,11 @@ legend + .option-grid { margin-top: 0; }
 .pp-stat span { font-size: 13px; color: var(--steel); }
 .pp-two { display: grid; gap: 16px; margin-bottom: 16px; align-items: start; }
 .pp-two .card.form, .card.form.pp-wide { max-width: none; }
+.pp-two--even { align-items: stretch; }
+.pp-two--even > .card { height: 100%; margin-bottom: 0; }
+.pp-cardline > span { display: inline-flex; gap: 8px; }
+.pp-extra { margin: 8px 0 16px; }
+.pp-extra summary { cursor: pointer; font-weight: 600; }
 .pp-main > .card.form { margin-bottom: 16px; }
 .pp-stack { display: grid; gap: 12px; }
 .pp-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; align-items: end; padding: 14px 16px; margin-bottom: 16px; border-radius: var(--r); background: var(--white); box-shadow: var(--shadow); }

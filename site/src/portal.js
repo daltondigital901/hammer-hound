@@ -342,7 +342,7 @@
       if (f.market !== "all" && !f.markets.some(function (m) { return m.name.toLowerCase() === f.market.toLowerCase(); })) mOpts.push([f.market, f.market + " (0)"]);
       var tOpts = [["all", "All trades (" + f.total + ")"]].concat(f.trades.map(function (t) { return [t.slug, t.name + " (" + t.count + ")"]; }));
       if (f.trade !== "all" && !f.trades.some(function (t) { return t.slug === f.trade; })) tOpts.push([f.trade, (pro.tradeName && f.trade === pro.trade ? pro.tradeName : f.trade) + " (0)"]);
-      if (f.mine) mOpts.splice(1, 0, ["mine", "My service area (" + f.mine.count + ")"]);
+      if (f.mine) mOpts.splice(1, 0, ["mine", "Within " + (f.mine.radius || 20) + " miles of me (" + f.mine.count + ")"]);
       var mSel = select("f-market", mOpts, (mOpts.filter(function (x) { return x[0].toLowerCase() === f.market.toLowerCase(); })[0] || ["all"])[0]), tSel = select("f-trade", tOpts, f.trade);
       mSel.addEventListener("change", function () { pick.market = mSel.value; offersView(); }); tSel.addEventListener("change", function () { pick.trade = tSel.value; offersView(); });
       var mine = (f.home.market || "all").toLowerCase() === f.market.toLowerCase() && (f.home.trade || "all") === f.trade;
@@ -459,8 +459,15 @@
       var amount = select("w-amount", amounts, String(r.reloadAmount)), short = r.balance < r.leadPrice;
       var add = h("button", { class: "btn btn--yellow btn--block", type: "button", text: "Add funds", on: { click: function () { saver(status, add, "/api/pro/add-funds", { amount: Number(amount.value) }, function () { walletView(); }); } } });
       // Card on file. Real cards arrive with Square; a test account can save a test card to try the whole flow.
+      // Backup card (Ryan 2026-11-20): charged only if the main card is declined.
+      var cardAct = function (action, extra) { return function () { call("/api/pro/card", Object.assign({ action: action }, extra || {})).then(function (res) { if (res.error) { cardStatus.innerHTML = ""; cardStatus.appendChild(note(res.error, "bad")); return; } walletView(); }); }; };
+      var backupBox = r.backupCard
+        ? [h("p", { class: "label", text: "Backup card" }), h("p", { class: "pp-cardline" }, [h("span", { text: r.backupCard }), h("span", {}, [h("button", { class: "btn btn--text btn--sm", type: "button", text: "Make main", on: { click: cardAct("make-main") } }), h("button", { class: "btn btn--text btn--sm", type: "button", text: "Remove", on: { click: cardAct("remove-backup") } })])]),
+           h("p", { class: "hint", text: "Charged only if your main card is declined." })]
+        : [h("button", { class: "btn btn--outline btn--block", type: "button", text: r.testCard && !r.cardsReady ? "Add a test backup card" : "Add a backup card", on: { click: cardAct("save-backup") } }),
+           h("p", { class: "hint", text: "If your main card is declined, we charge the backup so your claim still goes through." })];
       var cardBox = r.card
-        ? [h("p", { class: "pp-cardline" }, [h("strong", { text: r.card }), h("button", { class: "btn btn--text btn--sm", type: "button", text: "Remove", on: { click: function () { call("/api/pro/card", { action: "remove" }).then(function () { walletView(); }); } } })]), field("w-amount", "Amount to add", amount), add, status]
+        ? [h("p", { class: "pp-cardline" }, [h("strong", { text: r.card }), h("button", { class: "btn btn--text btn--sm", type: "button", text: "Remove", on: { click: cardAct("remove") } })])].concat(backupBox, [cardStatus, field("w-amount", "Amount to add", amount), add, status])
         : [h("p", { class: "sub", text: "Save a card once and every lead is one tap or one text away. You are not charged until your wallet cannot cover a lead you claim." }),
            h("button", { class: "btn btn--yellow btn--block", type: "button", text: r.cardsReady ? "Add a card" : r.testCard ? "Save a test card" : "Add a card", on: { click: saveCard(false) } }),
            r.testCard ? h("button", { class: "btn btn--text btn--block", type: "button", text: "Save a test card that declines", on: { click: saveCard(true) } }) : null,
@@ -481,7 +488,7 @@
       var m = r.membership;
       shell([head("Wallet", "Your balance, your card, your invoices."),
         r.pending ? h("div", { class: "unlock unlock--alert" }, [h("img", { src: "/assets/img/badge.png", alt: "", width: "50", height: "60" }), h("div", {}, [h("strong", { text: "Your card was declined." }), h("span", { text: "Update your card below and we will add " + money0(r.pending.amount) + " to your wallet" + (r.pending.lead ? " and claim the lead you were after, if it is still open." : ".") })]), h("button", { class: "btn btn--black", type: "button", text: r.card ? "Replace my card" : "Add a card", on: { click: function () { call("/api/pro/card", { action: "remove" }).then(function () { walletView(); }); } } })]) : null,
-        h("div", { class: "pp-two" }, [
+        h("div", { class: "pp-two pp-two--even" }, [
           card([h("h2", { text: "Balance" }), h("p", { class: "offer-price", text: money(r.balance) }),
             h("p", { class: "meta", text: r.credit > 0 ? money(r.credit) + " of this is free welcome credit. It is spent before money you add." : "Leads are paid from this balance." }),
             short ? h("p", { class: "form-status", text: "Your wallet is low. " + (r.card ? "Your next claim reloads " + money0(r.reloadAmount) + " on " + r.card + "." : "Add a card to claim your next one.") }) : null,
@@ -506,7 +513,7 @@
     var boxes = TRADE_LIST.map(function (t) { var b = h("input", { type: "checkbox", value: t[0] }); b.checked = pro.extraTrades.indexOf(t[0]) >= 0; return { box: b, el: h("label", { class: "pp-check" }, [b, h("span", { text: t[1] })]) }; });
     // Other towns the pro works in. Leads and lead texts cover the home market and all of these.
     var areas = (pro.serviceArea || []).slice(), areaBox = h("div", { class: "area-chips" }), areaIn = input("p-area", "text", "", { placeholder: "Bartlett, TN", autocomplete: "off" }), areaErr = h("div");
-    function drawAreas() { areaBox.innerHTML = ""; areas.forEach(function (a, i) { areaBox.appendChild(h("span", { class: "chip area-chip" }, [a + " ", h("button", { type: "button", "aria-label": "Remove " + a, text: "×", on: { click: function () { areas.splice(i, 1); drawAreas(); } } })])); }); if (!areas.length) areaBox.appendChild(h("span", { class: "meta", text: "None yet. You only see and get texts for your home market." })); }
+    function drawAreas() { areaBox.innerHTML = ""; areas.forEach(function (a, i) { areaBox.appendChild(h("span", { class: "chip area-chip" }, [a + " ", h("button", { type: "button", "aria-label": "Remove " + a, text: "×", on: { click: function () { areas.splice(i, 1); drawAreas(); } } })])); }); if (!areas.length) areaBox.appendChild(h("span", { class: "meta", text: "None added." })); }
     function addArea() {
       var v = areaIn.value.trim().replace(/\s+/g, " "); areaErr.innerHTML = "";
       if (!v) return;
@@ -517,15 +524,31 @@
     }
     areaIn.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); addArea(); } });
     drawAreas();
+    // Service radius (Ryan 2026-11-20): miles around the ZIP. The towns inside it are listed as the pro picks.
+    var radius = select("p-radius", [10, 15, 20, 30, 40, 50, 75].map(function (m) { return [String(m), m + " miles"]; }), String(pro.serviceRadius || 20)), townsBox = h("div", { class: "area-chips" }), townsNote = h("p", { class: "hint" }), showAll = false;
+    function drawTowns() {
+      var qs = "?radius=" + radius.value + "&zip=" + encodeURIComponent(zip.value) + "&city=" + encodeURIComponent(city.value) + "&state=" + encodeURIComponent(state.value);
+      townsNote.textContent = "Finding the towns in your radius."; townsBox.innerHTML = "";
+      call("/api/pro/coverage" + qs).then(function (r) {
+        townsBox.innerHTML = "";
+        if (r.error || !r.found) { townsNote.textContent = "Enter your business ZIP code to see the towns you cover."; return; }
+        townsNote.textContent = r.count + " town" + (r.count === 1 ? "" : "s") + " within " + r.radius + " miles. You see leads and get lead texts for all of them.";
+        (showAll ? r.towns : r.towns.slice(0, 18)).forEach(function (t) { townsBox.appendChild(h("span", { class: "chip", text: t.name + (t.miles ? " · " + t.miles + " mi" : "") })); });
+        if (!showAll && r.towns.length > 18) townsBox.appendChild(h("button", { class: "btn btn--text btn--sm", type: "button", text: "Show all " + r.count, on: { click: function () { showAll = true; drawTowns(); } } }));
+      });
+    }
+    radius.addEventListener("change", drawTowns); zip.addEventListener("change", drawTowns);
+    drawTowns();
     var save = h("button", { class: "btn btn--yellow btn--block", type: "button", text: "Save profile", on: { click: function () {
       addArea();
-      saver(status, save, "/api/pro/profile", { business: biz.value, city: city.value, state: state.value, zip: zip.value, email: email.value, trade: trade.value, serviceArea: areas, extraTrades: boxes.filter(function (b) { return b.box.checked; }).map(function (b) { return b.box.value; }) }, function () { pick = { market: null, trade: null }; });
+      saver(status, save, "/api/pro/profile", { business: biz.value, city: city.value, state: state.value, zip: zip.value, email: email.value, trade: trade.value, serviceArea: areas, serviceRadius: Number(radius.value), extraTrades: boxes.filter(function (b) { return b.box.checked; }).map(function (b) { return b.box.value; }) }, function () { pick = { market: null, trade: null }; });
     } } });
     shell([head("Business profile", "What owners see, and which leads you see first."),
       card([h("h2", { text: "Your business" }), field("p-biz", "Business name", biz, "Shown to property owners whose leads you take."), field("p-email", "Email", email, "Where we send account notices."),
         h("h2", { text: "Your market" }), field("p-city", "City", city), field("p-state", "State", state, "Leads open on this market by default. You can look at any market from the Leads page."), field("p-zip", "Business ZIP code", zip),
-        h("h2", { text: "Other towns you work in" }), h("p", { class: "sub", text: "Add the towns around you that you will drive to. You see leads and get lead texts for all of them." }), areaBox,
-        h("div", { class: "area-add" }, [field("p-area", "Town and state", areaIn), h("button", { class: "btn btn--outline", type: "button", text: "Add", on: { click: addArea } })]), areaErr,
+        h("h2", { text: "How far you travel" }), field("p-radius", "Service radius", radius, "Measured from your business ZIP code."), townsNote, townsBox,
+        h("details", { class: "pp-extra" }, [h("summary", { text: "Add a town outside your radius" }), h("p", { class: "sub", text: "Only for a town you also serve that is farther out. Most pros never need this." }), areaBox,
+          h("div", { class: "area-add" }, [field("p-area", "Town and state", areaIn), h("button", { class: "btn btn--outline", type: "button", text: "Add", on: { click: addArea } })]), areaErr]),
         h("h2", { text: "Your trades" }), field("p-trade", "Main trade", trade, "Leads open on this trade by default."), h("p", { class: "label", text: "Other trades you take" }), h("div", { class: "pp-checks" }, boxes.map(function (b) { return b.el; })),
         status, save], "verify"),
     ]);
