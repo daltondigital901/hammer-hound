@@ -654,3 +654,25 @@ legend + .option-grid { margin-top: 0; }
 .tm-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .tm-log li { display: grid; gap: 2px; padding-bottom: 8px; border-bottom: 1px solid var(--concrete-2); }
 .tm-log small { color: var(--steel); font-size: 13px; }
+/* first-time tour */
+.tour { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; padding: 0 12px calc(84px + env(safe-area-inset-bottom)); pointer-events: none; display: flex; justify-content: center; }
+.tour-card { pointer-events: auto; width: 100%; max-width: 460px; background: var(--asphalt); color: #fff; border: 3px solid var(--yellow); border-radius: 16px; padding: 16px; box-shadow: 0 12px 40px rgba(0,0,0,.35); display: grid; gap: 12px; animation: tour-in .25s ease-out; }
+.tour-card--hound { grid-template-columns: 56px 1fr; align-items: start; }
+.tour-card--hound .tour-foot { grid-column: 1 / -1; }
+.tour-step { margin: 0 0 2px; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--yellow); }
+.tour-text h2 { margin: 0 0 6px; font-size: 20px; color: #fff; }
+.tour-text p { margin: 0; line-height: 1.45; }
+.tour-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.tour-dots { display: flex; gap: 6px; }
+.tour-dots i { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,.3); }
+.tour-dots i.is-on { background: var(--yellow); }
+.tour-btns { display: flex; gap: 8px; align-items: center; margin-left: auto; }
+.tour .btn--text { color: #fff; }
+.tour .btn--outline { color: #fff; border-color: rgba(255,255,255,.6); background: transparent; }
+.tour-ring { outline: 3px solid var(--yellow) !important; outline-offset: 3px; border-radius: 10px; animation: tour-pulse 1.4s ease-in-out infinite; position: relative; z-index: 2; }
+.has-tour .pp-main { padding-bottom: 300px; }
+.tour-again { margin-top: 16px; }
+@keyframes tour-in { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes tour-pulse { 0%, 100% { outline-color: var(--yellow); } 50% { outline-color: var(--orange-text); } }
+@media (min-width: 900px) { .tour { padding-bottom: 28px; justify-content: flex-end; padding-right: 28px; } }
+@media (prefers-reduced-motion: reduce) { .tour-card, .tour-ring { animation: none; } }

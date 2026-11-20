@@ -199,7 +199,7 @@ const sameCity = (a, b) => String(a || "").trim().toLowerCase() === String(b || 
 // Verified means documents passed and the insurance on file has not expired.
 const isVerified = (p) => p.fields.Verification === "Verified" && (!p.fields["Insurance Expires"] || p.fields["Insurance Expires"] >= today());
 const proView = (p) => ({
-  member: p.member ? { name: p.member.fields.Member, canPay: !!p.member.fields["Can Pay"] } : null,
+  member: p.member ? { name: p.member.fields.Member, canPay: !!p.member.fields["Can Pay"] } : null, tourSeen: !!(p.member || p).fields["Tour Seen At"],
   business: p.fields["Business Name"], mobile: p.fields.Mobile, trade: p.fields.Trade || "", zip: p.fields.ZIP || "", test: !!p.fields.Test,
   verified: isVerified(p), verification: p.fields.Verification === "Verified" && !isVerified(p) ? "Insurance expired" : p.fields.Verification || "Not started",
   legalName: p.fields["Legal Business Name"] || "", einLast4: (p.fields.EIN || "").slice(-4), insuranceExpires: p.fields["Insurance Expires"] || "", verifiedAt: p.fields["Verified At"] || "",
@@ -1271,7 +1271,14 @@ async function api(request, env, path) {
   if (pro.member && (path.startsWith("/api/pro/team") || ["/api/pro/documents", "/api/pro/review", "/api/pro/profile", "/api/pro/notifications", "/api/pro/wallet", "/api/pro/card", "/api/pro/add-funds", "/api/pro/reload-settings", "/api/pro/invoice", "/api/pro/close"].includes(path))) return fail(403, "Only the account owner can do that.");
   if (pro.member && path === "/api/pro/buy" && !pro.member.fields["Can Pay"]) return fail(403, `You cannot claim leads on this account. Ask ${pro.fields["Business Name"]} to claim it or to give you pay authority.`);
   if (path.startsWith("/api/pro/team")) return teamApi(request, env, pro, path, body);
-  if (path === "/api/pro/me") return json({ pro: proView(pro) });
+  // The numbers the first-time tour quotes come from the live settings, so the tour cannot drift from the prices.
+  if (path === "/api/pro/me") return json({ pro: proView(pro), tour: { shared: num(env.SHADOW_SHARED_PRICE, 75), exclusive: num(env.SHADOW_EXCLUSIVE_PRICE, 225), maxPros: num(env.SHADOW_MAX_PROS, 5), welcome: num(env.WELCOME_CREDIT, 240), hotHours: HOT_HOURS, leadDays: LEAD_DAYS, textsLive: twilioReady(env) } });
+  // The tour was finished or skipped. Stored on the person, so it shows once on any device.
+  if (path === "/api/pro/tour" && request.method === "POST") {
+    const self = pro.member || pro;
+    if (!self.fields["Tour Seen At"]) await update(env, pro.member ? HH.team : HH.pros, self.id, { "Tour Seen At": new Date().toISOString() });
+    return json({ ok: true });
+  }
   if (path === "/api/pro/documents" && request.method === "POST") return submitDocuments(request, env, pro);
   if (path === "/api/pro/review" && request.method === "POST") {
     if (pro.fields.Verification !== "Declined") return fail(409, "There is no failed check to review on this account.");

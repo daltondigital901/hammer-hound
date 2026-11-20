@@ -220,3 +220,12 @@ Up to 5 people per account (`TEAM_MAX`), in the `Team` table (`tblAxauFF33UVS2gV
 ## Team acknowledgment
 
 Before the first team member, the owner accepts a notice that people they add can, if the owner chooses, be given authority to pay for leads. `POST /api/pro/team/ack { agree: "yes" }` stores `Team Ack` (fld8qH14mVrf5rcKS: agreement version | time | IP) and adds a "Team turned on" row to the Authority Log. `team/add` is refused without it. Verification throughout is the texted code: sign-in, and the second confirmation when pay authority is given. The Pros and Team fields `2FA Secret` and `2FA On At` are unused and can be deleted.
+
+## First-time tour
+
+A card at the bottom of the portal walks a new person through it once: Open leads, claiming, the wallet, lead texts, My leads, then "Verify my business" (or "See open leads" if they are verified). It changes tab as it goes and rings the part it is describing. Skip is on every card; "Take the tour" under More replays it.
+
+- **Shown once per person.** `POST /api/pro/tour` sets `Tour Seen At` on the pro (fldzfYEA0hs2ajUbK) or the team member (fldP3cdvEuxjKJypB). Clear the field to show it again.
+- **Numbers come from settings.** `GET /api/pro/me` returns `tour` (prices, pros per lead, welcome credit, hot hours, whether texting is live), so the copy follows `wrangler.jsonc`.
+- **Variants.** Team members get four cards (no wallet or texts card). The texts card says texting is not live until Twilio is connected. An owner with a card on file is told about the Older leads tab.
+- The copy lives in `tourSteps()` in `site/src/portal.js`.

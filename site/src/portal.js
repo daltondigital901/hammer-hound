@@ -61,7 +61,7 @@
   function go(t) { tab = t; if (location.hash !== "#" + t) { try { history.pushState(null, "", "#" + t); } catch (e) {} } window.scrollTo(0, 0); render(); }
   function navLink(n, cls) {
     var on = tab === n[0] || (n[0] === "more" && PRIMARY.indexOf(tab) < 0);
-    var b = h("button", { class: cls + (on ? " is-on" : ""), type: "button", on: { click: function () { go(n[0]); } } }, [icon(n[2]), h("span", { text: n[1] })]);
+    var b = h("button", { class: cls + (on ? " is-on" : ""), type: "button", "data-nav": n[0], on: { click: function () { go(n[0]); } } }, [icon(n[2]), h("span", { text: n[1] })]);
     if (on) b.setAttribute("aria-current", "page");
     if (n[0] === "verify" && !pro.verified) b.appendChild(h("i", { class: "pp-dot", title: "Not verified yet" }));
     return b;
@@ -520,7 +520,69 @@
     ]);
   }
   function moreView() {
-    shell([head("More", pro.business), h("div", { class: "pp-more" }, NAV.filter(function (n) { return PRIMARY.indexOf(n[0]) < 0; }).map(function (n) { return navLink(n, "pp-link"); }))]);
+    shell([head("More", pro.business), h("div", { class: "pp-more" }, NAV.filter(function (n) { return PRIMARY.indexOf(n[0]) < 0; }).map(function (n) { return navLink(n, "pp-link"); })),
+      h("button", { class: "btn btn--outline btn--block tour-again", type: "button", text: "Take the tour", on: { click: function () { startTour(); } } })]);
+  }
+
+  // ---------- first-time tour ----------
+  // A card at the bottom of the screen walks a new person through the real portal, moving between tabs and
+  // ringing the part it is talking about. It never blocks the page, and can be skipped at any card.
+  var tourInfo = { shared: 75, exclusive: 225, maxPros: 5, welcome: 240, hotHours: 72, leadDays: 7, textsLive: false }, tourEl = null, tourTimer = null;
+  function tourSteps() {
+    var t = tourInfo, m = pro.member, steps = [];
+    steps.push({ hound: true, title: "Welcome, " + (m ? m.name : pro.business) + ".", body: "Here is how Hammer Hound works, in about a minute." });
+    steps.push({ tab: "offers", sel: "[data-nav=offers]", title: "Real jobs in " + (pro.city || "your market") + ".", body: "Every lead is written the same way: the job, the area, the size and the timing. Hot leads came in during the last " + t.hotHours + " hours." + (!m && pro.card ? " Older leads, 3 to " + t.leadDays + " days, are marked down on their own tab." : "") });
+    steps.push({ tab: "offers", sel: ".pp-grid .offer", title: "Claim the ones you want.", body: m && !m.canPay
+      ? "When you want a lead, reply YES to the text or tell " + pro.business + ". They claim it for the account."
+      : "Shared goes to up to " + t.maxPros + " pros for " + money0(t.shared) + ". \"Only me\" is yours alone for " + money0(t.exclusive) + ". The owner's name, number and address are yours the moment you claim." });
+    if (!m) steps.push({ tab: "offers", sel: "[data-balance]", title: "You start with " + money0(t.welcome) + ".", body: "That is welcome credit, enough for " + Math.floor(t.welcome / t.shared) + " hot leads once you are verified. After that, leads are paid from your wallet. Add a card and it reloads when you run short." });
+    if (!m) steps.push({ tab: "notifications", sel: ".pp-main .card", title: "Leads come to your phone.", body: t.textsLive ? "We text new leads in your market. Reply YES to claim one and the full details come straight back by text." : "Turn on lead texts here. When texting goes live, new leads in your market come to your phone and a YES claims one." });
+    steps.push({ tab: "leads", sel: "[data-nav=leads]", title: "Work them here.", body: "Every lead " + (m ? "on the account" : "you claim") + " lands in My leads. Mark each one New, Contacted, Quoted or Won, and keep notes. Got a bad one? Report it and we review it for a credit back." });
+    steps.push(m || pro.verified
+      ? { hound: true, title: "You're set.", body: "Go see what is open right now.", cta: ["See open leads", "offers"] }
+      : { hound: true, title: "One step left.", body: "Verify your business to start claiming. Upload proof of business and insurance. It takes about 2 minutes.", cta: ["Verify my business", "verify"] });
+    return steps;
+  }
+  function tourRing(sel) {
+    clearInterval(tourTimer);
+    [].forEach.call(document.querySelectorAll(".tour-ring"), function (e) { e.classList.remove("tour-ring"); });
+    if (!sel) return;
+    var tries = 0;
+    // The screen is redrawn when the tab changes, so wait for the part to exist, then keep the ring on it.
+    tourTimer = setInterval(function () {
+      var el = [].filter.call(document.querySelectorAll(sel), function (e) { return e.offsetParent !== null || e.getClientRects().length; })[0];
+      if (el && !el.classList.contains("tour-ring")) { el.classList.add("tour-ring"); if (el.closest(".pp-main") && el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "smooth" }); else if (!el.closest(".pp-bar")) window.scrollTo({ top: 0, behavior: "smooth" }); }
+      if (++tries > 40 || !tourEl) clearInterval(tourTimer);
+    }, 150);
+  }
+  function endTour(dest) {
+    if (tourEl) { tourEl.remove(); tourEl = null; }
+    tourRing(null); document.body.classList.remove("has-tour");
+    if (!pro.tourSeen) { pro.tourSeen = true; call("/api/pro/tour", {}); }
+    if (dest) go(dest);
+  }
+  function startTour() {
+    var steps = tourSteps(), i = 0;
+    if (tourEl) tourEl.remove();
+    tourEl = h("div", { class: "tour", role: "dialog", "aria-label": "Tour of the portal", "aria-live": "polite" });
+    document.body.appendChild(tourEl); document.body.classList.add("has-tour");
+    function show() {
+      var s = steps[i], last = i === steps.length - 1;
+      if (s.tab && s.tab !== tab && VIEWS[s.tab]) go(s.tab);
+      tourRing(s.sel);
+      tourEl.innerHTML = "";
+      var next = h("button", { class: "btn btn--yellow", type: "button", text: last ? s.cta[0] : i === 0 ? "Show me" : "Next", on: { click: function () { if (last) endTour(s.cta[1]); else { i++; show(); } } } });
+      tourEl.appendChild(h("div", { class: "tour-card" + (s.hound ? " tour-card--hound" : "") }, [
+        s.hound ? h("img", { src: "/assets/img/badge.png", alt: "", width: "56", height: "68" }) : null,
+        h("div", { class: "tour-text" }, [h("p", { class: "tour-step", text: (i + 1) + " of " + steps.length }), h("h2", { text: s.title }), h("p", { text: s.body })]),
+        h("div", { class: "tour-foot" }, [
+          h("div", { class: "tour-dots", "aria-hidden": "true" }, steps.map(function (_, n) { return h("i", { class: n === i ? "is-on" : "" }); })),
+          h("div", { class: "tour-btns" }, [
+            last ? null : h("button", { class: "btn btn--text btn--sm", type: "button", text: "Skip", on: { click: function () { endTour(); } } }),
+            i > 0 ? h("button", { class: "btn btn--outline btn--sm", type: "button", text: "Back", on: { click: function () { i--; show(); } } }) : null, next])])]));
+      next.focus({ preventScroll: true });
+    }
+    show();
   }
 
   // ---------- team ----------
@@ -600,7 +662,9 @@
   call("/api/pro/me").then(function (r) {
     if (r.status === 401) { try { localStorage.removeItem("hh_pro"); } catch (e) {} location.href = "/pros/sign-in/"; return; }
     if (r.error) { root.innerHTML = ""; root.appendChild(note(r.error, "bad")); return; }
-    pro = r.pro; store.set("hh_pro", "1");
+    pro = r.pro; store.set("hh_pro", "1"); if (r.tour) tourInfo = r.tour;
+    // First time in: the tour. It starts once the first screen is drawn.
+    if (!pro.tourSeen) setTimeout(startTour, 600);
     if (pro.member) { asMember(); Object.keys(VIEWS).forEach(function (k) { if (MEMBER_TABS.indexOf(k) < 0) delete VIEWS[k]; }); tab = VIEWS[location.hash.slice(1)] ? location.hash.slice(1) : "offers"; render(); return; }
     var t = location.hash.slice(1);
     // A new pro lands on verification first, and can skip it to look at leads.
