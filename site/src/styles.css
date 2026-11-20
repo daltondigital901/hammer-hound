@@ -676,3 +676,4 @@ legend + .option-grid { margin-top: 0; }
 @keyframes tour-pulse { 0%, 100% { outline-color: var(--yellow); } 50% { outline-color: var(--orange-text); } }
 @media (min-width: 900px) { .tour { padding-bottom: 28px; justify-content: flex-end; padding-right: 28px; } }
 @media (prefers-reduced-motion: reduce) { .tour-card, .tour-ring { animation: none; } }
+.offer-why { margin: 2px 0 0; font-size: 13px; color: var(--steel); }

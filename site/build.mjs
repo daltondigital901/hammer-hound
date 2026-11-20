@@ -201,7 +201,7 @@ const proPromise = houndPromise({
   lead: "Real Job Guarantee: pay for a lead that is not a real job and you get your money back.",
   points: ["Wrong or disconnected number", "Duplicate of a lead you already bought", "Not a real request for service", "Outside your trade or service area"],
   fine: `Credit or refund, your choice. Report it from your account. It does not cover an owner who does not answer or hires someone else. The full rule is the <a href="/terms/">Lead Credit Policy</a>.`,
-  cta: ["Get my 3 free leads", "/pros/join/"],
+  cta: ["Get $240 in free leads", "/pros/join/"],
 });
 
 page({
@@ -318,7 +318,7 @@ ${hazard}
 <section class="section section--dark">
   <div class="wrap">
     <p class="eyebrow eyebrow--yellow">For pros</p>
-    <div class="section-head"><h2>Your first 3 leads are free. After that you buy only the leads you want.</h2><a class="btn btn--yellow" href="/pros/">Join as a pro</a></div>
+    <div class="section-head"><h2>Your first $240 in leads is free. After that you buy only the leads you want.</h2><a class="btn btn--yellow" href="/pros/">Join as a pro</a></div>
     ${stepList([
       ["Get offers by text", "See the trade, the area and the job size before you spend anything."],
       ["Buy only what you want", "Reply YES to buy a lead from your balance. Take it exclusive if no one else has bought."],
@@ -647,7 +647,7 @@ page({
   <div class="wrap">
     <p class="eyebrow eyebrow--yellow">For pros</p>
     <h1>Leads by text. Buy only the ones you want.</h1>
-    <p class="lead">Every job is confirmed by phone before you see it. Your first 3 leads are free.</p>
+    <p class="lead">Every job is confirmed by phone before you see it. Your first $240 in leads is free.</p>
     <p class="btn-row"><a class="btn btn--yellow" href="/pros/join/">Join as a pro</a><a class="btn btn--ghost" href="/pros/sign-in/" data-pro-link>Pro sign in</a></p>
     ${checks(proBullets, "checks--yellow")}
   </div>
@@ -678,7 +678,7 @@ ${proPromise}
   </div>
 </section>
 <section class="pro-band pro-band--yellow">
-  <div class="wrap pro-band-row"><div><h2>Your first 3 leads are free.</h2><p>After that you buy only the leads you want.</p></div><a class="btn btn--black" href="/pros/join/">Join as a pro</a></div>
+  <div class="wrap pro-band-row"><div><h2>Your first $240 in leads is free.</h2><p>After that you buy only the leads you want.</p></div><a class="btn btn--black" href="/pros/join/">Join as a pro</a></div>
 </section>`,
 });
 
@@ -693,7 +693,7 @@ const feeOffer = (dark) => `<div class="fee-offer${dark ? " fee-offer--dark" : "
 const landingHeader = `<header class="site-header">
   <div class="wrap header-row">
     ${logo(false, true)}
-    <div class="header-actions"><a class="link-quiet" href="/pros/sign-in/" data-pro-link>Pro sign in</a><a class="btn btn--yellow btn--sm" href="/pros/join/">Get 3 free leads</a></div>
+    <div class="header-actions"><a class="link-quiet" href="/pros/sign-in/" data-pro-link>Pro sign in</a><a class="btn btn--yellow btn--sm" href="/pros/join/">Get $240 in free leads</a></div>
   </div>
 </header>`;
 const fixes = [
@@ -709,7 +709,7 @@ const proFaqs = [
   ["How many leads will I get?", "As many as you want to buy. There is no cap and no minimum. How many are offered depends on how many property owners in your service area ask for your trade."],
   ["Are the leads exclusive?", "They are shared with up to 5 pros, because the owner chooses how many can call. If no one has bought a lead yet, you can buy it exclusive at the exclusive price shown."],
   ["What counts as a bad lead?", "A wrong or disconnected number, a duplicate of a lead you already bought from us, a request that was not real, or a job outside your trades or service area. Report it within the window in the Terms and choose a credit or a refund. An owner who does not pick up, hires someone else or changes their mind is not a bad lead."],
-  ["What do I need to get my 3 free leads?", "Create an account, then verify your business: your EIN, one proof of business such as a contractor or business license, and proof of insurance. Your Verified Pro badge and free leads unlock when both documents pass. You can look at leads in your market before you verify."],
+  ["What do I need to get my $240 in free leads?", "Create an account, then verify your business: your EIN, one proof of business such as a contractor or business license, and proof of insurance. Your Verified Pro badge and free leads unlock when both documents pass. You can look at leads in your market before you verify."],
   ["Is there a membership fee?", "Membership is free for your first year. After that it renews automatically at $300 a year, charged to your card on file, until you close your account. We email you about 35, 18 and 3 days before each charge, and you can cancel in your account before then without paying it."],
   ["What am I agreeing to?", "The Pro Agreement and Terms of Use, which cover leads, your wallet, the membership fee and refunds. There is no minimum purchase, and you can close your account at any time."],
 ];
@@ -731,7 +731,7 @@ page({
       <form class="lp-form" action="/pros/join/" method="get" data-hero-cta>
         <label><span class="sr-only">Your trade</span><select class="input" name="trade" required><option value="">Your trade</option>${trades.map((t) => `<option value="${t.slug}">${esc(t.name)}</option>`).join("")}</select></label>
         <label><span class="sr-only">Business ZIP code</span><input class="input" type="text" name="zip" inputmode="numeric" pattern="[0-9]{5}" maxlength="5" placeholder="Business ZIP code" autocomplete="postal-code"></label>
-        <button class="btn btn--yellow btn--lg" type="submit">Get my 3 free leads</button>
+        <button class="btn btn--yellow btn--lg" type="submit">Get $240 in free leads</button>
       </form>
       <p class="lp-micro">Two minutes to create your account. Free leads unlock once your business and insurance documents pass.</p>
       ${checks(["Every job confirmed by phone", "No cap, no minimum", "Bad lead? Credit or refund"], "checks--row checks--yellow")}
@@ -752,7 +752,7 @@ ${hazard}
     <div class="grid grid--3 fixes">
       ${fixes.map(([prob, fix, body]) => `<div class="card fix"><p class="fix-problem">${icon("close", 16)}<span><span class="sr-only">Problem: </span>${esc(prob)}</span></p><h3>${esc(fix)}</h3><p>${esc(body)}</p></div>`).join("")}
     </div>
-    <p class="btn-row btn-row--center"><a class="btn btn--black btn--lg" href="/pros/join/">Get my 3 free leads</a></p>
+    <p class="btn-row btn-row--center"><a class="btn btn--black btn--lg" href="/pros/join/">Get $240 in free leads</a></p>
   </div>
 </section>
 ${proPromise}
@@ -773,7 +773,7 @@ ${proPromise}
       <p class="chips"><span class="chip chip--green">${icon("check", 16)} Owner confirmed by phone</span></p>
       <h3>What you get when you buy a lead</h3>
       ${checks(["Owner's name and mobile number", "Job address", "Trade and type of job", "Job size, budget range and timing", "The owner's own notes about the job"])}
-      <a class="btn btn--yellow btn--block" href="/pros/join/">Get my 3 free leads</a>
+      <a class="btn btn--yellow btn--block" href="/pros/join/">Get $240 in free leads</a>
     </div>
   </div>
 </section>
@@ -781,11 +781,11 @@ ${proPromise}
   <div class="wrap">
     <h2>How it works</h2>
     ${stepList([
-      ["Create your account and verify", "Tell us your trade and ZIP code, then upload proof of business and proof of insurance. Your 3 free leads unlock when both pass."],
+      ["Create your account and verify", "Tell us your trade and ZIP code, then upload proof of business and proof of insurance. Your $240 in free leads unlocks when both pass."],
       ["Get offers by text", "Each offer shows the trade, the area, the job size and the price. No contact details yet, and no charge."],
       ["Reply YES and call", "The lead comes out of your balance and the owner's details arrive in seconds. Call while they are expecting you."],
     ])}
-    <p class="btn-row"><a class="btn btn--black btn--lg" href="/pros/join/">Get my 3 free leads</a></p>
+    <p class="btn-row"><a class="btn btn--black btn--lg" href="/pros/join/">Get $240 in free leads</a></p>
   </div>
 </section>
 <section class="section">
@@ -795,22 +795,22 @@ ${proPromise}
   </div>
 </section>
 <section class="pro-band pro-band--yellow" data-final-cta>
-  <div class="wrap pro-band-row"><div><h2>Your first 3 leads are free.</h2><p>See the quality for yourself before you load a dollar.</p>${feeOffer(false)}</div><a class="btn btn--black btn--lg" href="/pros/join/">Create my pro account</a></div>
+  <div class="wrap pro-band-row"><div><h2>Your first $240 in leads is free.</h2><p>See the quality for yourself before you load a dollar.</p>${feeOffer(false)}</div><a class="btn btn--black btn--lg" href="/pros/join/">Create my pro account</a></div>
 </section>
-<div class="sticky-cta" data-sticky-cta hidden><a class="btn btn--yellow btn--block" href="/pros/join/">Get my 3 free leads</a></div>`,
+<div class="sticky-cta" data-sticky-cta hidden><a class="btn btn--yellow btn--block" href="/pros/join/">Get $240 in free leads</a></div>`,
 });
 
 const splitShell = (left, right) => `<div class="split"><div class="split-dark"><div class="split-inner">${logo(true, true)}${left}</div></div><div class="split-light"><div class="split-inner">${right}</div></div></div>${hazard}`;
 page({
   path: "/pros/join/",
   title: `Join as a Pro | ${site.name}`,
-  desc: D("Create your pro account, verify your business and get your first 3 leads free."),
+  desc: D("Create your pro account, verify your business and get your first $240 in leads free."),
   chrome: "", footer: "none", bodyClass: "bare",
   body: splitShell(
-    `<h1>Your first 3 leads are free.</h1>${feeOffer(true)}${checks(proBullets, "checks--yellow")}`,
+    `<h1>Your first $240 in leads is free.</h1>${feeOffer(true)}${checks(proBullets, "checks--yellow")}`,
     `<form class="form" data-form="proJoin" novalidate>
       <h2>Create your pro account</h2>
-      <p class="sub">Create your account and see the leads in your market. Verify your business to unlock your Verified Pro badge and 3 free leads.</p>
+      <p class="sub">Create your account and see the leads in your market. Verify your business to unlock your Verified Pro badge and $240 in free leads.</p>
       <label class="label" for="j-biz">Business name</label><input class="input" id="j-biz" name="business" type="text" placeholder="Business name" autocomplete="organization" required>
       <label class="label" for="j-email">Email</label><input class="input" id="j-email" name="email" type="email" placeholder="you@business.com" autocomplete="email" required>
       <label class="label" for="j-phone">Mobile number</label><input class="input" id="j-phone" name="phone" type="tel" placeholder="(555) 555-0100" autocomplete="tel" required>

@@ -70,7 +70,7 @@ The person who accepts this Agreement confirms that they are at least 18 and hav
 
 ### 5. Fees and payment
 
-**5.1 Lead prices.** The price of each lead is shown in the offer before you buy. Prices vary by trade, job, market and the age of the lead, and may change at any time for leads you have not yet bought.
+**5.1 Lead prices.** The price of each lead is shown in the offer before you buy. Prices vary by trade, the size and timing of the job, how the owner can be reached, demand in the market and the age of the lead, and may change at any time for leads you have not yet bought.
 
 **5.2 Wallet and card on file.** Leads are paid from your wallet. You add to your wallet with a card, and you may save that card on file. A wallet balance is not a bank deposit and earns no interest.
 
@@ -86,7 +86,7 @@ The person who accepts this Agreement confirms that they are at least 18 and hav
 
 **5.2.5 Team members.** You may add up to 5 people to your account, each with their own mobile number. A person you add gets lead texts only after they reply YES to our invite text from that number. You decide, for each person, whether they get lead texts, whether they can sign in, and whether they can claim leads. Giving a person the authority to claim leads lets a YES from their number order a lead, paid from your wallet and, if the wallet is short, by a reload charged to your card on file. Before you add anyone, you must acknowledge this section in your account. We ask you to confirm the authority twice, the second time with a code we text to your phone, and we record when you gave it. You are responsible for every lead claimed and every charge made by a person you authorized, until you turn the authority off or remove them. You can do either at any time on the Team screen, and it takes effect at once. You may set a daily limit for each person.
 
-**5.3 Welcome credit.** A new pro account starts with $240 of welcome credit, which is enough for 3 shared leads at the standard price of $75. Welcome credit can be spent only on leads that are still in their first 72 hours, only after you pass verification, and is spent before money you add. Older leads, which are offered at a lower price, are shown only to pros with a card on file and are paid for with money you add, not with welcome credit. It has no cash value, cannot be withdrawn, transferred or refunded, and may be changed or ended for new accounts at any time. If a lead paid for with welcome credit qualifies under the Lead Credit Policy, the welcome credit is returned to your balance; it is not paid out.
+**5.3 Welcome credit.** A new pro account starts with $240 of welcome credit. Welcome credit can be spent only on leads that are still in their first 72 hours, only after you pass verification, and is spent before money you add. Older leads, which are offered at a lower price, are shown only to pros with a card on file and are paid for with money you add, not with welcome credit. It has no cash value, cannot be withdrawn, transferred or refunded, and may be changed or ended for new accounts at any time. If a lead paid for with welcome credit qualifies under the Lead Credit Policy, the welcome credit is returned to your balance; it is not paid out.
 
 **5.4 All purchases are final** except as stated in the Lead Credit Policy in section 6.
 

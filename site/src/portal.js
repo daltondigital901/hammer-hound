@@ -332,6 +332,7 @@
         var avail = o.hot ? pro.balance : Math.round((pro.balance - pro.credit) * 100) / 100;
         var covered = o.hot && pro.credit >= o.sharedPrice, short = avail < o.sharedPrice, unit = pro.reloadAmount || 150;
         var need = function (price) { return Math.ceil((price - avail) / unit) * unit; };
+        var why = o.priceWhy && o.priceWhy.length ? h("p", { class: "offer-why", text: "Priced for: " + o.priceWhy.join(", ") + "." }) : null;
         // When the wallet is short the button says what will be charged, before the tap.
         var label = function (kind, price) { var base = (kind === "exclusive" ? "Exclusive " : "Claim lead · ") + money0(price); return avail >= price ? base : pro.card ? base + " · reloads " + money0(need(price)) : base; };
         var press = function (kind, price) { return function () { if (avail < price && !pro.card) { status.innerHTML = ""; status.appendChild(note("Your wallet has " + money(avail) + ". Add a card and this lead is one tap away.")); status.appendChild(h("button", { class: "btn btn--black btn--sm", type: "button", text: "Add a card", on: { click: function () { go("wallet"); } } })); return; } act(kind, avail < price)(); }; };
@@ -339,7 +340,7 @@
           h("div", { class: "offer-top" }, [h("span", { class: "chip", text: o.tradeName }), o.bid ? h("span", { class: "chip", text: "Bid invitation" }) : null, o.hot ? h("span", { class: "chip chip--hot", text: "Hot · " + ago(o.receivedAt) }) : h("span", { class: "chip chip--old", text: ago(o.receivedAt) })])].concat(jobBlock(o), [
           h("div", { class: "offer-foot" }, [
             h("p", { class: "meta", text: "Received " + when(o.receivedAt) + " · closes " + when(o.endsAt) + " · " + o.spotsTaken + " of " + o.maxPros + " spots taken" }),
-            h("p", { class: "offer-price" }, o.percentOff ? [h("s", { class: "offer-was", text: money0(o.fullPrice) }), document.createTextNode(" " + money(o.sharedPrice) + " "), h("span", { class: "chip chip--green", text: o.percentOff + "% off" })] : [document.createTextNode(money(o.sharedPrice))]),
+            h("p", { class: "offer-price" }, o.percentOff ? [h("s", { class: "offer-was", text: money0(o.fullPrice) }), document.createTextNode(" " + money(o.sharedPrice) + " "), h("span", { class: "chip chip--green", text: o.percentOff + "% off" })] : [document.createTextNode(money(o.sharedPrice))]), why,
             h("p", { class: "meta", text: locked ? (pro.credit > 0 ? "Shared lead. Your " + money0(pro.credit) + " in free credit unlocks when you are verified." : "Shared lead. Verify to claim it.") : covered ? "Shared lead. Covered by your free credit." : short ? (pro.card ? "Shared lead. " + (o.hot ? "Your wallet has " : "Welcome credit is for hot leads only. You have ") + money(avail) + (o.hot ? "" : " of your own funds") + "; " + pro.card + " covers the rest." : "Shared lead. Your wallet has " + money(avail) + ".") : "Shared lead. Paid from your wallet." }),
             pro.member && !pro.member.canPay ? h("p", { class: "meta", text: "Only " + pro.business + " or someone they gave pay authority can claim this." })
             : locked ? h("div", { class: "offer-actions" }, [h("button", { class: "btn btn--outline btn--locked", type: "button", text: "Verify to claim this lead", on: { click: function () { go("verify"); } } })])
@@ -437,7 +438,7 @@
         h("div", { class: "pp-two" }, [
           card([h("h2", { text: "Balance" }), h("p", { class: "offer-price", text: money(r.balance) }),
             h("p", { class: "meta", text: r.credit > 0 ? money(r.credit) + " of this is free welcome credit. It is spent before money you add." : "Leads are paid from this balance." }),
-            short ? h("p", { class: "form-status", text: "A lead is " + money(r.leadPrice) + ". " + (r.card ? "Your next claim reloads " + money0(r.reloadAmount) + " on " + r.card + "." : "Add a card to claim your next one.") }) : null,
+            short ? h("p", { class: "form-status", text: "Your wallet is low. " + (r.card ? "Your next claim reloads " + money0(r.reloadAmount) + " on " + r.card + "." : "Add a card to claim your next one.") }) : null,
             h("h2", { text: "Card on file" })].concat(cardBox)),
           card([h("h2", { text: "Reloads" }), auto.el, field("w-unit", "Reload amount", unit, "Charged each time a reload is needed."), field("w-limit", "Monthly limit", limit, r.chargedThisMonth ? money(r.chargedThisMonth) + " charged so far this month." : "The most your card can be charged for reloads in a month. Leave empty for no limit."),
             h("p", { class: "hint", text: "Every charge is emailed to you as a receipt. Replying YES to a lead text also uses your card on file when your wallet is short." }), reloadStatus, saveReload]),
@@ -527,15 +528,15 @@
   // ---------- first-time tour ----------
   // A card at the bottom of the screen walks a new person through the real portal, moving between tabs and
   // ringing the part it is talking about. It never blocks the page, and can be skipped at any card.
-  var tourInfo = { shared: 75, exclusive: 225, maxPros: 5, welcome: 240, hotHours: 72, leadDays: 7, textsLive: false }, tourEl = null, tourTimer = null;
+  var tourInfo = { exclusiveMultiple: 3, maxPros: 5, welcome: 240, hotHours: 72, leadDays: 7, textsLive: false }, tourEl = null, tourTimer = null;
   function tourSteps() {
     var t = tourInfo, m = pro.member, steps = [];
     steps.push({ hound: true, title: "Welcome, " + (m ? m.name : pro.business) + ".", body: "Here is how Hammer Hound works, in about a minute." });
     steps.push({ tab: "offers", sel: "[data-nav=offers]", title: "Real jobs in " + (pro.city || "your market") + ".", body: "Every lead is written the same way: the job, the area, the size and the timing. Hot leads came in during the last " + t.hotHours + " hours." + (!m && pro.card ? " Older leads, 3 to " + t.leadDays + " days, are marked down on their own tab." : "") });
     steps.push({ tab: "offers", sel: ".pp-grid .offer", title: "Claim the ones you want.", body: m && !m.canPay
       ? "When you want a lead, reply YES to the text or tell " + pro.business + ". They claim it for the account."
-      : "Shared goes to up to " + t.maxPros + " pros for " + money0(t.shared) + ". \"Only me\" is yours alone for " + money0(t.exclusive) + ". The owner's name, number and address are yours the moment you claim." });
-    if (!m) steps.push({ tab: "offers", sel: "[data-balance]", title: "You start with " + money0(t.welcome) + ".", body: "That is welcome credit, enough for " + Math.floor(t.welcome / t.shared) + " hot leads once you are verified. After that, leads are paid from your wallet. Add a card and it reloads when you run short." });
+      : "Each lead shows its price. It depends on the trade, the size of the job and how soon they want it. Shared goes to up to " + t.maxPros + " pros. \"Only me\" is yours alone for " + t.exclusiveMultiple + " times the shared price. The owner's details are yours the moment you claim." });
+    if (!m) steps.push({ tab: "offers", sel: "[data-balance]", title: "You start with " + money0(t.welcome) + ".", body: "That is welcome credit. It pays for hot leads once you are verified. After that, leads are paid from your wallet. Add a card and it reloads when you run short." });
     if (!m) steps.push({ tab: "notifications", sel: ".pp-main .card", title: "Leads come to your phone.", body: t.textsLive ? "We text new leads in your market. Reply YES to claim one and the full details come straight back by text." : "Turn on lead texts here. When texting goes live, new leads in your market come to your phone and a YES claims one." });
     steps.push({ tab: "leads", sel: "[data-nav=leads]", title: "Work them here.", body: "Every lead " + (m ? "on the account" : "you claim") + " lands in My leads. Mark each one New, Contacted, Quoted or Won, and keep notes. Got a bad one? Report it and we review it for a credit back." });
     steps.push(m || pro.verified

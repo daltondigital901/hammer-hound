@@ -570,7 +570,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
 // ---- first-time tour: shown until the person finishes or skips it, per person ----
 {
   const c = await signUp(92), me0 = await call("/api/pro/me", null, c);
-  assert.equal(me0.pro.tourSeen, false); assert.deepEqual([me0.tour.shared, me0.tour.exclusive, me0.tour.maxPros, me0.tour.welcome, me0.tour.hotHours, me0.tour.leadDays], [75, 225, 5, 240, 72, 7]); assert.equal(typeof me0.tour.textsLive, "boolean");
+  assert.equal(me0.pro.tourSeen, false); assert.deepEqual([me0.tour.exclusiveMultiple, me0.tour.maxPros, me0.tour.welcome, me0.tour.hotHours, me0.tour.leadDays], [3, 5, 240, 72, 7]); assert.equal(typeof me0.tour.textsLive, "boolean");
   assert.equal((await call("/api/pro/tour", {}, c)).ok, true); assert.equal((await call("/api/pro/me", null, c)).pro.tourSeen, true);
   const first = db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550192").fields["Tour Seen At"]; await call("/api/pro/tour", {}, c);
   assert.equal(db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550192").fields["Tour Seen At"], first, "the first time is kept");
@@ -580,6 +580,80 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   await call("/api/pro/team/update", { memberId: tess.id, getsTexts: true, portal: true, dailyCap: "" }, c); await call("/api/pro/sign-in", { phone: "9015550178" });
   const tv = await call("/api/pro/verify-code", { phone: "9015550178", code: "424242" }); assert.equal(tv.pro.tourSeen, false, "the owner finishing the tour does not finish it for the member");
   await call("/api/pro/tour", {}, tv.cookie); assert.ok(tess.fields["Tour Seen At"]); assert.equal((await call("/api/pro/me", null, tv.cookie)).pro.tourSeen, true);
+}
+
+// ---- the pricing engine ----
+{
+  const { PRICING, priceLead, demandMultiplier, priceReasons } = await import("../src/pricing.js"), { repriceLeads, refreshMarkets } = await import("../src/worker.js");
+  const L = (o = {}) => ({ trade: "concrete", size: "Medium", timing: "Within a month", property: "Home", bid: false, hasPhone: true, hasEmail: true, hasAddress: false, ...o });
+  const P = (o, tr, mk) => priceLead(L(o), tr, mk);
+  // base: job value x rate. Concrete is $2,500 x 3% = $75, and an unknown trade uses the default
+  assert.deepEqual([P().shared, P().exclusive], [75, 225]); assert.equal(P({ trade: "drywall" }).shared, 25); assert.equal(P({ trade: "excavation" }).shared, 105); assert.equal(P({ trade: "plumbing" }).shared, 75);
+  assert.equal(P({ trade: "plumbing" }).basis.jobValueFrom, "default"); assert.equal(P().basis.jobValueFrom, "Niche List default");
+  // the request: size, timing, property, contact, address
+  assert.equal(P({ size: "Large" }).shared, 115); assert.equal(P({ size: "Small" }).shared, 55); assert.equal(P({ size: "Not stated", timing: "Not stated", property: "Not stated" }).shared, 75, "unknown facts are neutral");
+  assert.equal(P({ timing: "Emergency" }).shared, 95); assert.equal(P({ timing: "Flexible" }).shared, 65); assert.equal(P({ property: "Business" }).shared, 90);
+  assert.equal(P({ hasPhone: false }).shared, 45, "email only is worth less"); assert.equal(P({ hasPhone: false, hasEmail: false }).shared, 30); assert.equal(P({ hasAddress: true }).shared, 80);
+  // a bid invitation replaces the property multiplier, it does not stack with it
+  assert.equal(P({ bid: true, property: "Business" }).shared, 45); assert.equal(P({ bid: true, property: "Business" }).basis.factors.property, 1);
+  // multipliers combine, and the combination is bounded
+  assert.equal(P({ size: "Large", timing: "Emergency", property: "Business", hasAddress: true }).shared, 175); assert.equal(P({ size: "Large", timing: "Emergency", property: "Business", hasAddress: true }).basis.factors.request, 2.36);
+  assert.equal(P({ size: "Small", timing: "Flexible", hasPhone: false, hasEmail: false }).basis.factors.request, 0.4, "the request multiplier cannot go under its floor");
+  // the Pricing Trades row overrides the defaults; minimum and maximum hold
+  assert.equal(P({}, { jobValue: 10000 }).shared, 300); assert.equal(P({}, { jobValue: 10000, ratePct: 2 }).shared, 200); assert.equal(P({}, { jobValue: 100000 }).shared, 400, "global maximum");
+  assert.equal(P({}, { jobValue: 100000, max: 900 }).shared, 900); assert.equal(P({ trade: "drywall", size: "Small", hasPhone: false }).shared, 15, "global minimum"); assert.equal(P({ trade: "drywall" }, { min: 40 }).shared, 40);
+  assert.equal(P({ trade: "drywall", size: "Small", hasPhone: false }).basis.bound, "minimum");
+  // the market: a manual multiplier beats demand; demand is bounded
+  assert.equal(P({}, null, { demand: 1.2 }).shared, 90); assert.equal(P({}, null, { demand: 1.2, manual: 0.8 }).shared, 60); assert.equal(P({}, null, { demand: 9 }).shared, 115); assert.equal(P({}, null, { demand: 0.1 }).shared, 55);
+  // the cost floor: one sale covers the lead's cost plus the margin, even above the maximum
+  assert.equal(P({}, null, { costPerLead: 80 }).shared, 120); assert.equal(P({}, null, { costPerLead: 80 }).basis.bound, "cost floor"); assert.equal(P({}, null, { costPerLead: 20 }).shared, 75, "a cost under the price changes nothing");
+  assert.equal(P({}, { max: 100 }, { costPerLead: 200 }).shared, 300); assert.equal(P({}, null, { costPerLead: 81 }).shared % 5, 0);
+  // every price is a multiple of $5 and exclusive is three times shared
+  for (const size of Object.keys(PRICING.size)) for (const timing of Object.keys(PRICING.timing)) for (const trade of ["drywall", "concrete", "excavation"]) { const r = P({ size, timing, trade }); assert.equal(r.shared % 5, 0); assert.equal(r.exclusive, r.shared * 3); assert.ok(r.shared >= 15 && r.shared <= 400); }
+  // the basis explains the price, and the reasons read in plain words
+  const b = P({ size: "Large", timing: "Within a week" }).basis; assert.deepEqual([b.v, b.jobValue, b.rate, b.base, b.factors.size, b.factors.timing, b.shared], ["p1", 2500, 0.03, 75, 1.5, 1.15, 130]);
+  assert.deepEqual(priceReasons(b), ["large job", "wants it within a week"]); assert.deepEqual(priceReasons(P({ bid: true, hasPhone: false }, null, { demand: 1.3 }).basis), ["bid invitation", "no phone number given", "high demand here"]); assert.deepEqual(priceReasons(P().basis), []);
+  // demand: no real pro or too few leads means no opinion; otherwise it follows sell-through, one step a day, inside its bounds
+  assert.equal(demandMultiplier({ leads: 50, claims: 100, pros: 0, spots: 5 }).multiplier, 1); assert.match(demandMultiplier({ leads: 50, claims: 100, pros: 0, spots: 5 }).note, /No real verified pro/);
+  assert.equal(demandMultiplier({ leads: 9, claims: 40, pros: 3, spots: 5 }).multiplier, 1); assert.match(demandMultiplier({ leads: 9, claims: 40, pros: 3, spots: 5 }).note, /Only 9 leads/);
+  assert.equal(demandMultiplier({ leads: 20, claims: 40, pros: 8, spots: 5 }).multiplier, 1, "40% of possible sales is on target");
+  assert.equal(demandMultiplier({ leads: 20, claims: 45, pros: 8, spots: 5 }).multiplier, 1.05); assert.equal(demandMultiplier({ leads: 20, claims: 100, pros: 8, spots: 5 }).multiplier, 1.1, "at most one step up a day");
+  // a thin market is measured against what its pros could buy: two pros taking every lead is a full market, not a 40% one
+  assert.equal(demandMultiplier({ leads: 20, claims: 40, pros: 2, spots: 5 }).sellThrough, 1); assert.equal(demandMultiplier({ leads: 20, claims: 16, pros: 2, spots: 5 }).multiplier, 1); assert.equal(demandMultiplier({ leads: 20, claims: 8, pros: 1, spots: 5 }).multiplier, 1);
+  assert.equal(demandMultiplier({ leads: 20, claims: 100, pros: 3, spots: 5 }, 1.45).multiplier, 1.5, "never over the maximum"); assert.equal(demandMultiplier({ leads: 20, claims: 0, pros: 3, spots: 5 }).multiplier, 0.9); assert.equal(demandMultiplier({ leads: 20, claims: 0, pros: 3, spots: 5 }, 0.78).multiplier, 0.75);
+
+  // --- wired in: the lead writer prices each lead, with its reasons, and the Pricing Trades table fills itself ---
+  env.PRICING_ENGINE = "on";
+  const LD = db.tblfA6ivDIlWVp4us, TR = db.tbl6J7aYXbhEZjrVw, MK = db.tbl4QFgPCQk4QL27B, PRO = db.tbl9bEGuy8DPkkee7, c = await signUp(93);
+  seedForm(76, { service: "Roof Repair", city: "Memphis" }); await ingest(env); const lead = LD.at(-1), basis = JSON.parse(lead.fields["Price Basis"]);
+  assert.equal(TR.length, 25, "one row per trade, plus other"); assert.deepEqual([TR.find((r) => r.fields.Trade === "roofing").fields["Job Value"], TR.find((r) => r.fields.Trade === "plumbing").fields["Job Value"]], [3000, undefined]);
+  assert.equal(lead.fields["Price Version"], "p1"); assert.equal(basis.jobValue, 3000); assert.equal(lead.fields["Shared Price"], basis.shared); assert.equal(lead.fields["Exclusive Price"], basis.shared * 3);
+  assert.equal(lead.fields["Shared Price"], priceLead({ trade: "roofing", size: lead.fields["Job Size"], timing: lead.fields.Timing, property: lead.fields["Property Type"], bid: false, hasPhone: true, hasEmail: true, hasAddress: !!lead.fields["Job Address"] }).shared);
+  const card = (await call(ALL, null, c)).offers.find((o) => o.id === lead.id); assert.equal(card.sharedPrice, lead.fields["Shared Price"]); assert.ok(Array.isArray(card.priceWhy));
+  // editing the trade's row changes the next price; a locked lead is left alone
+  TR.find((r) => r.fields.Trade === "roofing").fields["Job Value"] = 6000; lead.fields["Price Version"] = "old"; const was = lead.fields["Shared Price"];
+  LD.push({ id: "recLOCKEDPRICE0001", fields: { Lead: "Locked · Memphis, TN", Job: "Locked", Trade: "roofing", City: "Memphis", Status: "Offered", Style: "v2", Qualified: "Yes", "Received At": new Date().toISOString(), "Shared Price": 33, "Exclusive Price": 99, "Price Locked": true, "Max Pros": 5 } });
+  const { default: w2 } = await import("../src/worker.js"); await new Promise((r) => setTimeout(r, 5));
+  // (the trade table is cached for five minutes in production; the price follows on the next load)
+  const rp = await repriceLeads(env); assert.ok(rp.repriced >= 1); assert.equal(lead.fields["Price Version"], "p1"); assert.ok([was, was * 2].includes(lead.fields["Shared Price"])); assert.equal(LD.at(-1).fields["Shared Price"], 33, "a locked price is never touched");
+  // once anyone has bought a lead its price is fixed for everyone after them
+  const got = await call("/api/pro/buy", { leadId: lead.id, kind: "shared" }, c); assert.equal(got.status, 200); assert.equal(got.price, lead.fields["Shared Price"]); assert.equal(lead.fields["Price Version"], "sold");
+  const fixed = lead.fields["Shared Price"]; await repriceLeads(env); assert.equal(lead.fields["Shared Price"], fixed);
+  // the text offer quotes the lead's own price
+  const { offerText } = await import("../src/worker.js"); assert.match(offerText({ ...lead.fields }, {}), new RegExp("\\$" + fixed + " from your wallet.*exclusive \\(\\$" + fixed * 3 + "\\)"));
+  // the daily market refresh: test accounts never count, so nothing moves on test sales alone; a real pro and a request get a row
+  const before = MK.length, r1 = await refreshMarkets(env); assert.equal(r1.moved, 0); assert.ok(MK.every((m) => m.fields["Demand Multiplier"] === 1));
+  const tup = MK.find((m) => m.fields.Segment === "tupelo|roofing"); assert.equal(tup, undefined, "a request from a test account is not demand");
+  PRO.push({ id: "recREALPRICING0001".slice(0, 17), fields: { "Business Name": "Real Demo Co", Mobile: "9018889999", City: "Memphis", Trade: "roofing", "Extra Trades": "gutters", Verification: "Verified", Balance: 0 } });
+  await refreshMarkets(env); const mem = MK.find((m) => m.fields.Segment === "memphis|roofing"), gut = MK.find((m) => m.fields.Segment === "memphis|gutters");
+  assert.ok(mem && gut); assert.equal(mem.fields["Verified Pros"], 1); assert.ok(mem.fields["Leads 30d"] >= 1); assert.equal(mem.fields["Claims 30d"], 0, "claims by test accounts are not counted"); assert.equal(mem.fields["Demand Multiplier"], mem.fields["Leads 30d"] >= 10 ? 0.9 : 1, "a real pro who buys nothing lowers the price one step"); assert.match(mem.fields["Demand Note"], /Only \d+ leads|% of possible sales made/);
+  // a manual multiplier and a cost per lead on that row drive the next lead priced there
+  mem.fields["Manual Multiplier"] = 2; seedForm(77, { service: "Roof Repair", city: "Memphis" }); await ingest(env); const l2 = LD.at(-1), b2 = JSON.parse(l2.fields["Price Basis"]);
+  assert.equal(b2.factors.market, 2); assert.equal(b2.factors.marketFrom, "manual"); mem.fields["Manual Multiplier"] = null; mem.fields["Cost Per Lead"] = 500;
+  seedForm(78, { service: "Roof Repair", city: "Memphis" }); await ingest(env); assert.equal(LD.at(-1).fields["Shared Price"], 750); assert.equal(JSON.parse(LD.at(-1).fields["Price Basis"]).bound, "cost floor");
+  // the kill switch returns to the flat price
+  env.PRICING_ENGINE = "off"; seedForm(79, { service: "Roof Repair", city: "Memphis" }); await ingest(env); assert.deepEqual([LD.at(-1).fields["Shared Price"], LD.at(-1).fields["Exclusive Price"]], [75, 225]);
+  PRO.pop(); for (const l of LD) l.fields.Alerted = "x";
 }
 
 // ---- insurance reminders and nudges ----

@@ -11,7 +11,7 @@ const DIST = join(ROOT, "site", "dist");
 const TYPES = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".woff2": "font/woff2", ".ico": "image/x-icon", ".json": "application/json", ".webmanifest": "application/manifest+json", ".xml": "application/xml", ".txt": "text/plain" };
 
 // ---- in-memory Airtable ----
-export const db = { tblW1A0iKDAd111iI: [], tblfA6ivDIlWVp4us: [], tbl9bEGuy8DPkkee7: [], tblJnYLq2aCiCVU1C: [], tbl9olHmI5p746DOe: [], tblFDXXEvvlb6F8vN: [], tblZ2EIWCgOb36JR2: [], tbl315ujQMh1PHOi8: [], tblAxauFF33UVS2gV: [], tblTYo9QOk8hTwQad: [] };
+export const db = { tblW1A0iKDAd111iI: [], tblfA6ivDIlWVp4us: [], tbl9bEGuy8DPkkee7: [], tblJnYLq2aCiCVU1C: [], tbl9olHmI5p746DOe: [], tblFDXXEvvlb6F8vN: [], tblZ2EIWCgOb36JR2: [], tbl315ujQMh1PHOi8: [], tblAxauFF33UVS2gV: [], tblTYo9QOk8hTwQad: [], tbl6J7aYXbhEZjrVw: [], tbl4QFgPCQk4QL27B: [] };
 let seq = 0;
 const rid = () => "rec" + String(++seq).padStart(14, "0");
 const NUM = "fldfJJYK166eGNfxw";
@@ -53,6 +53,10 @@ function matches(table, rec, formula) {
   if (formula === "AND({Verification}='Verified',NOT({Paused}))") return f.Verification === "Verified" && !f.Paused;
   if (formula === "NOT({Email}='')") return !!f.Email;
   if (formula.includes("{Alerted}=''")) return f.Status === "Offered" && f.Style === "v2" && Date.now() - Date.parse(f["Received At"]) < 12 * 3600e3 && !f.Alerted;
+  if (formula.includes("NOT({Price Version}=")) return f.Status === "Offered" && f.Style === "v2" && Date.now() - Date.parse(f["Received At"]) < 7 * 864e5 && f["Price Version"] !== "p1" && f["Price Version"] !== "sold" && !f["Price Locked"];
+  if ((m = formula.match(/^\{Segment\}='(.*)'$/))) return f.Segment === m[1];
+  if (formula.startsWith("AND({Style}='v2',{Qualified}='Yes'")) return f.Style === "v2" && f.Qualified === "Yes" && Date.now() - Date.parse(f["Received At"]) < 30 * 864e5;
+  if (formula === "IS_AFTER({Bought At},DATEADD(NOW(),-30,'days'))") return Date.now() - Date.parse(f["Bought At"]) < 30 * 864e5;
   if (formula.startsWith("AND({Status}='Offered',{Style}='v2'")) return f.Status === "Offered" && f.Style === "v2" && Date.now() - Date.parse(f["Received At"]) < 7 * 864e5;
   if (formula.startsWith("AND(NOT({Style}='v2')")) return f.Style !== "v2" && f.Style !== "failed 3" && (f.Status !== "Rejected" || String(f.Qualified || "").startsWith("No:")) && Date.now() - Date.parse(f["Received At"]) < 7 * 864e5;
   throw new Error("mock: unknown formula " + formula);
@@ -112,7 +116,7 @@ export const env = {
   SHADOW_SHARED_PRICE: "75", SHADOW_EXCLUSIVE_PRICE: "225", SHADOW_MAX_PROS: "5", TEST_BALANCE: "240",
   ANTHROPIC_API_KEY: "test-key", ANTHROPIC_API: "https://ai.test/v1/messages", STYLE_BATCH: "50",
   DOCS: { put: async (k, v, o) => { stored.set(k, { size: v.byteLength, body: v, ...o }); }, get: async (k) => (stored.has(k) ? stored.get(k) : null) },
-  ADMIN_KEY: "test-admin-key-0123456789", ADMIN_DELAY: "0",
+  ADMIN_KEY: "test-admin-key-0123456789", PRICING_ENGINE: "off", ADMIN_DELAY: "0",
   EMAIL: { send: async (msg) => { sent.push(msg); return { messageId: "m" + sent.length }; } },
   ASSETS: { fetch: async (req) => {
     let p = decodeURIComponent(new URL(req.url).pathname); let file = join(DIST, p);
