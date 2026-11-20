@@ -216,3 +216,7 @@ Up to 5 people per account (`TEAM_MAX`), in the `Team` table (`tblAxauFF33UVS2gV
 - **Sign-in.** A member with `Portal` on signs in with their own number and sees Open leads, My leads and Support. Wallet, card, documents, settings and the team return 403.
 - **API.** `GET /api/pro/team`, `POST /api/pro/team/add|update|invite|authority|remove|test-optin` (owner only).
 - Pro Agreement 5.2.5 covers it.
+
+## Team acknowledgment
+
+Before the first team member, the owner accepts a notice that people they add can, if the owner chooses, be given authority to pay for leads. `POST /api/pro/team/ack { agree: "yes" }` stores `Team Ack` (fld8qH14mVrf5rcKS: agreement version | time | IP) and adds a "Team turned on" row to the Authority Log. `team/add` is refused without it. Verification throughout is the texted code: sign-in, and the second confirmation when pay authority is given. The Pros and Team fields `2FA Secret` and `2FA On At` are unused and can be deleted.

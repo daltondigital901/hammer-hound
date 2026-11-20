@@ -542,11 +542,20 @@ async function grantCodeOk(env, pro, m, code) {
 }
 async function teamApi(request, env, pro, path, body) {
   const ip = request.headers.get("CF-Connecting-IP") || "unknown", owner = `Owner · ${fmtPhone(pro.fields.Mobile)}`;
-  const team = await teamOf(env, pro.id), out = async () => json({ members: (await teamOf(env, pro.id)).map(memberView), max: TEAM_MAX, card: pro.fields.Card || "", test: !!pro.fields.Test,
+  const team = await teamOf(env, pro.id), out = async (p = pro) => json({ members: (await teamOf(env, pro.id)).map(memberView), max: TEAM_MAX, card: pro.fields.Card || "", test: !!pro.fields.Test, ack: !!p.fields["Team Ack"],
     log: (await list(env, HH.base, HH.authLog, { filterByFormula: `{Account ID}='${pro.id}'`, "sort[0][field]": "At", "sort[0][direction]": "desc", pageSize: 20, maxRecords: 20 })).map((r) => ({ entry: r.fields.Entry, by: r.fields.By || "", at: r.fields.At })) });
   if (path === "/api/pro/team" && request.method === "GET") return out();
   if (request.method !== "POST") return fail(404, "Not found.");
+  // Before the first team member: the owner acknowledges what adding people makes possible. Recorded with the time and IP address.
+  if (path === "/api/pro/team/ack") {
+    if (body.agree !== "yes") return fail(400, "Tick the box to continue.");
+    if (pro.fields["Team Ack"]) return out();
+    const saved = await update(env, HH.pros, pro.id, { "Team Ack": `${AGREEMENT_VERSION} | ${new Date().toISOString()} | ${ip}` });
+    await create(env, HH.authLog, { Entry: "Team turned on: owner acknowledged that team members can be given authority to pay for leads", Action: "Team turned on", "Account ID": pro.id, Account: pro.fields["Business Name"] || "", By: owner, At: new Date().toISOString(), IP: ip, Agreement: AGREEMENT_VERSION, Test: !!pro.fields.Test });
+    return out(saved);
+  }
   if (path === "/api/pro/team/add") {
+    if (!pro.fields["Team Ack"]) return fail(403, "Read and accept the team notice before adding team members.");
     const name = String(body.name || "").trim().slice(0, 80), phone = digits(body.phone);
     if (!name || phone.length !== 10) return fail(400, "Enter the person's name and a 10-digit mobile number.");
     if (team.length >= TEAM_MAX) return fail(400, `An account can have up to ${TEAM_MAX} team members.`);

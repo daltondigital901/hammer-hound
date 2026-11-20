@@ -571,6 +571,17 @@
           pay, grant, texts.el, portal.el, field("t-cap-" + id, "Daily limit for leads they claim ($)", cap, "Leave empty for no limit."), status, save,
           h("button", { class: "btn btn--text btn--block", type: "button", text: "Remove " + m.name, on: { click: function () { call("/api/pro/team/remove", { memberId: id }).then(function (res) { done(res, status); }); } } })], "verify");
       });
+      if (!r.ack) {
+        var agree = toggle("t-ack", "I understand", "", false), gs = h("div");
+        shell([head("Team", "Add up to " + r.max + " people to this account."),
+          card([h("h2", { text: "Before you add anyone" }),
+            h("div", { class: "tm-confirm" }, [
+              h("p", { text: "People you add get lead texts on their own phone once they accept." }),
+              h("p", { text: "If you choose, you can also give a person the authority to claim leads. A YES from their number then orders the lead and it is paid from your wallet and your card on file." }),
+              h("p", { text: "That is off for everyone until you turn it on for a person. Each time, you confirm it on screen and with a code we text to your phone. You are responsible for the charges they make." }), agree.el]),
+            gs, h("button", { class: "btn btn--yellow btn--block", type: "button", text: "Turn on my team", on: { click: function () { call("/api/pro/team/ack", { agree: agree.box.checked ? "yes" : "" }).then(function (res) { done(res, gs); }); } } })], "verify")]);
+        return;
+      }
       var name = input("t-name", "text", "", { autocomplete: "off" }), phone = input("t-phone", "tel", "", { autocomplete: "off", placeholder: "(901) 555-0100" });
       var add = r.members.length < r.max ? card([h("h2", { text: "Add a person" }), field("t-name", "Name", name), field("t-phone", "Their mobile number", phone, "We text them an invite. They get lead texts only after they reply YES."), top,
         h("button", { class: "btn btn--yellow btn--block", type: "button", text: "Add and text the invite", on: { click: function () { call("/api/pro/team/add", { name: name.value, phone: phone.value }).then(function (res) { done(res, top); }); } } })], "verify")

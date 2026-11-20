@@ -504,11 +504,15 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   const P = db.tbl9bEGuy8DPkkee7, T = db.tblAxauFF33UVS2gV, LOG = db.tblTYo9QOk8hTwQad, LD = db.tblfA6ivDIlWVp4us, PU = db.tblJnYLq2aCiCVU1C, { alertPros } = await import("../src/worker.js");
   const sms = async (from, body) => { const url = "https://hammerhound.com/api/sms/inbound", p = { Body: body, From: from }; const r = await worker.fetch(new Request(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Twilio-Signature": createHmac("sha1", "tok").update(url + Object.keys(p).sort().map((k) => k + p[k]).join("")).digest("base64") }, body: new URLSearchParams(p) }), env); return r.text(); };
   const c = await signUp(91), me = P.find((p) => p.fields.Mobile === "9015550191"), acts = () => LOG.filter((r) => r.fields["Account ID"] === me.id).map((r) => r.fields.Action);
+  // before anyone can be added: the owner's acknowledgment, recorded with the version, time and IP address
+  assert.equal((await call("/api/pro/team", null, c)).ack, false); assert.equal((await call("/api/pro/team/add", { name: "Dana", phone: "9017771111" }, c)).status, 403, "no team before the acknowledgment");
+  assert.equal((await call("/api/pro/team/ack", {}, c)).status, 400); assert.equal((await call("/api/pro/team/ack", { agree: "yes" }, c)).ack, true);
+  assert.match(me.fields["Team Ack"], /^November 19, 2026 \| 20\d\d-.* \| /); assert.equal(acts().at(-1), "Team turned on");
   // adding: a name and a number nobody else uses; the invite goes out by text
   assert.equal((await call("/api/pro/team/add", { name: "", phone: "9017771111" }, c)).status, 400); assert.equal((await call("/api/pro/team/add", { name: "Me", phone: "9015550191" }, c)).status, 409);
   const t0 = texts.length, added = await call("/api/pro/team/add", { name: "Dana", phone: "(901) 777-1111" }, c); assert.equal(added.members.length, 1); assert.equal(added.max, 5);
   const dana = T.at(-1); assert.deepEqual([dana.fields["Gets Texts"], dana.fields["Can Pay"], dana.fields.Portal], [true, false, false]);
-  assert.equal(texts[t0].to, "+19017771111"); assert.match(texts[t0].body, /Test Pro 91 added you to their account to get lead texts\. Reply YES to accept/); assert.deepEqual(acts(), ["Added", "Invited"]);
+  assert.equal(texts[t0].to, "+19017771111"); assert.match(texts[t0].body, /Test Pro 91 added you to their account to get lead texts\. Reply YES to accept/); assert.deepEqual(acts().slice(-2), ["Added", "Invited"]);
   assert.equal((await call("/api/pro/team/add", { name: "Dana again", phone: "9017771111" }, c)).status, 409, "one number, one account");
   // pay authority cannot be given before the person accepts, and the invite is accepted from their own phone
   assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes" }, c)).status, 409);
