@@ -455,15 +455,15 @@
   // ---------- business profile ----------
   function profileView() {
     var status = h("div");
-    var biz = input("p-biz", "text", pro.business, { autocomplete: "organization" }), city = input("p-city", "text", pro.city, { autocomplete: "address-level2" }), zip = input("p-zip", "text", pro.zip, { inputmode: "numeric", maxlength: "5" }), email = input("p-email", "email", pro.email, { autocomplete: "email" });
+    var biz = input("p-biz", "text", pro.business, { autocomplete: "organization" }), city = input("p-city", "text", pro.city, { autocomplete: "address-level2" }), state = select("p-state", [["", "State"]].concat(["AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"].map(function (c) { return [c, c]; })), pro.state || ""), zip = input("p-zip", "text", pro.zip, { inputmode: "numeric", maxlength: "5" }), email = input("p-email", "email", pro.email, { autocomplete: "email" });
     var trade = select("p-trade", [["", "Choose a trade"]].concat(TRADE_LIST), pro.trade);
     var boxes = TRADE_LIST.map(function (t) { var b = h("input", { type: "checkbox", value: t[0] }); b.checked = pro.extraTrades.indexOf(t[0]) >= 0; return { box: b, el: h("label", { class: "pp-check" }, [b, h("span", { text: t[1] })]) }; });
     var save = h("button", { class: "btn btn--yellow btn--block", type: "button", text: "Save profile", on: { click: function () {
-      saver(status, save, "/api/pro/profile", { business: biz.value, city: city.value, zip: zip.value, email: email.value, trade: trade.value, extraTrades: boxes.filter(function (b) { return b.box.checked; }).map(function (b) { return b.box.value; }) }, function () { pick = { market: null, trade: null }; });
+      saver(status, save, "/api/pro/profile", { business: biz.value, city: city.value, state: state.value, zip: zip.value, email: email.value, trade: trade.value, extraTrades: boxes.filter(function (b) { return b.box.checked; }).map(function (b) { return b.box.value; }) }, function () { pick = { market: null, trade: null }; });
     } } });
     shell([head("Business profile", "What owners see, and which leads you see first."),
       card([h("h2", { text: "Your business" }), field("p-biz", "Business name", biz, "Shown to property owners whose leads you take."), field("p-email", "Email", email, "Where we send account notices."),
-        h("h2", { text: "Your market" }), field("p-city", "City", city, "Leads open on this market by default. You can look at any market from the Leads page."), field("p-zip", "Business ZIP code", zip),
+        h("h2", { text: "Your market" }), field("p-city", "City", city), field("p-state", "State", state, "Leads open on this market by default. You can look at any market from the Leads page."), field("p-zip", "Business ZIP code", zip),
         h("h2", { text: "Your trades" }), field("p-trade", "Main trade", trade, "Leads open on this trade by default."), h("p", { class: "label", text: "Other trades you take" }), h("div", { class: "pp-checks" }, boxes.map(function (b) { return b.el; })),
         status, save], "verify"),
     ]);
@@ -532,7 +532,7 @@
   function tourSteps() {
     var t = tourInfo, m = pro.member, steps = [];
     steps.push({ hound: true, title: "Welcome, " + (m ? m.name : pro.business) + ".", body: "Here is how Hammer Hound works, in about a minute." });
-    steps.push({ tab: "offers", sel: "[data-nav=offers]", title: "Real jobs in " + (pro.city || "your market") + ".", body: "Every lead is written the same way: the job, the area, the size and the timing. Hot leads came in during the last " + t.hotHours + " hours." + (!m && pro.card ? " Older leads, 3 to " + t.leadDays + " days, are marked down on their own tab." : "") });
+    steps.push({ tab: "offers", sel: "[data-nav=offers]", title: "Real jobs in " + (pro.market || "your market") + ".", body: "Every lead is written the same way: the job, the area, the size and the timing. Hot leads came in during the last " + t.hotHours + " hours." + (!m && pro.card ? " Older leads, 3 to " + t.leadDays + " days, are marked down on their own tab." : "") });
     steps.push({ tab: "offers", sel: ".pp-grid .offer", title: "Claim the ones you want.", body: m && !m.canPay
       ? "When you want a lead, reply YES to the text or tell " + pro.business + ". They claim it for the account."
       : "Each lead shows its price. It depends on the trade, the size of the job and how soon they want it. Shared goes to up to " + t.maxPros + " pros. \"Only me\" is yours alone for " + t.exclusiveMultiple + " times the shared price. The owner's details are yours the moment you claim." });

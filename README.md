@@ -264,3 +264,11 @@ exclusive    = shared x 3
 - **Sell-through** is claims by real pros divided by the sales that were possible: leads x the smaller of spots per lead and real verified pros in that market and trade. Test accounts never count. `refreshMarkets()` runs daily at 5am Central; `POST /api/admin/pricing` runs it now.
 - **Kill switch.** `PRICING_ENGINE` = `"off"` in `wrangler.jsonc` returns every new lead to `SHADOW_SHARED_PRICE` / `SHADOW_EXCLUSIVE_PRICE`.
 - **Welcome credit** is now described in dollars everywhere ("$240 in free leads"), since a lead no longer has one price. The site copy has the $240 written in; change it there if `WELCOME_CREDIT` changes.
+
+## Locations are "City, ST"
+
+- **Leads.** Each lead stores the state of the Dalton Digital site it came through (`Site State`, fldTpg1N4iJnaBmbV; Site List `State` fldYpj5Hd8EzNNzSV). The lead writer uses the state in the request first, then the site's, and is told to notice a city that is plainly across a state line. `fixStates()` fills in leads copied earlier, 30 a minute.
+- **One format.** `cleanPlace()` splits and tidies whatever was typed ("memphis", "Memphis, TN", "BYRON CENTER mi") and `placeOf()` writes "City, ST" for cards, lead titles, texts, emails and the admin panel.
+- **Markets** in Open leads are places, "Memphis, TN (3)", so two cities with one name in different states are separate. A place with no state matches any state.
+- **Pros** have a `State` (fldnNtg6oNSxPrFcF). The join form and the profile have a state picker and require it. A pro who joined before this is matched by city alone until they pick one.
+- **Pricing segments** are keyed by place and trade: `memphis, tn|roofing`.
