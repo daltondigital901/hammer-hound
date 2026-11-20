@@ -24,6 +24,9 @@ const json = (data, status = 200, headers = {}) => new Response(JSON.stringify(d
 const fail = (status, error) => json({ error }, status);
 const num = (v, d) => (Number.isFinite(Number(v)) && v !== "" && v != null ? Number(v) : d);
 const digits = (p) => String(p || "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+// A lead is only a lead if the owner can be called: ten digits, a real area code. No phone, never offered.
+const hasPhone = (p) => /^[2-9]\d{9}$/.test(digits(p));
+const NO_PHONE = "No: no phone number";
 const esc = (s) => String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 // 555-01xx numbers are reserved for fiction, so they can never belong to a real person.
 const isTestPhone = (p) => /^\d{3}55501\d{2}$/.test(p);
@@ -105,8 +108,9 @@ export async function ingest(env) {
     const found = await list(env, DD1.base, DD1.siteList, { filterByFormula: `OR(${siteIds.slice(i, i + 40).map((id) => `RECORD_ID()='${id}'`).join(",")})`, pageSize: 100, returnFieldsByFieldId: "true", "fields[]": Object.values(DD1.s) });
     for (const x of found) sites[x.id] = x.fields;
   }
-  const skipped = { noSite: 0, gbp: 0, client: 0, prospect: 0 };
+  const skipped = { noPhone: 0, noSite: 0, gbp: 0, client: 0, prospect: 0 };
   const eligible = rows.filter((r) => {
+    if (!hasPhone(parseForm(r.fields[DD1.f.details]).Phone)) { skipped.noPhone++; return false; }
     const site = sites[(r.fields[DD1.f.siteLink] || [])[0]];
     if (!site) { skipped.noSite++; return false; }
     if (env.EXCLUDE_GBP_SITES === "true" && HAS_GBP.has(selectName(site[DD1.s.gbp]))) { skipped.gbp++; return false; }
@@ -663,7 +667,7 @@ async function purchase(env, pro, { leadId, kind, reload = false, via = "Portal"
   const bought = await purchasesFor(env, leadId);
   const mine = bought.find((p) => p.fields.Purchase.endsWith(pro.id));
   if (mine) return no(409, "You already have this lead. It is in My leads.", { already: mine, lead });
-  if (lead.fields.Status !== "Offered" || !isOpenAge(lead)) return no(410, "This lead has closed.");
+  if (lead.fields.Status !== "Offered" || !isOpenAge(lead) || !hasPhone(lead.fields["Owner Phone"])) return no(410, "This lead has closed.");
   if (bought.some((p) => p.fields.Kind === "Exclusive")) return no(410, "Another pro took this lead exclusive.");
   if (kind === "exclusive" && bought.length) return no(409, "Exclusive is gone because another pro has already bought this lead.");
   if (bought.length >= lead.fields["Max Pros"]) return no(410, "All spots on this lead are taken.");
@@ -765,7 +769,7 @@ function leadText(o, headline) {
 }
 const alreadyText = (r, pro) => leadText(leadView(r.lead), `already claimed by ${String(r.already.fields["Claimed By"] || "").split(" · ")[0] || pro.fields["Business Name"]}. No charge. Here are the details.`);
 export async function alertPros(env) {
-  const fresh = await list(env, HH.base, HH.leads, { filterByFormula: `AND({Status}='Offered',{Style}='${STYLE}',IS_AFTER({Received At},DATEADD(NOW(),-${ALERT_HOURS},'hours')),{Alerted}='')`, "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 5, maxRecords: 5 });
+  const fresh = await list(env, HH.base, HH.leads, { filterByFormula: `AND({Status}='Offered',{Style}='${STYLE}',LEN({Owner Phone}&'')=10,IS_AFTER({Received At},DATEADD(NOW(),-${ALERT_HOURS},'hours')),{Alerted}='')`, "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 5, maxRecords: 5 });
   if (!fresh.length) return { leads: 0, texts: 0, emails: 0 };
   const pros = await list(env, HH.base, HH.pros, { filterByFormula: "AND({Verification}='Verified',NOT({Paused}))", pageSize: 100, maxRecords: 5000 });
   const out = { leads: fresh.length, texts: 0, emails: 0 }, day = today();
@@ -1063,6 +1067,7 @@ export async function fixStates(env) {
 const writerRejected = (f) => f.Status === "Rejected" && String(f.Qualified || "").startsWith("No:");
 async function styleOne(env, lead) {
   const f = lead.fields;
+  if (!hasPhone(f["Owner Phone"])) return update(env, HH.leads, lead.id, { Style: STYLE, Qualified: NO_PHONE, Status: f.Status === "Offered" ? "Rejected" : f.Status });
   const w = await askJson(env, { system: LEAD_RULES, schema: LEAD_SCHEMA, maxTokens: 700, content: [{ type: "text", text: `Came in as: ${String(f["Lead Source"] || "").split(" ")[0] || "Form"}\nSite name: ${f["Site Name"] || ""}\nCity field: ${f.City || ""}\nSite state: ${f["Site State"] || ""}\nService or subject field: ${f.Service || ""}\nMessage:\n${f.Message || "(empty)"}` }] },
     (r) => { if (typeof r.is_job_request !== "boolean") throw new Error("no is_job_request in the reply"); });
   if (!w.is_job_request) return update(env, HH.leads, lead.id, { Style: STYLE, Qualified: "No: " + String(w.not_a_job_reason || "not a request for work").slice(0, 120), Status: f.Status === "Offered" ? "Rejected" : f.Status });
@@ -1082,7 +1087,10 @@ async function styleOne(env, lead) {
 export async function styleLeads(env) {
   if (!env.ANTHROPIC_API_KEY) return { styled: 0, waiting: 0, note: "no AI key" };
   const todo = await list(env, HH.base, HH.leads, { filterByFormula: `AND(NOT({Style}='${STYLE}'),NOT({Style}='failed 3'),OR(NOT({Status}='Rejected'),FIND('No:',{Qualified})=1),IS_AFTER({Received At},DATEADD(NOW(),-${LEAD_DAYS},'days')))`, "sort[0][field]": "Received At", "sort[0][direction]": "desc", pageSize: 100, maxRecords: 100 });
-  const batch = todo.slice(0, num(env.STYLE_BATCH, 6));
+  // No phone number: never offered, and no AI call is spent on it. Kept out of the batch so it cannot hide an outage.
+  const dead = todo.filter((l) => !hasPhone(l.fields["Owner Phone"])).slice(0, 20), live = todo.filter((l) => hasPhone(l.fields["Owner Phone"]));
+  for (const l of dead) await styleOne(env, l).catch(() => {});
+  const batch = live.slice(0, num(env.STYLE_BATCH, 6));
   const done = await Promise.allSettled(batch.map((l) => styleOne(env, l)));
   const failed = done.filter((d) => d.status === "rejected");
   // Count the misses on the lead itself. After three it is left for a person, so one bad lead cannot burn AI calls every minute.
@@ -1090,10 +1098,17 @@ export async function styleLeads(env) {
   const why = failed.length ? String(failed[0].reason && failed[0].reason.message || failed[0].reason) : "", outage = failed.length === done.length && (done.length > 1 || /\b(429|5\d\d):|timed? ?out|abort|fetch failed|network/i.test(why));
   for (let i = 0; i < done.length && !outage; i++) if (done[i].status === "rejected") { const n = (Number(String(batch[i].fields.Style || "").replace("failed ", "")) || 0) + 1; await update(env, HH.leads, batch[i].id, { Style: `failed ${n}` }).catch(() => {}); }
   if (failed.length) console.error("lead writer failed:", String(failed[0].reason && failed[0].reason.message || failed[0].reason).slice(0, 300));
-  return { styled: done.length - failed.length, failed: failed.length, outage, waiting: todo.length - batch.length };
+  return { styled: done.length - failed.length, failed: failed.length, outage, waiting: live.length - batch.length, noPhone: dead.length };
 }
 // Only leads in the uniform format are ever offered.
-const OPEN = `AND({Status}='Offered',{Style}='${STYLE}',IS_AFTER({Received At},DATEADD(NOW(),-${LEAD_DAYS},'days')))`;
+// Leads already on the board with no phone number are taken off it, a batch a minute, until none are left.
+export async function dropNoPhone(env) {
+  const bad = await list(env, HH.base, HH.leads, { filterByFormula: `AND({Status}='Offered',NOT(LEN({Owner Phone}&'')=10))`, pageSize: 40, maxRecords: 40, "fields[]": ["Status", "Owner Phone"] });
+  const out = bad.filter((l) => !hasPhone(l.fields["Owner Phone"]));
+  for (const l of out) await update(env, HH.leads, l.id, { Status: "Rejected", Style: STYLE, Qualified: NO_PHONE });
+  return out.length;
+}
+const OPEN = `AND({Status}='Offered',{Style}='${STYLE}',LEN({Owner Phone}&'')=10,IS_AFTER({Received At},DATEADD(NOW(),-${LEAD_DAYS},'days')))`;
 
 // ---------- insurance reminders and nudges ----------
 // Before expiry: keep the badge. After a lapse or a failed check: nudges with sample leads, details locked.
@@ -1630,6 +1645,7 @@ export default {
     const step = (name, fn) => fn().catch((e) => console.error(`${name} failed:`, String(e && e.message || e)));
     const run = async () => {
       if (env.SHADOW_MODE === "true") await step("ingest", async () => console.log("ingest", JSON.stringify(await ingest(env))));
+      await step("no phone", async () => { const n = await dropNoPhone(env); if (n) console.log("no-phone leads removed", n); });
       await step("states", async () => { const n = await fixStates(env); if (n) console.log("states filled", n); });
       await step("pricing", async () => { const r = await repriceLeads(env); if (r.repriced || r.sold) console.log("pricing", JSON.stringify(r)); });
       await step("alerts", async () => { const alerts = await alertPros(env); if (alerts.leads) console.log("alerts", JSON.stringify(alerts)); });

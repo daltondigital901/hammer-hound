@@ -282,3 +282,15 @@ exclusive    = shared x 3
 - **Never started.** A pro who joined and uploaded nothing is emailed after 1, 3 and 7 days (`start1`, `start3`, `start7`), then left alone. Like the other nudges, these wait for `MAILING_ADDRESS` before going to real pros.
 - **Admin alerts.** `ADMIN_EMAIL` gets an email when a verification needs a person, a bad lead is reported, or a ticket is opened.
 - **First lead.** My leads shows "How to win this lead" while a pro has one or two leads, until they tap "Got it".
+
+## No phone number, no lead
+
+A lead is only offered if the owner left a phone number (ten digits, area code not starting with 0 or 1; a leading 1 is dropped). `hasPhone` enforces it in five places:
+
+- **Intake:** a Call Tracker row with no phone is not copied (`skipped.noPhone` in the ingest log).
+- **Lead writer:** a lead with no phone is marked `Rejected`, Qualified `No: no phone number`, with no AI call, and is never brought back.
+- **Open leads and lead texts:** the Airtable filters require `LEN({Owner Phone}&'')=10`.
+- **Claiming:** refused as closed.
+- **Clean-up:** `dropNoPhone` runs every minute and rejects any `Offered` lead with no phone, 40 at a time.
+
+An email lead counts only if its details carry a `Phone:` line.
