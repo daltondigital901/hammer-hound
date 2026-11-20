@@ -22,8 +22,8 @@ db.tbl9olHmI5p746DOe.push({ id: SITE_FREE, fields: { fldxjMNAdLglWFBLl: "Yes - N
 export function seedForm(n, o = {}) {
   const email = o.kind === "Email";
   const details = email
-    ? `New email lead:\nName: ${o.name || "Sample Owner " + n}\nEmail: owner${n}@example.com\nTo: hello@sample.example\nSubject: ${o.subject || "Quote for a retaining wall"}\nMessage: ${o.message || "Please send a quote."}`
-    : `New website lead:\nName: ${o.name || "Sample Owner " + n}\nPhone: 90155501${String(n % 100).padStart(2, "0")}\nEmail: owner${n}@example.com\nCity: ${o.city || "Memphis"}\nService: ${o.service || "Roof Repair"}\nMessage: ${o.message || "Leak over the kitchen.\nNeed someone this week."}`;
+    ? `New email lead:\nName: ${o.name || "Sample Owner " + n}\nEmail: owner${n}@example.com${o.phone === "" ? "" : "\nPhone: " + (o.phone || "90155501" + String(n % 100).padStart(2, "0"))}\nTo: hello@sample.example\nSubject: ${o.subject || "Quote for a retaining wall"}\nMessage: ${o.message || "Please send a quote."}`
+    : `New website lead:\nName: ${o.name || "Sample Owner " + n}${o.phone === "" ? "" : "\nPhone: " + (o.phone || "90155501" + String(n % 100).padStart(2, "0"))}\nEmail: owner${n}@example.com\nCity: ${o.city || "Memphis"}\nService: ${o.service || "Roof Repair"}\nMessage: ${o.message || "Leak over the kitchen.\nNeed someone this week."}`;
   db.tblW1A0iKDAd111iI.push({ id: rid(), fields: { [NUM]: n, fldJmHzvV9WlWbPUH: email ? "Email" : "Form", fldqadMmvag7tK3U7: o.siteName || "Sample Roofing Site", fldiLbdgf1efaCUOf: o.site === null ? undefined : [o.site || SITE_FREE], fldZ3OCAkOMlzbwec: new Date().toISOString(), fldw8MWCtjotaU9Tw: "Organic",
     _valid: o.valid !== false, _client: !!o.client, _kind: o.kind || "Form", fldDI13VDK04kQnYK: details } });
 }
@@ -53,13 +53,16 @@ function matches(table, rec, formula) {
   if (formula === "AND({Review Status}='Approved',NOT({Credited}))") return f["Review Status"] === "Approved" && !f.Credited;
   if (formula === "AND({Verification}='Verified',NOT({Paused}))") return f.Verification === "Verified" && !f.Paused;
   if (formula === "NOT({Email}='')") return !!f.Email;
-  if (formula.includes("{Alerted}=''")) return f.Status === "Offered" && f.Style === "v2" && Date.now() - Date.parse(f["Received At"]) < 12 * 3600e3 && !f.Alerted;
+  if (formula === "AND({Status}='Offered',NOT(LEN({Owner Phone}&'')=10))") return f.Status === "Offered" && String(f["Owner Phone"] || "").length !== 10;
+  if (/^AND\(\{Status\}='Offered',\{Style\}='v2',(?!LEN\(\{Owner Phone\}&''\)=10)/.test(formula) && !formula.includes("Price Version")) throw new Error("mock: an open-lead filter is missing the phone condition");
+  const ph = String(f["Owner Phone"] || "").length === 10;
+  if (formula.includes("{Alerted}=''")) return ph && f.Status === "Offered" && f.Style === "v2" && Date.now() - Date.parse(f["Received At"]) < 12 * 3600e3 && !f.Alerted;
   if (formula.startsWith("AND({State}='',{Site State}=''")) return !f.State && !f["Site State"] && f["DD1 Call Number"] != null && Date.now() - Date.parse(f["Received At"]) < 30 * 864e5;
   if (formula.includes("NOT({Price Version}=")) return f.Status === "Offered" && f.Style === "v2" && Date.now() - Date.parse(f["Received At"]) < 7 * 864e5 && f["Price Version"] !== "p1" && f["Price Version"] !== "sold" && !f["Price Locked"];
   if ((m = formula.match(/^\{Segment\}='(.*)'$/))) return f.Segment === m[1];
   if (formula.startsWith("AND({Style}='v2',{Qualified}='Yes'")) return f.Style === "v2" && f.Qualified === "Yes" && Date.now() - Date.parse(f["Received At"]) < 30 * 864e5;
   if (formula === "IS_AFTER({Bought At},DATEADD(NOW(),-30,'days'))") return Date.now() - Date.parse(f["Bought At"]) < 30 * 864e5;
-  if (formula.startsWith("AND({Status}='Offered',{Style}='v2'")) return f.Status === "Offered" && f.Style === "v2" && Date.now() - Date.parse(f["Received At"]) < 7 * 864e5;
+  if (formula.startsWith("AND({Status}='Offered',{Style}='v2'")) return ph && f.Status === "Offered" && f.Style === "v2" && Date.now() - Date.parse(f["Received At"]) < 7 * 864e5;
   if (formula.startsWith("AND(NOT({Style}='v2')")) return f.Style !== "v2" && f.Style !== "failed 3" && (f.Status !== "Rejected" || String(f.Qualified || "").startsWith("No:")) && Date.now() - Date.parse(f["Received At"]) < 7 * 864e5;
   throw new Error("mock: unknown formula " + formula);
 }

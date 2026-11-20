@@ -36,7 +36,7 @@ const signUp = async (n) => {
 // form parsing and ingest
 assert.deepEqual(parseForm("New website lead:\nName: A B\nPhone: 9015550100\nEmail: a@example.com\nCity: Memphis\nService: Roof Repair\nMessage: line one\nline two"), { Message: "line one\nline two", Name: "A B", Phone: "9015550100", Email: "a@example.com", City: "Memphis", Service: "Roof Repair" });
 // an old-rule lead is removed before anything is copied
-db.tblfA6ivDIlWVp4us.push({ id: "recOLDRULE00000001", fields: { Lead: "old", Source: "DD1 form (shadow)", "DD1 Call Number": 999, Status: "Offered", "Offer Ends At": new Date(Date.now() + 1e7).toISOString() } });
+db.tblfA6ivDIlWVp4us.push({ id: "recOLDRULE00000001", fields: { "Owner Phone": "9015550100", Lead: "old", Source: "DD1 form (shadow)", "DD1 Call Number": 999, Status: "Offered", "Offer Ends At": new Date(Date.now() + 1e7).toISOString() } });
 assert.deepEqual(await ingest(env), { purged: 1, copied: 0 }, "old-rule leads are purged first");
 assert.equal(db.tblfA6ivDIlWVp4us.length, 0);
 
@@ -46,13 +46,13 @@ seedForm(3, { kind: "Email", subject: "Quote for a retaining wall" });
 seedForm(4, { valid: false }); seedForm(5, { site: SITE_GBP }); seedForm(6, { site: SITE_CLIENT }); seedForm(7, { client: true }); seedForm(8, { site: null }); db.tblW1A0iKDAd111iI.at(-1).fields.fldfJJYK166eGNfxw = 7.5; seedForm(8, { site: SITE_PROSPECT });
 const first1 = await ingest(env);
 // sites with a GBP are copied for now; a site with a client or an open prospect is not
-assert.equal(first1.copied, 4); assert.deepEqual(first1.skipped, { noSite: 1, gbp: 0, client: 1, prospect: 1 });
+assert.equal(first1.copied, 4); assert.deepEqual(first1.skipped, { noPhone: 0, noSite: 1, gbp: 0, client: 1, prospect: 1 });
 assert.equal(db.tblfA6ivDIlWVp4us.find((l) => l.fields["DD1 Call Number"] === 5).fields["Site GBP"], "Has One!"); assert.equal(db.tblfA6ivDIlWVp4us.find((l) => l.fields["DD1 Call Number"] === 1).fields["Site GBP"], "Yes - Not Requested Yet");
 assert.equal((await ingest(env)).copied, 0, "does not copy the same lead twice");
 seedForm(9); assert.equal((await ingest(env)).copied, 1, "picks up a new form");
 { const L0 = db.tblfA6ivDIlWVp4us; L0.splice(L0.findIndex((l) => l.fields["DD1 Call Number"] === 5), 1); }   // the later checks count the other three
 const leads = db.tblfA6ivDIlWVp4us; assert.ok(leads.every((l) => l.fields.Test === true && l.fields.Rule === "v3"));
-const mail = leads.find((l) => l.fields["Lead Source"].startsWith("Email")); assert.equal(mail.fields.Service, "Quote for a retaining wall"); assert.equal(mail.fields["Owner Phone"], "");
+const mail = leads.find((l) => l.fields["Lead Source"].startsWith("Email")); assert.equal(mail.fields.Service, "Quote for a retaining wall"); assert.equal(mail.fields["Owner Phone"], "9015550103");
 
 // gates
 assert.equal((await call("/api/pro/join", { city: "Memphis", state: "TN", agree: "yes", email: "join@example.com", business: "Outsider", phone: "9012223333" })).status, 403, "shadow mode blocks non-internal numbers");
@@ -195,7 +195,7 @@ assert.match(readFileSync(new URL("../site/dist/pros/join/index.html", import.me
   const spam = L.find((l) => l.fields["DD1 Call Number"] === 28); assert.equal(spam.fields.Status, "Rejected"); assert.match(spam.fields.Qualified, /^No: vendor pitch/);
   assert.ok(!(await call(ALL, null, a)).offers.some((o) => o.id === spam.id));
   // a lead the writer has not reached is not offered
-  L.push({ id: "recUNSTYLED0000001", fields: { Lead: "Fwd: raw subject", Service: "Fwd: raw subject", Status: "Offered", "Offer Ends At": new Date(Date.now() + 1e7).toISOString(), "Received At": new Date().toISOString(), Source: "DD1 form (shadow)", Rule: "v3" } });
+  L.push({ id: "recUNSTYLED0000001", fields: { "Owner Phone": "9015550100", Lead: "Fwd: raw subject", Service: "Fwd: raw subject", Status: "Offered", "Offer Ends At": new Date(Date.now() + 1e7).toISOString(), "Received At": new Date().toISOString(), Source: "DD1 form (shadow)", Rule: "v3" } });
   assert.ok(!(await call(ALL, null, a)).offers.some((o) => o.id === "recUNSTYLED0000001"), "raw leads are held back");
   ai.down = true; assert.equal((await styleLeads(env)).failed, 1); ai.down = false; assert.equal((await styleLeads(env)).styled, 1);
   assert.equal(scrub("Jane Doe at 746 Highland Springs Ct, 765-661-3431, jane@x.com wants brick fixed.", { "Owner Name": "Jane Doe" }), "The owner at [address removed], [removed], [removed] wants brick fixed.");
@@ -373,11 +373,11 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
 
   // the lead writer stops after three failed runs on the same lead
   const { styleLeads } = await import("../src/worker.js"), LD = db.tblfA6ivDIlWVp4us;
-  LD.push({ id: "recSTUCKLEAD000001", fields: { Lead: "raw", Service: "raw", Message: "UNWRITABLE", Status: "Offered", "Received At": new Date().toISOString() } });
+  LD.push({ id: "recSTUCKLEAD000001", fields: { "Owner Phone": "9015550100", Lead: "raw", Service: "raw", Message: "UNWRITABLE", Status: "Offered", "Received At": new Date().toISOString() } });
   for (let i = 0; i < 3; i++) await styleLeads(env); const calls = ai.calls; await styleLeads(env);
   assert.equal(LD.at(-1).fields.Style, "failed 3"); assert.equal(ai.calls, calls, "no more AI calls are spent on it");
   // an AI outage is not counted against the leads waiting: they are written when it comes back
-  LD.push({ id: "recOUTAGELEAD00001", fields: { Lead: "raw", Service: "Roof Repair", Message: "Leak.", Status: "Offered", "Received At": new Date().toISOString() } }, { id: "recOUTAGELEAD00002", fields: { Lead: "raw", Service: "Roof Repair", Message: "Leak.", Status: "Offered", "Received At": new Date().toISOString() } });
+  LD.push({ id: "recOUTAGELEAD00001", fields: { "Owner Phone": "9015550100", Lead: "raw", Service: "Roof Repair", Message: "Leak.", Status: "Offered", "Received At": new Date().toISOString() } }, { id: "recOUTAGELEAD00002", fields: { "Owner Phone": "9015550100", Lead: "raw", Service: "Roof Repair", Message: "Leak.", Status: "Offered", "Received At": new Date().toISOString() } });
   ai.down = true; for (let i = 0; i < 4; i++) assert.equal((await styleLeads(env)).outage, true); ai.down = false;
   assert.equal(LD.at(-1).fields.Style, undefined); await styleLeads(env); assert.equal(LD.at(-1).fields.Style, "v2"); assert.equal(LD.at(-2).fields.Style, "v2");
 
@@ -412,7 +412,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
 // ---- hot leads, older leads, and bid invitations ----
 {
   const LD = db.tblfA6ivDIlWVp4us, c = await signUp(85), hrs = (h) => new Date(Date.now() - h * 3600e3).toISOString();
-  const mk = (id, h, extra = {}) => { LD.push({ id, fields: { Lead: "Age Test · Memphis, TN", Job: "Age Test", Trade: "roofing", City: "Memphis", State: "TN", Status: "Offered", Style: "v2", Qualified: "Yes", "Received At": hrs(h), "Shared Price": 75, "Exclusive Price": 225, "Max Pros": 5, Alerted: "x", ...extra } }); return id; };
+  const mk = (id, h, extra = {}) => { LD.push({ id, fields: { "Owner Phone": "9015550100", Lead: "Age Test · Memphis, TN", Job: "Age Test", Trade: "roofing", City: "Memphis", State: "TN", Status: "Offered", Style: "v2", Qualified: "Yes", "Received At": hrs(h), "Shared Price": 75, "Exclusive Price": 225, "Max Pros": 5, Alerted: "x", ...extra } }); return id; };
   const hot = mk("recAGEHOT00000001", 71), old = mk("recAGEOLD00000001", 73), week = mk("recAGEWEEK0000001", 7 * 24 - 1), gone = mk("recAGEGONE0000001", 7 * 24 + 1);
   // older leads are hidden until a card is on file, and cannot be claimed without one
   { const v = await call(ALL, null, c); assert.equal(v.olderShown, false); assert.equal(v.older, 0); assert.ok(v.offers.every((o) => o.hot)); assert.ok(v.offers.find((o) => o.id === hot));
@@ -439,7 +439,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   const bid = LD.at(-1).fields; assert.equal(bid.Status, "Offered"); assert.match(bid.Job, /^Demolition Bid Invitation$/); assert.doesNotMatch(bid.Job, /Request|Subcontractor|Fwd|ITB/); assert.equal(bid["Property Type"], "Business");
   assert.equal((await call(ALL, null, c)).offers.find((o) => o.job === bid.Job).bid, true);
   // leads the writer rejected under the old rules are looked at again; ones a person rejected are not
-  LD.push({ id: "recREJWRITER00001", fields: { Lead: "x", Service: "Fwd: ITB Park Restroom Bid", Message: "Invitation to bid.", Status: "Rejected", Style: "v1", Qualified: "No: Bid invitation from general contractor", "Received At": hrs(5) } }, { id: "recREJPERSON00001", fields: { Lead: "x", Service: "ITB", Message: "Invitation to bid.", Status: "Rejected", Style: "v1", "Received At": hrs(5) } });
+  LD.push({ id: "recREJWRITER00001", fields: { "Owner Phone": "9015550100", Lead: "x", Service: "Fwd: ITB Park Restroom Bid", Message: "Invitation to bid.", Status: "Rejected", Style: "v1", Qualified: "No: Bid invitation from general contractor", "Received At": hrs(5) } }, { id: "recREJPERSON00001", fields: { "Owner Phone": "9015550100", Lead: "x", Service: "ITB", Message: "Invitation to bid.", Status: "Rejected", Style: "v1", "Received At": hrs(5) } });
   await styleLeads(env);
   assert.equal(LD.find((l) => l.id === "recREJWRITER00001").fields.Status, "Offered"); assert.match(LD.find((l) => l.id === "recREJWRITER00001").fields.Job, /Park Restroom Bid Invitation$/); assert.equal(LD.find((l) => l.id === "recREJPERSON00001").fields.Status, "Rejected");
 }
@@ -635,7 +635,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   const card = (await call(ALL, null, c)).offers.find((o) => o.id === lead.id); assert.equal(card.sharedPrice, lead.fields["Shared Price"]); assert.ok(Array.isArray(card.priceWhy));
   // editing the trade's row changes the next price; a locked lead is left alone
   TR.find((r) => r.fields.Trade === "roofing").fields["Job Value"] = 6000; lead.fields["Price Version"] = "old"; const was = lead.fields["Shared Price"];
-  LD.push({ id: "recLOCKEDPRICE0001", fields: { Lead: "Locked · Memphis, TN", Job: "Locked", Trade: "roofing", City: "Memphis", Status: "Offered", Style: "v2", Qualified: "Yes", "Received At": new Date().toISOString(), "Shared Price": 33, "Exclusive Price": 99, "Price Locked": true, "Max Pros": 5 } });
+  LD.push({ id: "recLOCKEDPRICE0001", fields: { "Owner Phone": "9015550100", Lead: "Locked · Memphis, TN", Job: "Locked", Trade: "roofing", City: "Memphis", Status: "Offered", Style: "v2", Qualified: "Yes", "Received At": new Date().toISOString(), "Shared Price": 33, "Exclusive Price": 99, "Price Locked": true, "Max Pros": 5 } });
   const { default: w2 } = await import("../src/worker.js"); await new Promise((r) => setTimeout(r, 5));
   // (the trade table is cached for five minutes in production; the price follows on the next load)
   const rp = await repriceLeads(env); assert.ok(rp.repriced >= 1); assert.equal(lead.fields["Price Version"], "p1"); assert.ok([was, was * 2].includes(lead.fields["Shared Price"])); assert.equal(LD.at(-1).fields["Shared Price"], 33, "a locked price is never touched");
@@ -672,13 +672,13 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   // joining needs a state
   assert.match((await call("/api/pro/join", { city: "Memphis", agree: "yes", email: "ns@example.com", business: "No State", phone: "9015550164" })).error, /Pick the state/);
   // a lead copied before states were carried over is fixed from its site, and its title follows
-  LD.push({ id: "recNOSTATELEAD0001".slice(0, 17), fields: { Lead: "Patio Pour · Bartlett", Job: "Patio Pour", City: "Bartlett", Trade: "concrete", Status: "Offered", Style: "v2", Qualified: "Yes", "DD1 Call Number": 80, "Received At": new Date().toISOString(), "Shared Price": 75, "Exclusive Price": 225, "Max Pros": 5, Alerted: "x", "Price Version": "p1" } });
+  LD.push({ id: "recNOSTATELEAD0001".slice(0, 17), fields: { "Owner Phone": "9015550100", Lead: "Patio Pour · Bartlett", Job: "Patio Pour", City: "Bartlett", Trade: "concrete", Status: "Offered", Style: "v2", Qualified: "Yes", "DD1 Call Number": 80, "Received At": new Date().toISOString(), "Shared Price": 75, "Exclusive Price": 225, "Max Pros": 5, Alerted: "x", "Price Version": "p1" } });
   assert.equal(await fixStates(env), 1); assert.deepEqual([LD.at(-1).fields.State, LD.at(-1).fields.Lead], ["TN", "Patio Pour · Bartlett, TN"]); assert.equal(await fixStates(env), 0);
   // a pro who signed up before states (city only) still gets their market, shown with its state
   const c = await signUp(94), me = db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550194"); me.fields.State = "";
   const v = await call("/api/pro/offers", null, c); assert.equal(v.filters.market, "Memphis, TN"); assert.ok(v.offers.length > 0 && v.offers.every((o) => o.city === "Memphis"));
   // the same city name in another state is a different market
-  LD.push({ id: "recOTHERSTATE00001".slice(0, 17), fields: { Lead: "Roof Repair · Memphis, MO", Job: "Roof Repair", City: "Memphis", State: "MO", "Site State": "MO", Trade: "roofing", Status: "Offered", Style: "v2", Qualified: "Yes", "Received At": new Date().toISOString(), "Shared Price": 75, "Exclusive Price": 225, "Max Pros": 5, Alerted: "x", "Price Version": "p1" } });
+  LD.push({ id: "recOTHERSTATE00001".slice(0, 17), fields: { "Owner Phone": "9015550100", Lead: "Roof Repair · Memphis, MO", Job: "Roof Repair", City: "Memphis", State: "MO", "Site State": "MO", Trade: "roofing", Status: "Offered", Style: "v2", Qualified: "Yes", "Received At": new Date().toISOString(), "Shared Price": 75, "Exclusive Price": 225, "Max Pros": 5, Alerted: "x", "Price Version": "p1" } });
   me.fields.State = "TN"; const tn = await call("/api/pro/offers", null, c); assert.ok(tn.offers.length > 0 && tn.offers.every((o) => o.state !== "MO"), "the Missouri lead is not in a Tennessee pro's market"); assert.ok(tn.filters.markets.some((m) => m.name === "Memphis, MO") && tn.filters.markets.some((m) => m.name === "Memphis, TN"));
   const mo = await call("/api/pro/offers?market=" + encodeURIComponent("Memphis, MO") + "&trade=all", null, c); assert.ok(mo.offers.some((o) => o.place === "Memphis, MO") && !mo.offers.some((o) => o.state === "TN"), "Memphis, MO does not show Tennessee leads"); assert.equal(mo.filters.market, "Memphis, MO");
   LD.pop();
@@ -721,6 +721,21 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   assert.deepEqual(["2027-03-01", "2027-03-02", "2027-03-03", "2027-03-04", "2027-03-07", "2027-03-08", "2027-03-15", "2027-03-16"].map((n) => S("Not started", "2027-03-01", n)), [undefined, "start1", "start1", "start3", "start3", "start7", "start7", undefined]);
   assert.equal(S(undefined, "2027-03-01", "2027-03-02"), "start1"); assert.equal(S("Pending", "2027-03-01", "2027-03-02"), undefined); assert.equal(S("In review", "2027-03-01", "2027-03-05"), undefined);
   assert.equal(reminderFor({ Email: "a@b.co", Verification: "Not started", "Created At": "2027-03-01T15:00:00.000Z" }, "2027-03-02").key, "2027-03-01|start1");
+}
+
+// ---- a lead with no phone number is never offered ----
+{
+  const LD = db.tblfA6ivDIlWVp4us, { dropNoPhone, alertPros } = await import("../src/worker.js"), n0 = LD.length;
+  // not copied in: no phone line, an empty one, too few digits, a made-up area code; a 1 in front of ten digits is fine
+  seedForm(301, { phone: "" }); seedForm(302, { kind: "Email", phone: "" }); seedForm(303, { phone: "555-1234" }); seedForm(304, { phone: "000-000-0000" }); seedForm(305, { phone: "+1 (901) 444-0305" });
+  const r = await ingest(env); assert.equal(r.skipped.noPhone, 4); assert.equal(r.copied, 1); assert.equal(LD.length, n0 + 1); assert.equal(LD.at(-1).fields["Owner Phone"], "9014440305");
+  // one already on the board loses its number: it comes off Open leads, is not texted out, cannot be claimed, and is then removed
+  const good = LD.at(-1), c = await signUp(96); good.fields.Alerted = ""; const before = (await call("/api/pro/offers?market=all&trade=all", null, c)).offers; assert.ok(before.some((o) => o.id === good.id));
+  good.fields["Owner Phone"] = ""; assert.ok(!(await call("/api/pro/offers?market=all&trade=all", null, c)).offers.some((o) => o.id === good.id), "not shown");
+  const t0 = texts.length; await alertPros(env); assert.ok(!good.fields.Alerted, "not alerted"); assert.equal((await call("/api/pro/buy", { leadId: good.id, kind: "shared" }, c)).status, 410, "not claimable"); void t0;
+  assert.equal(await dropNoPhone(env), 1); assert.deepEqual([good.fields.Status, good.fields.Qualified], ["Rejected", "No: no phone number"]); assert.equal(await dropNoPhone(env), 0);
+  // and the lead writer never brings it back, or spends an AI call on it
+  good.fields.Style = ""; const { styleLeads } = await import("../src/worker.js"); await styleLeads(env); assert.deepEqual([good.fields.Status, good.fields.Style, good.fields.Qualified], ["Rejected", "v2", "No: no phone number"]);
 }
 
 // ---- insurance reminders and nudges ----
