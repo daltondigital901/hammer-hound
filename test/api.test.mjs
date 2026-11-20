@@ -272,7 +272,7 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   const yes = await sms("+19012223333", " yes ");
   for (const part of [/claimed\. Roof Repair, Memphis, TN\./, /OWNER: Sample Owner 60/, /PHONE: \(901\) 555-0160/, /EMAIL: owner60@example\.com/, /Timing: Within a week\. Property: Home\. Size: Small\./, /JOB: The owner wants roof repair/, /THEIR WORDS: Leak over the kitchen\. Need someone this week\./, /Call now\./]) assert.match(yes.text, part, "the YES reply carries the whole lead");
   assert.equal(real.fields.Balance, 90); assert.deepEqual(db.tblZ2EIWCgOb36JR2.slice(-2).map((r) => [r.fields.Type, r.fields.Via]), [["Top-up", "Text"], ["Lead", "Text"]]);
-  assert.match((await sms("+19012223333", "YES")).text, /not claimed\. You already have this lead/);
+  { const again = (await sms("+19012223333", "YES")).text; assert.match(again, /already claimed by Real Roofing\. No charge\. Here are the details\./); assert.match(again, /OWNER: Sample Owner 60/); }
   assert.match((await sms("+19012223333", "balance")).text, /wallet has \$90\.00/); assert.match((await sms("+19019990000", "YES")).text, /not on a pro account/);
   assert.ok(!/\$\d/.test(yes.text), "the lead text shows no charge and no wallet balance");
   assert.match(sent.at(-1).subject, /Receipt: \$150\.00 added/, "the card charge is confirmed by an emailed receipt instead");
@@ -370,9 +370,13 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
 
   // the lead writer stops after three failed runs on the same lead
   const { styleLeads } = await import("../src/worker.js"), LD = db.tblfA6ivDIlWVp4us;
-  LD.push({ id: "recSTUCKLEAD000001", fields: { Lead: "raw", Service: "raw", Status: "Offered", "Offer Ends At": new Date(Date.now() + 1e7).toISOString(), "Received At": new Date().toISOString() } });
-  ai.down = true; for (let i = 0; i < 3; i++) await styleLeads(env); const calls = ai.calls; await styleLeads(env); ai.down = false;
+  LD.push({ id: "recSTUCKLEAD000001", fields: { Lead: "raw", Service: "raw", Message: "UNWRITABLE", Status: "Offered", "Received At": new Date().toISOString() } });
+  for (let i = 0; i < 3; i++) await styleLeads(env); const calls = ai.calls; await styleLeads(env);
   assert.equal(LD.at(-1).fields.Style, "failed 3"); assert.equal(ai.calls, calls, "no more AI calls are spent on it");
+  // an AI outage is not counted against the leads waiting: they are written when it comes back
+  LD.push({ id: "recOUTAGELEAD00001", fields: { Lead: "raw", Service: "Roof Repair", Message: "Leak.", Status: "Offered", "Received At": new Date().toISOString() } }, { id: "recOUTAGELEAD00002", fields: { Lead: "raw", Service: "Roof Repair", Message: "Leak.", Status: "Offered", "Received At": new Date().toISOString() } });
+  ai.down = true; for (let i = 0; i < 4; i++) assert.equal((await styleLeads(env)).outage, true); ai.down = false;
+  assert.equal(LD.at(-1).fields.Style, undefined); await styleLeads(env); assert.equal(LD.at(-1).fields.Style, "v2"); assert.equal(LD.at(-2).fields.Style, "v2");
 
   // "I want more leads here": recorded once per pro, market and trade
   const MR = db.tbl315ujQMh1PHOi8;
@@ -382,12 +386,36 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   assert.equal((await call("/api/pro/market-request", { market: "Tupelo", trade: "roofing" }, null)).status, 401);
 }
 
+// ---- second audit: paging past 100 rows, and a reload settling a declined one ----
+{
+  const { creditBacks } = await import("../src/worker.js"), PU = db.tblJnYLq2aCiCVU1C, P = db.tbl9bEGuy8DPkkee7, before = PU.length;
+  // 130 approved reports for one pro: every one is found, though Airtable hands back 100 rows a call
+  const pp = { id: "recPAGINGPRO000001".slice(0, 17), fields: { "Business Name": "Paging Pro", Email: "pg@example.com", Balance: 0, Test: true } }; P.push(pp);
+  for (let i = 0; i < 130; i++) PU.push({ id: "recPG" + String(i).padStart(12, "0"), fields: { Purchase: `recNOLEAD${String(i).padStart(8, "0")}:${pp.id}`, Price: 1, "Review Status": "Approved", Kind: "Shared" } });
+  const { default: w } = await import("../src/worker.js");
+  let total = 0; for (let i = 0; i < 8 && total < 130; i++) total += await creditBacks(env);
+  assert.equal(total, 130); assert.equal(pp.fields.Balance, 130);
+  const adminCookie = (await (async () => { const r = await worker.fetch(new Request("https://hammerhound.com/api/admin/sign-in", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: env.ADMIN_KEY }) }), env); return (r.headers.get("Set-Cookie") || "").split(";")[0]; })());
+  const ov = await (await worker.fetch(new Request("https://hammerhound.com/api/admin/overview", { headers: { Cookie: adminCookie } }), env)).json();
+  assert.ok(ov.stats.pros.total === P.length, "the admin overview counts every pro");
+  PU.splice(before, 130); P.splice(P.indexOf(pp), 1); db.tblZ2EIWCgOb36JR2 = db.tblZ2EIWCgOb36JR2.filter((r) => r.fields["Pro ID"] !== pp.id);
+  // a reload that succeeds clears one left waiting by a declined card, so saving a card later cannot charge twice
+  const c2 = await signUp(88), p2 = P.find((p) => p.fields.Mobile === "9015550188");
+  await call("/api/pro/card", { action: "save" }, c2); p2.fields["Pending Reload"] = `150|||${new Date().toISOString()}`;
+  assert.equal((await call("/api/pro/add-funds", { amount: 150 }, c2)).status, 200); assert.equal(p2.fields["Pending Reload"], "");
+  const bal2 = p2.fields.Balance; assert.equal((await call("/api/pro/card", { action: "save" }, c2)).reloaded, 0); assert.equal(p2.fields.Balance, bal2);
+}
+
 // ---- hot leads, older leads, and bid invitations ----
 {
   const LD = db.tblfA6ivDIlWVp4us, c = await signUp(85), hrs = (h) => new Date(Date.now() - h * 3600e3).toISOString();
   const mk = (id, h, extra = {}) => { LD.push({ id, fields: { Lead: "Age Test · Memphis, TN", Job: "Age Test", Trade: "roofing", City: "Memphis", State: "TN", Status: "Offered", Style: "v2", Qualified: "Yes", "Received At": hrs(h), "Shared Price": 75, "Exclusive Price": 225, "Max Pros": 5, Alerted: "x", ...extra } }); return id; };
   const hot = mk("recAGEHOT00000001", 71), old = mk("recAGEOLD00000001", 73), week = mk("recAGEWEEK0000001", 7 * 24 - 1), gone = mk("recAGEGONE0000001", 7 * 24 + 1);
-  const r = await call(ALL, null, c), by = (id) => r.offers.find((o) => o.id === id);
+  // older leads are hidden until a card is on file, and cannot be claimed without one
+  { const v = await call(ALL, null, c); assert.equal(v.olderShown, false); assert.equal(v.older, 0); assert.ok(v.offers.every((o) => o.hot)); assert.ok(v.offers.find((o) => o.id === hot));
+    const blocked = await call("/api/pro/buy", { leadId: old, kind: "shared" }, c); assert.equal(blocked.status, 403); assert.match(blocked.error, /Add a card/); }
+  const meP = db.tbl9bEGuy8DPkkee7.find((p) => p.fields.Mobile === "9015550185"); await call("/api/pro/card", { action: "save" }, c);
+  const r = await call(ALL, null, c), by = (id) => r.offers.find((o) => o.id === id); assert.equal(r.olderShown, true);
   assert.equal(by(hot).hot, true, "under 72 hours is hot"); assert.equal(by(old).hot, false, "past 72 hours is an older lead"); assert.equal(by(week).hot, false); assert.equal(by(gone), undefined, "a week old is closed");
   assert.equal(r.hot + r.older, r.offers.length); assert.equal(r.hotHours, 72); assert.equal(r.leadDays, 7);
   assert.equal((await call("/api/pro/buy", { leadId: gone, kind: "shared" }, c)).status, 410); // older leads are marked down by age: 50, 40, 30, 20 percent of the hot price, to the nearest $5
@@ -395,7 +423,11 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   { const v = (await call(ALL, null, c)).offers, g = (id) => v.find((o) => o.id === id);
     assert.deepEqual([g(hot).sharedPrice, g(hot).percentOff], [75, 0]); assert.deepEqual([g(old).sharedPrice, g(old).exclusivePrice, g(old).fullPrice, g(old).percentOff], [40, 115, 75, 50]);
     assert.deepEqual([g(d5).sharedPrice, g(d5).exclusivePrice], [25, 70]); assert.deepEqual([g(week).sharedPrice, g(week).exclusivePrice, g(week).percentOff], [15, 45, 80]); }
-  const paid = await call("/api/pro/buy", { leadId: old, kind: "shared" }, c); assert.equal(paid.status, 200, "older leads can still be claimed"); assert.equal(paid.price, 40, "and the marked-down price is what is charged");
+  // welcome credit does not pay for an older lead: with $240 of credit and no funds of their own, the card is charged
+  const need = await call("/api/pro/buy", { leadId: old, kind: "shared" }, c); assert.equal(need.status, 402); assert.match(need.error, /\$0\.00 of your own funds\. Welcome credit is for hot leads only/); assert.equal(need.reloadAmount, 150);
+  const paid = await call("/api/pro/buy", { leadId: old, kind: "shared", reload: true }, c); assert.equal(paid.status, 200, "older leads can still be claimed"); assert.equal(paid.price, 40, "and the marked-down price is what is charged");
+  assert.equal(paid.creditUsed, 0); assert.equal(paid.reloaded, 150); assert.equal(meP.fields.Balance, 350); assert.equal(meP.fields["Welcome Credit"], 240, "welcome credit is untouched");
+  const hotBuy = await call("/api/pro/buy", { leadId: hot, kind: "shared" }, c); assert.equal(hotBuy.creditUsed, 75, "and still pays for a hot lead");
   // text and email alerts only go out for hot leads
   const { alertPros, styleLeads } = await import("../src/worker.js");
   for (const l of LD) l.fields.Alerted = "x"; LD.find((l) => l.id === week).fields.Alerted = ""; assert.equal((await alertPros(env)).leads, 0);
@@ -464,6 +496,75 @@ assert.equal((await call("/api/pro/me", null, m1)).status, 401, "a closed accoun
   assert.equal((await adm("/api/admin/overview", null, null, hdr(token({ ...good, aud: ["other"] })))).status, 401); assert.equal((await adm("/api/admin/overview", null, null, hdr(token({ ...good, exp: 1 })))).status, 401);
   assert.equal((await adm("/api/admin/overview", null, null, hdr(token(good, generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey)))).status, 401, "a token signed by another key is refused");
   delete env.ACCESS_TEAM; delete env.ACCESS_AUD; delete env.ACCESS_CERTS;
+}
+
+// ---- team members: invite, pay authority with a double confirm, claims by text ----
+{
+  Object.assign(env, { TWILIO_ACCOUNT_SID: "AC1", TWILIO_AUTH_TOKEN: "tok", TWILIO_FROM: "+19015550000" });
+  const P = db.tbl9bEGuy8DPkkee7, T = db.tblAxauFF33UVS2gV, LOG = db.tblTYo9QOk8hTwQad, LD = db.tblfA6ivDIlWVp4us, PU = db.tblJnYLq2aCiCVU1C, { alertPros } = await import("../src/worker.js");
+  const sms = async (from, body) => { const url = "https://hammerhound.com/api/sms/inbound", p = { Body: body, From: from }; const r = await worker.fetch(new Request(url, { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Twilio-Signature": createHmac("sha1", "tok").update(url + Object.keys(p).sort().map((k) => k + p[k]).join("")).digest("base64") }, body: new URLSearchParams(p) }), env); return r.text(); };
+  const c = await signUp(91), me = P.find((p) => p.fields.Mobile === "9015550191"), acts = () => LOG.filter((r) => r.fields["Account ID"] === me.id).map((r) => r.fields.Action);
+  // before anyone can be added: the owner's acknowledgment, recorded with the version, time and IP address
+  assert.equal((await call("/api/pro/team", null, c)).ack, false); assert.equal((await call("/api/pro/team/add", { name: "Dana", phone: "9017771111" }, c)).status, 403, "no team before the acknowledgment");
+  assert.equal((await call("/api/pro/team/ack", {}, c)).status, 400); assert.equal((await call("/api/pro/team/ack", { agree: "yes" }, c)).ack, true);
+  assert.match(me.fields["Team Ack"], /^November 19, 2026 \| 20\d\d-.* \| /); assert.equal(acts().at(-1), "Team turned on");
+  // adding: a name and a number nobody else uses; the invite goes out by text
+  assert.equal((await call("/api/pro/team/add", { name: "", phone: "9017771111" }, c)).status, 400); assert.equal((await call("/api/pro/team/add", { name: "Me", phone: "9015550191" }, c)).status, 409);
+  const t0 = texts.length, added = await call("/api/pro/team/add", { name: "Dana", phone: "(901) 777-1111" }, c); assert.equal(added.members.length, 1); assert.equal(added.max, 5);
+  const dana = T.at(-1); assert.deepEqual([dana.fields["Gets Texts"], dana.fields["Can Pay"], dana.fields.Portal], [true, false, false]);
+  assert.equal(texts[t0].to, "+19017771111"); assert.match(texts[t0].body, /Test Pro 91 added you to their account to get lead texts\. Reply YES to accept/); assert.deepEqual(acts().slice(-2), ["Added", "Invited"]);
+  assert.equal((await call("/api/pro/team/add", { name: "Dana again", phone: "9017771111" }, c)).status, 409, "one number, one account");
+  // pay authority cannot be given before the person accepts, and the invite is accepted from their own phone
+  assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes" }, c)).status, 409);
+  assert.match(await sms("+19017771111", "hello"), /Reply YES to get lead texts/); assert.match(await sms("+19017771111", "Yes"), /you're in\. You'll get lead texts for Test Pro 91/); assert.ok(dana.fields["Opted In At"]); assert.equal(acts().at(-1), "Opted in");
+  // a new lead is texted to the member; without pay authority a YES only asks the owner
+  for (const l of LD) l.fields.Alerted = "x"; seedForm(74, { service: "Roof Repair", city: "Memphis" }); await ingest(env); const lead = LD.at(-1), t1 = texts.length; await alertPros(env);
+  const toDana = texts.slice(t1).find((m) => m.to === "+19017771111"); assert.match(toDana.body, /New ROOFING lead in Memphis, TN.*Reply YES to ask Test Pro 91 to claim it/); assert.ok(!/\$75/.test(toDana.body)); assert.equal(dana.fields["Last Offer"].split("|")[0], lead.id);
+  const m0 = sent.length, bal0 = me.fields.Balance; assert.match(await sms("+19017771111", "YES"), /you cannot claim leads by text on this account\. We told Test Pro 91/); assert.equal(me.fields.Balance, bal0); assert.ok(sent.slice(m0).some((e) => e.subject === "Dana wants a lead"));
+  // the double confirm: on screen, then a code texted to the owner. Both are needed, and a wrong code grants nothing
+  assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true }, c)).status, 400, "the first confirmation is required");
+  const step = await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes" }, c); assert.equal(step.next, "code"); assert.equal(dana.fields["Can Pay"], false);
+  assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes", code: "111111" }, c)).status, 401); assert.equal(dana.fields["Can Pay"], false);
+  assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: true, code: "424242" }, c)).status, 400, "a code alone is not enough");
+  const m1 = sent.length, granted = await call("/api/pro/team/authority", { memberId: dana.id, on: true, confirm: "yes", code: "424242" }, c);
+  assert.equal(granted.members[0].canPay, true); assert.ok(granted.members[0].payGrantedAt); assert.match(dana.fields["Pay Granted By"], /^Owner · \(901\) 555-0191$/);
+  const grantRow = LOG.at(-1).fields; assert.equal(grantRow.Action, "Pay authority granted"); assert.ok(grantRow.At && grantRow.IP && grantRow.Agreement); assert.match(grantRow.Detail, /Confirmed twice/);
+  assert.ok(sent.slice(m1).some((e) => /Dana can now claim and pay for leads by text/.test(e.subject) && /responsible for every charge/.test(e.html)));
+  // now a YES claims it: the full details go to the person who claimed, and the claim is recorded against them
+  const m2 = sent.length, claim = await sms("+19017771111", "YES"); assert.match(claim, /claimed\. Roof Repair, Memphis, TN\.\nOWNER: Sample Owner 74\nPHONE: \(901\) 555-0174/); assert.ok(!/\$\d/.test(claim));
+  assert.equal(me.fields.Balance, bal0 - 75); const buyRow = PU.find((p) => p.fields.Purchase === `${lead.id}:${me.id}`); assert.equal(buyRow.fields["Claimed By"], "Dana · (901) 777-1111");
+  assert.equal(db.tblZ2EIWCgOb36JR2.filter((r) => r.fields["Pro ID"] === me.id).at(-1).fields.By, "Dana · (901) 777-1111"); assert.ok(sent.slice(m2).some((e) => e.subject === "Dana claimed a lead" && e.to === me.fields.Email));
+  assert.equal((await call("/api/pro/leads", null, c)).leads.find((l) => l.id === lead.id).claimedBy, "Dana");
+  // a second person on the team, and the owner, see who claimed it and the details, with no second charge
+  await call("/api/pro/team/add", { name: "Eli", phone: "9017772222" }, c); const eli = T.at(-1); await sms("+19017772222", "YES"); eli.fields["Last Offer"] = lead.id + "|x";
+  const second = await sms("+19017772222", "YES"); assert.match(second, /already claimed by Dana\. No charge\. Here are the details\. Roof Repair, Memphis, TN\.\nOWNER: Sample Owner 74/); assert.equal(me.fields.Balance, bal0 - 75);
+  assert.equal(PU.filter((p) => p.fields.Purchase === `${lead.id}:${me.id}`).length, 1);
+  // the owner's daily limit for a member
+  assert.equal((await call("/api/pro/team/update", { memberId: dana.id, getsTexts: true, portal: false, dailyCap: 5 }, c)).status, 400);
+  assert.equal((await call("/api/pro/team/update", { memberId: dana.id, getsTexts: true, portal: false, dailyCap: 100 }, c)).members[0].dailyCap, 100); assert.equal(acts().at(-1), "Settings changed");
+  seedForm(75, { service: "Roof Repair", city: "Memphis" }); await ingest(env); dana.fields["Last Offer"] = LD.at(-1).id + "|x";
+  assert.match(await sms("+19017771111", "YES"), /would pass your daily limit of \$100 \(\$75\.00 claimed today\)/); assert.equal(me.fields.Balance, bal0 - 75);
+  // turning it off is one step, takes effect at once, and is logged
+  assert.equal((await call("/api/pro/team/authority", { memberId: dana.id, on: false }, c)).members[0].canPay, false); assert.equal(acts().at(-1), "Pay authority revoked"); assert.ok(dana.fields["Pay Revoked At"]);
+  assert.match(await sms("+19017771111", "YES"), /you cannot claim leads by text/);
+  // STOP from the member's phone stops their texts only
+  assert.match(await sms("+19017771111", "STOP"), /<Response><\/Response>/); assert.equal(dana.fields["Gets Texts"], false); assert.equal(acts().at(-1), "Opted out");
+  // signing in: only when the owner switched it on, and a member cannot reach money, settings or the team
+  await call("/api/pro/team/add", { name: "Sam", phone: "9015550177" }, c); const sam = T.at(-1);
+  assert.equal((await call("/api/pro/team/invite", { memberId: sam.id }, c)).status, 503); assert.equal((await call("/api/pro/team/test-optin", { memberId: sam.id }, c)).members.find((m) => m.id === sam.id).optedInAt !== "", true);
+  assert.equal((await call("/api/pro/sign-in", { phone: "9015550177" })).status, 404);
+  await call("/api/pro/team/update", { memberId: sam.id, getsTexts: true, portal: true, dailyCap: "" }, c);
+  assert.equal((await call("/api/pro/sign-in", { phone: "9015550177" })).status, 200); const sv = await call("/api/pro/verify-code", { phone: "9015550177", code: "424242" }); assert.equal(sv.status, 200); assert.equal(sv.pro.member.name, "Sam"); assert.equal(sv.pro.business, "Test Pro 91");
+  const sc = sv.cookie; assert.equal((await call("/api/pro/me", null, sc)).pro.member.canPay, false); assert.equal((await call(ALL, null, sc)).status, 200); assert.equal((await call("/api/pro/leads", null, sc)).status, 200);
+  for (const path of ["/api/pro/wallet", "/api/pro/team"]) assert.equal((await call(path, null, sc)).status, 403);
+  for (const [path, body] of [["/api/pro/card", { action: "save" }], ["/api/pro/add-funds", { amount: 150 }], ["/api/pro/team/authority", { memberId: sam.id, on: true, confirm: "yes", code: "424242" }], ["/api/pro/close", { confirm: "CLOSE" }], ["/api/pro/notifications", {}]]) assert.equal((await call(path, body, sc)).status, 403, path + " is owner only");
+  assert.equal((await call("/api/pro/buy", { leadId: LD.at(-1).id, kind: "shared" }, sc)).status, 403, "no pay authority, no claim in the portal either"); assert.equal(sam.fields["Can Pay"], false);
+  await call("/api/pro/team/update", { memberId: sam.id, getsTexts: true, portal: false, dailyCap: "" }, c); assert.equal((await call("/api/pro/me", null, sc)).status, 401, "switching sign-in off ends the member's session");
+  // five at most; removing frees the number and ends everything for that person
+  await call("/api/pro/team/add", { name: "Four", phone: "9017773333" }, c); await call("/api/pro/team/add", { name: "Five", phone: "9017774444" }, c);
+  assert.equal((await call("/api/pro/team/add", { name: "Six", phone: "9017775555" }, c)).status, 400);
+  const left = await call("/api/pro/team/remove", { memberId: dana.id }, c); assert.equal(left.members.length, 4); assert.ok(dana.fields["Removed At"]); assert.match(await sms("+19017771111", "YES"), /this number is not on a pro account/);
+  assert.ok((await call("/api/pro/team", null, c)).log.length >= 10);
 }
 
 // ---- insurance reminders and nudges ----

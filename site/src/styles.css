@@ -642,3 +642,15 @@ legend + .option-grid { margin-top: 0; }
 .hq-table table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .hq-table th, .hq-table td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--concrete-2); white-space: nowrap; }
 .hq-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+/* team */
+.tm-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.tm-head h2 { margin: 0; }
+.tm-pay { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border: 2px solid var(--line); border-radius: 10px; }
+.tm-pay strong, .tm-pay small { display: block; }
+.tm-pay small { color: var(--steel); font-size: 13px; }
+.tm-pay--on { border-color: var(--orange-text); background: var(--orange-tint); }
+.tm-confirm { display: grid; gap: 8px; padding: 14px; border: 2px solid var(--asphalt); border-radius: 10px; background: var(--yellow-tint); }
+.tm-confirm p { margin: 0; }
+.tm-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.tm-log li { display: grid; gap: 2px; padding-bottom: 8px; border-bottom: 1px solid var(--concrete-2); }
+.tm-log small { color: var(--steel); font-size: 13px; }

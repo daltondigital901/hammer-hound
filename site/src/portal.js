@@ -43,6 +43,7 @@
   function setHeader() {
     var b = document.querySelector("[data-balance]"), s = document.querySelector("[data-signout]");
     if (!pro) return;
+    if (pro.member) { b.textContent = pro.member.name; b.hidden = false; b.title = "Signed in as a team member of " + pro.business; } else
     if (!b.hasAttribute("data-counting")) b.textContent = money(pro.balance); b.hidden = false; b.title = pro.credit > 0 ? money(pro.credit) + " of this is free welcome credit" : "Wallet balance";
     s.hidden = false; s.onclick = function () { call("/api/pro/sign-out", {}).then(function () { try { localStorage.removeItem("hh_pro"); } catch (e) {} location.href = "/pros/sign-in/"; }); };
   }
@@ -50,8 +51,12 @@
   // ---------- navigation ----------
   var NAV = [["home", "Home", "M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"], ["offers", "Open leads", "M4 5h16M4 12h16M4 19h10"], ["leads", "My leads", "M5 4h14v17l-7-4-7 4z"], ["wallet", "Wallet", "M3 7h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm0 0l12-4v4m2 6h.01"],
     ["verify", "Verification", "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6zm-3 9l2 2 4-4"], ["profile", "Business profile", "M4 21V8l8-5 8 5v13M9 21v-6h6v6"], ["notifications", "Notifications", "M6 17V11a6 6 0 0 1 12 0v6l2 2H4zm4 4h4"],
+    ["team", "Team", "M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm8 1a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM3 20a6 6 0 0 1 12 0m2 0a5 5 0 0 0-2.5-4.3"],
     ["support", "Support", "M4 5h16v11H9l-5 4z"], ["account", "Account", "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-8 9a8 8 0 0 1 16 0"]];
   var PRIMARY = ["home", "offers", "leads", "wallet"];
+  // A team member works leads. Money, documents, settings and the team belong to the owner.
+  var MEMBER_TABS = ["offers", "leads", "support"];
+  function asMember() { NAV = NAV.filter(function (n) { return MEMBER_TABS.indexOf(n[0]) >= 0; }); PRIMARY = MEMBER_TABS; }
   var icon = function (d) { var s = h("span", { class: "pp-ico", "aria-hidden": "true" }); s.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="' + d + '"/></svg>'; return s; };
   function go(t) { tab = t; if (location.hash !== "#" + t) { try { history.pushState(null, "", "#" + t); } catch (e) {} } window.scrollTo(0, 0); render(); }
   function navLink(n, cls) {
@@ -67,7 +72,7 @@
     var main = h("div", { class: "pp-main" });
     if (pro.test) main.appendChild(h("p", { class: "test-banner", text: "Test account. Leads are copied from Dalton Digital forms for internal testing. No card is charged and no owner is contacted." }));
     // Home has its own "Do this next" card, so the banner would only repeat it there.
-    if (!pro.verified && tab !== "verify" && tab !== "home") main.appendChild(h("div", { class: "unlock" }, [
+    if (!pro.verified && !pro.member && tab !== "verify" && tab !== "home") main.appendChild(h("div", { class: "unlock" }, [
       h("img", { src: "/assets/img/badge.png", alt: "", width: "50", height: "60" }),
       h("div", {}, [h("strong", { text: say((BANNER[pro.verification] || BANNER["Not started"])[0]) }), h("span", { text: say((BANNER[pro.verification] || BANNER["Not started"])[1]) })]),
       h("button", { class: "btn btn--black", type: "button", text: BANNER[pro.verification] ? BANNER[pro.verification][2] : "Get verified", on: { click: function () { go("verify"); } } }),
@@ -78,7 +83,7 @@
       main,
     ]));
     root.appendChild(h("nav", { class: "pp-bar", "aria-label": "Pro portal" }, NAV.filter(function (n) { return PRIMARY.indexOf(n[0]) >= 0; }).map(function (n) { return navLink(n, "pp-tab"); })
-      .concat([navLink(["more", "More", "M5 12h.01M12 12h.01M19 12h.01"], "pp-tab")])));
+      .concat(pro.member ? [] : [navLink(["more", "More", "M5 12h.01M12 12h.01M19 12h.01"], "pp-tab")])));
     setHeader();
   }
   var head = function (title, sub, right) { return h("div", { class: "portal-head" }, [h("div", {}, [h("h1", { text: title }), sub ? h("p", { class: "sub", text: sub }) : null]), right || null]); };
@@ -310,6 +315,7 @@
       var mine = (f.home.market || "all").toLowerCase() === f.market.toLowerCase() && (f.home.trade || "all") === f.trade;
       var filters = h("div", { class: "pp-filters" }, [field("f-market", "Market", mSel), field("f-trade", "Trade", tSel),
         mine ? h("p", { class: "hint", text: "Showing your market and trade." }) : h("button", { class: "btn btn--text", type: "button", text: "Back to my market and trade", on: { click: function () { pick = { market: null, trade: null }; offersView(); } } })]);
+      if (!r.olderShown) age = "hot";
       if (age === "older" && !r.older && r.hot) age = "hot"; if (age === "hot" && !r.hot && r.older) age = "older";
       var ageTabs = h("div", { class: "pp-ages", role: "tablist" }, [["hot", "Hot leads", r.hot, "Sent in the last " + r.hotHours + " hours"], ["older", "Older leads", r.older, "3 to " + r.leadDays + " days old, marked down"]].map(function (a) {
         return h("button", { class: "pp-age" + (age === a[0] ? " is-on" : ""), type: "button", role: "tab", "aria-selected": String(age === a[0]), on: { click: function () { age = a[0]; offersView(); } } }, [h("strong", { text: a[1] + " (" + a[2] + ")" }), h("span", { text: a[3] })]);
@@ -322,18 +328,21 @@
             pro.balance = res.balance; pro.credit = res.credit; claimed(res); go("leads");
           });
         }; };
-        var covered = pro.credit >= o.sharedPrice, short = pro.balance < o.sharedPrice, unit = pro.reloadAmount || 150;
-        var need = function (price) { return Math.ceil((price - pro.balance) / unit) * unit; };
+        // Welcome credit pays for hot leads only. An older lead is paid from the pro's own funds.
+        var avail = o.hot ? pro.balance : Math.round((pro.balance - pro.credit) * 100) / 100;
+        var covered = o.hot && pro.credit >= o.sharedPrice, short = avail < o.sharedPrice, unit = pro.reloadAmount || 150;
+        var need = function (price) { return Math.ceil((price - avail) / unit) * unit; };
         // When the wallet is short the button says what will be charged, before the tap.
-        var label = function (kind, price) { var base = (kind === "exclusive" ? "Exclusive " : "Claim lead · ") + money0(price); return pro.balance >= price ? base : pro.card ? base + " · reloads " + money0(need(price)) : base; };
-        var press = function (kind, price) { return function () { if (pro.balance < price && !pro.card) { status.innerHTML = ""; status.appendChild(note("Your wallet has " + money(pro.balance) + ". Add a card and this lead is one tap away.")); status.appendChild(h("button", { class: "btn btn--black btn--sm", type: "button", text: "Add a card", on: { click: function () { go("wallet"); } } })); return; } act(kind, pro.balance < price)(); }; };
+        var label = function (kind, price) { var base = (kind === "exclusive" ? "Exclusive " : "Claim lead · ") + money0(price); return avail >= price ? base : pro.card ? base + " · reloads " + money0(need(price)) : base; };
+        var press = function (kind, price) { return function () { if (avail < price && !pro.card) { status.innerHTML = ""; status.appendChild(note("Your wallet has " + money(avail) + ". Add a card and this lead is one tap away.")); status.appendChild(h("button", { class: "btn btn--black btn--sm", type: "button", text: "Add a card", on: { click: function () { go("wallet"); } } })); return; } act(kind, avail < price)(); }; };
         return h("div", { class: "card offer" }, [
           h("div", { class: "offer-top" }, [h("span", { class: "chip", text: o.tradeName }), o.bid ? h("span", { class: "chip", text: "Bid invitation" }) : null, o.hot ? h("span", { class: "chip chip--hot", text: "Hot · " + ago(o.receivedAt) }) : h("span", { class: "chip chip--old", text: ago(o.receivedAt) })])].concat(jobBlock(o), [
           h("div", { class: "offer-foot" }, [
             h("p", { class: "meta", text: "Received " + when(o.receivedAt) + " · closes " + when(o.endsAt) + " · " + o.spotsTaken + " of " + o.maxPros + " spots taken" }),
             h("p", { class: "offer-price" }, o.percentOff ? [h("s", { class: "offer-was", text: money0(o.fullPrice) }), document.createTextNode(" " + money(o.sharedPrice) + " "), h("span", { class: "chip chip--green", text: o.percentOff + "% off" })] : [document.createTextNode(money(o.sharedPrice))]),
-            h("p", { class: "meta", text: locked ? (pro.credit > 0 ? "Shared lead. Your " + money0(pro.credit) + " in free credit unlocks when you are verified." : "Shared lead. Verify to claim it.") : covered ? "Shared lead. Covered by your free credit." : short ? (pro.card ? "Shared lead. Your wallet has " + money(pro.balance) + "; " + pro.card + " covers the rest." : "Shared lead. Your wallet has " + money(pro.balance) + ".") : "Shared lead. Paid from your wallet." }),
-            locked ? h("div", { class: "offer-actions" }, [h("button", { class: "btn btn--outline btn--locked", type: "button", text: "Verify to claim this lead", on: { click: function () { go("verify"); } } })])
+            h("p", { class: "meta", text: locked ? (pro.credit > 0 ? "Shared lead. Your " + money0(pro.credit) + " in free credit unlocks when you are verified." : "Shared lead. Verify to claim it.") : covered ? "Shared lead. Covered by your free credit." : short ? (pro.card ? "Shared lead. " + (o.hot ? "Your wallet has " : "Welcome credit is for hot leads only. You have ") + money(avail) + (o.hot ? "" : " of your own funds") + "; " + pro.card + " covers the rest." : "Shared lead. Your wallet has " + money(avail) + ".") : "Shared lead. Paid from your wallet." }),
+            pro.member && !pro.member.canPay ? h("p", { class: "meta", text: "Only " + pro.business + " or someone they gave pay authority can claim this." })
+            : locked ? h("div", { class: "offer-actions" }, [h("button", { class: "btn btn--outline btn--locked", type: "button", text: "Verify to claim this lead", on: { click: function () { go("verify"); } } })])
             : h("div", { class: "offer-actions" }, [
               h("button", { class: "btn btn--yellow", type: "button", text: label("shared", o.sharedPrice), on: { click: press("shared", o.sharedPrice) } }),
               o.exclusiveAvailable ? h("button", { class: "btn btn--outline", type: "button", text: label("exclusive", o.exclusivePrice), on: { click: press("exclusive", o.exclusivePrice) } }) : null,
@@ -352,7 +361,7 @@
         h("p", { class: "sub", text: askable ? "Tell us you want them. We advertise where pros ask for leads." : "New leads show up here as they come in." }),
         askable ? want : null, wantStatus,
         f.total ? h("button", { class: "btn btn--outline btn--block", type: "button", text: "See the " + f.total + " open in other markets and trades", on: { click: function () { pick = { market: "all", trade: "all" }; offersView(); } } }) : null]);
-      shell([head(r.canBuy ? "Open leads" : "Open leads in your market", r.offers.length + " showing of " + f.total + " open"), filters, r.offers.length ? ageTabs : null, items.length ? h("div", { class: "grid grid--3 pp-grid" }, items) : empty]);
+      shell([head(r.canBuy ? "Open leads" : "Open leads in your market", r.offers.length + " showing of " + f.total + " open"), filters, r.offers.length && r.olderShown ? ageTabs : null, items.length ? h("div", { class: "grid grid--3 pp-grid" }, items) : empty]);
     });
   }
 
@@ -381,7 +390,7 @@
           status.innerHTML = ""; status.appendChild(reason); status.appendChild(sendBtn); report.hidden = true;
         } } }) : h("span", { class: "chip", text: "Bad-lead report: " + l.review });
         return h("div", { class: "card offer" }, [
-          h("div", { class: "offer-top" }, [h("span", { class: "chip", text: l.tradeName }), h("span", { class: "chip", text: l.kind === "Free" ? "Free lead" : l.kind + " · " + money(l.price) + (l.creditUsed >= l.price && l.price ? " free credit" : "") }), h("span", { class: "meta", text: "Bought " + when(l.boughtAt) })])].concat(jobBlock(l), [
+          h("div", { class: "offer-top" }, [h("span", { class: "chip", text: l.tradeName }), h("span", { class: "chip", text: l.kind === "Free" ? "Free lead" : l.kind + " · " + money(l.price) + (l.creditUsed >= l.price && l.price ? " free credit" : "") }), l.claimedBy ? h("span", { class: "chip chip--yellow", text: "Claimed by " + l.claimedBy }) : null, h("span", { class: "meta", text: "Bought " + when(l.boughtAt) })])].concat(jobBlock(l), [
           h("div", { class: "lead-contact" }, [h("span", { class: "lead-contact-label", text: "Owner" }), h("strong", { text: l.ownerName || "Name not given" }), l.ownerPhone ? h("a", { href: "tel:+1" + l.ownerPhone, text: phoneFmt(l.ownerPhone) }) : h("span", { class: "meta", text: "No phone number given" }), l.ownerEmail ? h("a", { href: "mailto:" + l.ownerEmail, text: l.ownerEmail }) : null, l.address ? h("span", { text: l.address }) : null]),
           l.message ? h("details", { class: "lead-words" }, [h("summary", { text: "The owner's own words" }), h("p", { text: l.message })]) : null,
           field("st-" + l.purchaseId, "Where it stands", stage), field("nt-" + l.purchaseId, "Notes", notes), saveNotes, report, status,
@@ -415,6 +424,7 @@
         pro = res.pro;
         if (res.claimed) { claimed(res.claimed); go("leads"); return; }
         walletView();
+        if (res.pendingError) setTimeout(function () { var m = document.querySelector(".pp-main"); if (m) m.insertBefore(note("Card saved, but the reload did not go through: " + res.pendingError, "bad"), m.children[1] || null); }, 400);
         if (res.reloaded) setTimeout(function () { var m = document.querySelector(".pp-main"); if (m) m.insertBefore(note(money0(res.reloaded) + " added to your wallet." + (res.claimError ? " The lead could not be claimed: " + res.claimError : ""), "good"), m.children[1] || null); }, 400);
       }); }; }
       var auto = toggle("w-auto", "Auto-reload", "When your wallet cannot cover a lead, charge my card the reload amount so the claim goes through.", r.autoReload);
@@ -503,7 +513,7 @@
         row("Verification", pro.verification), row("Pro Agreement accepted", pro.agreement ? "Version of " + pro.agreement : "Not on record")]),
         h("p", { class: "link-row" }, [h("a", { class: "link-more", href: "/pro-agreement/", target: "_blank", rel: "noopener", text: "Pro Agreement" }), h("a", { class: "link-more", href: "/terms/", target: "_blank", rel: "noopener", text: "Terms of Use" }), h("a", { class: "link-more", href: "/privacy/", target: "_blank", rel: "noopener", text: "Privacy Policy" })]),
         h("button", { class: "btn btn--outline btn--block", type: "button", text: "Sign out", on: { click: function () { call("/api/pro/sign-out", {}).then(function () { try { localStorage.removeItem("hh_pro"); } catch (e) {} location.href = "/pros/sign-in/"; }); } } })]),
-      card([h("h2", { text: "Team members" }), h("p", { class: "sub", text: "Sign-ins for your office or crew leads are not available yet. For now, one mobile number signs in to each account." })]),
+      card([h("h2", { text: "Team members" }), h("p", { class: "sub", text: "Add up to 5 people to this account. You choose who gets lead texts, who can sign in and who can claim leads." }), h("button", { class: "btn btn--outline btn--block", type: "button", text: "Open my team", on: { click: function () { go("team"); } } })]),
       card([h("h2", { text: "Close account" }), h("p", { class: "sub", text: "Closing stops all offers and signs you out. Leads you already bought stay yours to work. To take a break without closing, pause your leads in Notifications." }),
         field("a-close", "Type CLOSE to confirm", confirm), status,
         h("button", { class: "btn btn--outline btn--block", type: "button", text: "Close my account", on: { click: function () { call("/api/pro/close", { confirm: confirm.value.trim() }).then(function (r) { if (r.error) { status.innerHTML = ""; status.appendChild(note(r.error, "bad")); return; } location.href = "/pros/"; }); } } })]),
@@ -513,9 +523,77 @@
     shell([head("More", pro.business), h("div", { class: "pp-more" }, NAV.filter(function (n) { return PRIMARY.indexOf(n[0]) < 0; }).map(function (n) { return navLink(n, "pp-link"); }))]);
   }
 
-  var VIEWS = { home: homeView, offers: offersView, leads: leadsView, wallet: walletView, verify: verifyView, profile: profileView, notifications: notificationsView, support: supportView, account: accountView, more: moreView };
+  // ---------- team ----------
+  function teamView() {
+    call("/api/pro/team").then(function (r) {
+      if (tab !== "team") return;
+      if (r.error) { shell([head("Team"), note(r.error, "bad")]); return; }
+      draw(r);
+    });
+    function draw(r) {
+      var top = h("div");
+      var done = function (res, target) { if (res.error) { target.innerHTML = ""; target.appendChild(note(res.error, "bad")); return false; } if (res.members) draw(res); return true; };
+      var cards = r.members.map(function (m) {
+        var status = h("div"), grant = h("div"), id = m.id;
+        var texts = toggle("t-tx-" + id, "Gets lead texts", m.optedInAt ? "New leads in your market and trades are texted to this number." : "Starts once they reply YES to the invite text.", m.getsTexts);
+        var portal = toggle("t-po-" + id, "Can sign in", "Sees open leads and the leads you have. Never sees your wallet, card, documents or settings.", m.portal);
+        var cap = input("t-cap-" + id, "number", m.dailyCap || "", { min: "10", max: "5000", placeholder: "No limit" });
+        var save = h("button", { class: "btn btn--outline btn--block", type: "button", text: "Save", on: { click: function () { call("/api/pro/team/update", { memberId: id, getsTexts: texts.box.checked, portal: portal.box.checked, dailyCap: cap.value }).then(function (res) { done(res, status); }); } } });
+        // Pay authority. On: two confirmations, the second a code texted to the owner. Off: one tap.
+        function askGrant() {
+          grant.innerHTML = "";
+          grant.appendChild(h("div", { class: "tm-confirm" }, [
+            h("strong", { text: "Let " + m.name + " claim and pay for leads?" }),
+            h("p", { text: "A YES from " + phoneFmt(m.mobile) + " will order the lead. It is paid from your wallet" + (r.card ? ", and if the wallet is short " + r.card + " is charged a reload." : ", and from any card you add later if the wallet is short.") }),
+            h("p", { text: "You are responsible for every charge " + m.name + " makes until you turn this off." + (m.dailyCap ? " Their daily limit is " + money0(m.dailyCap) + "." : " They have no daily limit.") }),
+            h("div", { class: "offer-actions" }, [
+              h("button", { class: "btn btn--black", type: "button", text: "Yes, text me a code to confirm", on: { click: function () { call("/api/pro/team/authority", { memberId: id, on: true, confirm: "yes" }).then(function (res) { if (res.error) { grant.appendChild(note(res.error, "bad")); return; } if (res.next === "code") askCode(res); else done(res, grant); }); } } }),
+              h("button", { class: "btn btn--text", type: "button", text: "Cancel", on: { click: function () { grant.innerHTML = ""; } } })])]));
+        }
+        function askCode(sent) {
+          var code = input("t-code-" + id, "text", "", { inputmode: "numeric", autocomplete: "one-time-code", maxlength: "6", placeholder: "6-digit code" }), err = h("div");
+          grant.innerHTML = "";
+          grant.appendChild(h("div", { class: "tm-confirm" }, [
+            h("strong", { text: "Confirm on your phone" }), h("p", { text: sent.sent === "test" ? "Test account: enter your test code." : "We texted a code to " + sent.to + ". Enter it to give " + m.name + " pay authority." }),
+            field("t-code-" + id, "Code", code), err,
+            h("div", { class: "offer-actions" }, [
+              h("button", { class: "btn btn--yellow", type: "button", text: "Confirm pay authority", on: { click: function () { call("/api/pro/team/authority", { memberId: id, on: true, confirm: "yes", code: code.value.trim() }).then(function (res) { done(res, err); }); } } }),
+              h("button", { class: "btn btn--text", type: "button", text: "Cancel", on: { click: function () { grant.innerHTML = ""; } } })])]));
+          code.focus();
+        }
+        var pay = m.canPay
+          ? h("div", { class: "tm-pay tm-pay--on" }, [h("div", {}, [h("strong", { text: "Can claim and pay by text" }), h("small", { text: "On since " + when(m.payGrantedAt) + "." })]), h("button", { class: "btn btn--black btn--sm", type: "button", text: "Turn off", on: { click: function () { call("/api/pro/team/authority", { memberId: id, on: false }).then(function (res) { done(res, status); }); } } })])
+          : h("div", { class: "tm-pay" }, [h("div", {}, [h("strong", { text: "Cannot claim or pay" }), h("small", { text: m.optedInAt ? "A YES from this number only asks you to claim the lead." : "Available once they accept the invite." })]), m.optedInAt ? h("button", { class: "btn btn--outline btn--sm", type: "button", text: "Give pay authority", on: { click: askGrant } }) : null]);
+        return card([
+          h("div", { class: "tm-head" }, [h("div", {}, [h("h2", { text: m.name }), h("p", { class: "meta", text: phoneFmt(m.mobile) })]), h("span", { class: "chip " + (m.optedInAt ? "chip--green" : "chip--yellow"), text: m.optedInAt ? "Accepted" : "Invite sent" })]),
+          !m.optedInAt ? h("div", { class: "offer-actions" }, [h("button", { class: "btn btn--outline btn--sm", type: "button", text: "Text the invite again", on: { click: function () { call("/api/pro/team/invite", { memberId: id }).then(function (res) { if (done(res, status)) { status.innerHTML = ""; status.appendChild(note("Invite sent.", "good")); } }); } } }),
+            r.test ? h("button", { class: "btn btn--text btn--sm", type: "button", text: "Mark as accepted (test)", on: { click: function () { call("/api/pro/team/test-optin", { memberId: id }).then(function (res) { done(res, status); }); } } }) : null]) : null,
+          pay, grant, texts.el, portal.el, field("t-cap-" + id, "Daily limit for leads they claim ($)", cap, "Leave empty for no limit."), status, save,
+          h("button", { class: "btn btn--text btn--block", type: "button", text: "Remove " + m.name, on: { click: function () { call("/api/pro/team/remove", { memberId: id }).then(function (res) { done(res, status); }); } } })], "verify");
+      });
+      if (!r.ack) {
+        var agree = toggle("t-ack", "I understand", "", false), gs = h("div");
+        shell([head("Team", "Add up to " + r.max + " people to this account."),
+          card([h("h2", { text: "Before you add anyone" }),
+            h("div", { class: "tm-confirm" }, [
+              h("p", { text: "People you add get lead texts on their own phone once they accept." }),
+              h("p", { text: "If you choose, you can also give a person the authority to claim leads. A YES from their number then orders the lead and it is paid from your wallet and your card on file." }),
+              h("p", { text: "That is off for everyone until you turn it on for a person. Each time, you confirm it on screen and with a code we text to your phone. You are responsible for the charges they make." }), agree.el]),
+            gs, h("button", { class: "btn btn--yellow btn--block", type: "button", text: "Turn on my team", on: { click: function () { call("/api/pro/team/ack", { agree: agree.box.checked ? "yes" : "" }).then(function (res) { done(res, gs); }); } } })], "verify")]);
+        return;
+      }
+      var name = input("t-name", "text", "", { autocomplete: "off" }), phone = input("t-phone", "tel", "", { autocomplete: "off", placeholder: "(901) 555-0100" });
+      var add = r.members.length < r.max ? card([h("h2", { text: "Add a person" }), field("t-name", "Name", name), field("t-phone", "Their mobile number", phone, "We text them an invite. They get lead texts only after they reply YES."), top,
+        h("button", { class: "btn btn--yellow btn--block", type: "button", text: "Add and text the invite", on: { click: function () { call("/api/pro/team/add", { name: name.value, phone: phone.value }).then(function (res) { done(res, top); }); } } })], "verify")
+        : card([h("h2", { text: "Your team is full" }), h("p", { class: "sub", text: "An account can have up to " + r.max + " people. Remove someone to add another." })]);
+      var log = r.log.length ? card([h("h2", { text: "Team history" }), h("ul", { class: "tm-log" }, r.log.map(function (e) { return h("li", {}, [h("span", { text: e.entry }), h("small", { text: when(e.at) + (e.by ? " · " + e.by : "") })]); }))]) : null;
+      shell([head("Team", r.members.length + " of " + r.max + " people. You choose who gets lead texts, who can sign in and who can claim leads.")].concat(cards, [add, log]));
+    }
+  }
+
+  var VIEWS = { team: teamView, home: homeView, offers: offersView, leads: leadsView, wallet: walletView, verify: verifyView, profile: profileView, notifications: notificationsView, support: supportView, account: accountView, more: moreView };
   function render() {
-    if (!VIEWS[tab]) tab = "home";
+    if (!VIEWS[tab]) tab = pro && pro.member ? "offers" : "home";
     VIEWS[tab]();
   }
   window.addEventListener("popstate", function () { var t = location.hash.slice(1); if (pro && VIEWS[t]) { tab = t; render(); } });
@@ -523,6 +601,7 @@
     if (r.status === 401) { try { localStorage.removeItem("hh_pro"); } catch (e) {} location.href = "/pros/sign-in/"; return; }
     if (r.error) { root.innerHTML = ""; root.appendChild(note(r.error, "bad")); return; }
     pro = r.pro; store.set("hh_pro", "1");
+    if (pro.member) { asMember(); Object.keys(VIEWS).forEach(function (k) { if (MEMBER_TABS.indexOf(k) < 0) delete VIEWS[k]; }); tab = VIEWS[location.hash.slice(1)] ? location.hash.slice(1) : "offers"; render(); return; }
     var t = location.hash.slice(1);
     // A new pro lands on verification first, and can skip it to look at leads.
     tab = VIEWS[t] ? t : !pro.verified && pro.verification === "Not started" && !store.get("hh_skip") ? "verify" : "home";
